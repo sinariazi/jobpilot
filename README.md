@@ -21,8 +21,8 @@ A local-first job-search assistant built with Next.js and TypeScript. It searche
 - Evaluate semantic skill matching and add explainable ranking criteria; ranking currently counts exact normalized skill mentions only.
 - Add a licensed, broad-coverage job search provider to find roles beyond the current public feeds and geographies; public feeds do not contain every employer or vacancy.
 - Add more job-source adapters after checking each provider's API and display/attribution terms.
-- Add filters for date, work mode, and department; the current search box only searches title, company, and location.
-- Add pagination or incremental loading for large result sets.
+- Add further filters only when source feeds provide reliable structured fields; current filters cover posting age, inferred work mode, and available department tags.
+- Add provider-side pagination so searches can retrieve more than each feed's current fetched batch; “Show more” currently reveals jobs already retrieved.
 - Add OCR for scanned/image-only CVs; current parsing requires selectable text.
 - Improve layout-aware parsing for multi-column CVs and more heading formats; extraction is heuristic and suggestions require user review.
 - Encrypt local profile and tracker data, which can include sensitive details accepted from a CV.
