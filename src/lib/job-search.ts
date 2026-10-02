@@ -50,6 +50,12 @@ function postedDate(value?: string) {
   return Number.isNaN(date.getTime()) ? "Date not provided" : date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
+function publishedAt(value?: string) {
+  if (!value) return undefined;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+}
+
 function clean(value?: string) {
   return descriptionText(value ?? "");
 }
@@ -65,6 +71,7 @@ function mapArbeitnow(posting: ArbeitnowPosting, retrievedAt: string): Job | nul
     location: posting.location || (remote ? "Remote" : "Location not specified"),
     mode: remote ? "Remote" : posting.job_types?.join(", ") || "See posting",
     posted: postedDate(posting.created_at),
+    ...(publishedAt(posting.created_at) ? { postedAt: publishedAt(posting.created_at) } : {}),
     source: "Arbeitnow",
     sourceUrl: posting.url,
     sourceAttributionUrl: "https://www.arbeitnow.com/",
@@ -84,6 +91,7 @@ function mapRemotive(posting: RemotivePosting, retrievedAt: string): Job | null 
     location: posting.candidate_required_location || "Remote",
     mode: `Remote${posting.job_type ? ` · ${posting.job_type}` : ""}`,
     posted: postedDate(posting.publication_date),
+    ...(publishedAt(posting.publication_date) ? { postedAt: publishedAt(posting.publication_date) } : {}),
     source: "Remotive",
     sourceUrl: posting.url,
     sourceAttributionUrl: "https://remotive.com/remote-jobs/api",
@@ -104,6 +112,7 @@ function mapJobicy(posting: JobicyPosting, retrievedAt: string): Job | null {
     location: posting.jobGeo || "Remote",
     mode: `Remote${posting.jobType?.length ? ` · ${posting.jobType.join(", ")}` : ""}`,
     posted: postedDate(posting.pubDate),
+    ...(publishedAt(posting.pubDate) ? { postedAt: publishedAt(posting.pubDate) } : {}),
     source: "Jobicy",
     sourceUrl: posting.url,
     sourceAttributionUrl: "https://jobicy.com/jobs-rss-feed",
