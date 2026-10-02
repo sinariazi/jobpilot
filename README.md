@@ -2,13 +2,14 @@
 
 A local-first job-search assistant built with Next.js and TypeScript. It searches multiple public job feeds automatically, filters listings against the candidate's preferred locations, and ranks roles using profile target titles and transparent skill matching.
 
-> **Current scope:** Jobpilot searches public feeds from Arbeitnow (Europe-wide), Remotive (remote), and Jobicy (Europe remote). This improves discovery without requiring employer names, but it does not cover every employer or job board. It does not parse CVs, generate application documents, submit applications, or use an AI model. The profile, review decisions, saved jobs, and fetched listings are stored in a local file on this device.
+> **Current scope:** Jobpilot searches public feeds from Arbeitnow (Europe-wide), Remotive (remote), and Jobicy (Europe remote). This improves discovery without requiring employer names, but it does not cover every employer or job board. CV import extracts reviewable suggestions from text-based files in the browser. It does not generate application documents, submit applications, or use an AI model. The profile, review decisions, saved jobs, and fetched listings are stored in a local file on this device.
 
 ## Working now
 
 - Searches three broad public job feeds automatically; no company names, board slugs, or employer setup are required. Each listing links to its provider or original listing, with visible source attribution.
 - Filters listings using locations in the editable candidate profile. New profiles have no location preference until the user enters one.
 - Ranks matching target role titles first, then sorts by exact, normalized mentions of user-entered skills in the role title and description. The UI shows which skills were mentioned; this is a text overlap indicator, not a probability of getting the job.
+- Imports text-based PDF, DOCX, and TXT CVs in the browser and proposes past role titles and skills for review. The CV file and extracted full text are not uploaded or saved; only fields the user accepts and then saves are written to the local profile.
 - Caches the Remotive feed for six hours in keeping with its published request guidance, the Jobicy feed for at least one hour in keeping with its polling guidance, and Arbeitnow feeds for 30 minutes.
 - Saves live listings, saved jobs, application statuses, and the candidate profile to local JSON storage.
 - Includes a manual application tracker. It never submits an application.
@@ -22,7 +23,8 @@ A local-first job-search assistant built with Next.js and TypeScript. It searche
 - Add more job-source adapters after checking each provider's API and display/attribution terms.
 - Add filters for date, work mode, and department; the current search box only searches title, company, and location.
 - Add pagination or incremental loading for large result sets.
-- Import CV details only after the user reviews and confirms extracted profile facts.
+- Add OCR for scanned/image-only CVs; current parsing requires selectable text.
+- Improve layout-aware parsing for multi-column CVs and more heading formats; extraction is heuristic and suggestions require user review.
 - Encrypt local data before supporting CVs or other sensitive personal information.
 - Draft application documents for user review; AI-assisted drafting is not implemented.
 - Add export and backup/restore for the local profile and application tracker.
@@ -41,7 +43,7 @@ The app fetches public listings from its configured feeds and applies location a
 
 ## Run locally
 
-Requirements: Node.js 20.9 or newer and npm.
+Requirements: Node.js 22.13 or newer and npm.
 
 ```bash
 npm install
@@ -52,7 +54,7 @@ Open <http://localhost:3000>.
 
 The app stores data in `~/.jobpilot/state.json` (the current user's home directory). You can change the folder with `JOBPILOT_DATA_DIR`. Keep the app bound to `localhost`; don't expose it on your network.
 
-**Privacy:** The local file is not encrypted. Its folder and file use restrictive permissions on macOS and Linux, but this is not a substitute for encryption. Don't import a real CV or store sensitive personal data yet. Nothing from the candidate profile is sent to the Greenhouse API; the app only fetches public job listings. The old browser-local profile is moved to the local file on first launch and removed from browser storage after that succeeds.
+**Privacy:** CV parsing runs in the browser. The selected file and extracted full text are held in memory for parsing and are not uploaded or saved. If you accept suggestions and save the profile, those role and skill fields are written to the local JSON state file, which is not encrypted. Nothing from the candidate profile is sent to job feed providers. The old browser-local profile is moved to the local file on first launch and removed from browser storage after that succeeds.
 
 ## Search jobs
 
