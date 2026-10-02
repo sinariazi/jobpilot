@@ -2,7 +2,7 @@
 
 A local-first job-search assistant built with Next.js and TypeScript. It searches multiple public job feeds automatically, filters listings against the candidate's preferred locations, and ranks roles using profile target titles and transparent skill matching.
 
-> **Current scope:** Jobpilot is an early-stage, local-first job-search and application-preparation agent. It searches public feeds from Arbeitnow (Europe-wide), Remotive (remote), and Jobicy (Europe remote), but does not cover every employer or vacancy. Matching is deterministic, not AI. With an OpenAI API key and model configured by the operator, the app can draft a cover letter after the user explicitly agrees to send selected job details and profile fields to OpenAI. CV import currently extracts role and skill suggestions only. Jobpilot does not yet tailor CVs or submit applications.
+> **Current scope:** Jobpilot is an early-stage, local-first job-search and application-preparation agent. It searches public feeds from Arbeitnow (Europe-wide), Remotive (remote), and Jobicy (Europe remote), but does not cover every employer or vacancy. Matching is deterministic. When Ollama is running on the same laptop, Jobpilot can use an installed local model to draft a cover letter; candidate text stays on the laptop. CV import currently extracts role and skill suggestions only. Jobpilot does not yet tailor CVs or submit applications.
 
 ## Working now
 
@@ -16,7 +16,7 @@ A local-first job-search assistant built with Next.js and TypeScript. It searche
 - Exports and restores a versioned JSON backup of the local profile, listings, saved jobs, application statuses, notes, and cover-letter drafts; restores are validated and require confirmation.
 - Includes a manual application tracker with status and private per-job notes. It never submits an application.
 - Creates an editable cover-letter first draft for a selected job using its role and company, exact profile skill overlaps, and user-entered interest and experience details. Missing personal claims are shown as placeholders; drafts are saved locally and included in backups.
-- Can create an AI-written cover-letter draft through the server-side OpenAI API when `OPENAI_API_KEY` and `OPENAI_MODEL` are configured. Before each draft, the user must consent to sending the selected job description, their name and skills, and entered notes. The CV file is not sent. An offline template remains available without API credentials.
+- Can create an AI-written cover-letter draft with an Ollama model running locally. Jobpilot discovers installed models and lets the user choose one. Inference is sent only to the loopback Ollama service on this laptop; there is no hosted AI provider or API key. An offline template remains available when Ollama is unavailable.
 - Migrates prior browser-local profile and review state on first launch.
 - Lint, typecheck, Vitest, and production build run in GitHub Actions.
 
@@ -60,11 +60,11 @@ Open <http://localhost:3000>.
 
 The app stores data in `~/.jobpilot/state.json` (the current user's home directory). You can change the folder with `JOBPILOT_DATA_DIR`. Keep the app bound to `localhost`; don't expose it on your network.
 
-**Privacy:** CV parsing runs in the browser. The selected file and extracted full text are held in memory for parsing and are not uploaded or saved. If you accept suggestions and save the profile, those role and skill fields are written to the local JSON state file, which is not encrypted. Cover-letter source notes and drafts are also stored locally and in downloaded backups, which are unencrypted JSON. Jobpilot sends no candidate data to job-feed providers. For AI cover-letter drafting, Jobpilot sends the selected job description, profile name and skills, and the entered interest/evidence notes to OpenAI only after the user checks the explicit consent box. The CV file and full extracted text are not sent. OpenAI API usage is subject to the user's OpenAI account terms and charges. The old browser-local profile is moved to the local file on first launch and removed from browser storage after that succeeds.
+**Privacy:** CV parsing runs in the browser. The selected file and extracted full text are held in memory for parsing and are not uploaded or saved. If you accept suggestions and save the profile, those role and skill fields are written to the local JSON state file, which is not encrypted. Cover-letter source notes and drafts are also stored locally and in downloaded backups, which are unencrypted JSON. Jobpilot sends no candidate data to job-feed providers. For AI cover-letter drafting, job details, profile name and skills, and entered interest/evidence notes are sent to Ollama on the same laptop. The CV file and full extracted text are not sent to the model. The old browser-local profile is moved to the local file on first launch and removed from browser storage after that succeeds.
 
-## AI cover-letter setup
+## Local AI setup
 
-Copy `.env.example` to `.env.local`, then set `OPENAI_API_KEY` and `OPENAI_MODEL` to credentials and a model available to your OpenAI API account. Restart the development server after changing the environment file. The API key is read by the server and is never sent to the browser. Without both settings, AI drafting is disabled; use the offline template instead. Keep `.env.local` private and never commit it.
+Install [Ollama](https://ollama.com/download) on the same laptop as Jobpilot and start it. Download a model that fits your laptop using Ollama, for example `ollama pull <model-name>`. Jobpilot automatically lists models installed in Ollama; choose one in the cover-letter draft panel. No model name is hardcoded, no API key is required, and model inference runs locally. If Ollama uses a non-default local port, set `OLLAMA_BASE_URL` in `.env.local` (copy `.env.example` first), then restart Jobpilot. Jobpilot accepts loopback URLs only and will not send candidate data to a remote Ollama host. Model speed and output quality depend on the model and laptop hardware.
 
 ## Search jobs
 
