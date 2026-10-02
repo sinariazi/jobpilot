@@ -114,11 +114,14 @@ function mapJobicy(posting: JobicyPosting, retrievedAt: string): Job | null {
   };
 }
 
-async function getJson<T>(url: string, revalidate: number): Promise<T> {
+async function getJson<T>(url: string, revalidate?: number): Promise<T> {
+  const cacheOptions = revalidate === undefined
+    ? { cache: "no-store" as const }
+    : { next: { revalidate } };
   const response = await fetch(url, {
     headers: { Accept: "application/json", "User-Agent": "JobpilotLocal/0.1 (public job search)" },
     signal: AbortSignal.timeout(15000),
-    next: { revalidate },
+    ...cacheOptions,
   });
   if (!response.ok) throw new Error(`Feed returned HTTP ${response.status}`);
   return response.json() as Promise<T>;
@@ -126,7 +129,7 @@ async function getJson<T>(url: string, revalidate: number): Promise<T> {
 
 async function arbeitnowJobs(retrievedAt: string) {
   const pages = await Promise.all(Array.from({ length: 5 }, (_, index) =>
-    getJson<ArbeitnowPage>(`https://www.arbeitnow.com/api/job-board-api?page=${index + 1}`, 1800)));
+    getJson<ArbeitnowPage>(`https://www.arbeitnow.com/api/job-board-api?page=${index + 1}`)));
   return pages.flatMap((page) => (page.data ?? []).map((posting) => mapArbeitnow(posting, retrievedAt)).filter((job): job is Job => job !== null));
 }
 
