@@ -6,15 +6,17 @@ export function normalizeSkill(value: string) {
 
 export function scoreJob(job: Job, candidateSkills: string[]) {
   const skills = [...new Set(candidateSkills.map((skill) => skill.trim()).filter(Boolean))];
-  const posting = normalizeSkill(`${job.role} ${job.summary} ${job.description ?? ""}`);
-  const containsPhrase = (skill: string) => {
+  const title = normalizeSkill(job.role);
+  const posting = normalizeSkill(`${job.summary} ${job.description ?? ""}`);
+  const containsPhrase = (text: string, skill: string) => {
     const phrase = normalizeSkill(skill);
-    return phrase.length > 0 && ` ${posting} `.includes(` ${phrase} `);
+    return phrase.length > 0 && ` ${text} `.includes(` ${phrase} `);
   };
-  const matched = skills.filter(containsPhrase);
-  const missing = skills.filter((skill) => !containsPhrase(skill));
+  const titleMatched = skills.filter((skill) => containsPhrase(title, skill));
+  const matched = skills.filter((skill) => titleMatched.includes(skill) || containsPhrase(posting, skill));
+  const missing = skills.filter((skill) => !matched.includes(skill));
   const score = Math.round((matched.length / Math.max(skills.length, 1)) * 100);
-  return { score, matched, missing };
+  return { score, matched, missing, titleMatched };
 }
 
 export function matchesTargetRole(job: Job, targetRoles: string) {
