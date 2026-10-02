@@ -46,6 +46,7 @@ describe("local state storage", () => {
       saved: [exampleJob.id],
       status: { [exampleJob.id]: "Approved to prepare" },
       applicationNotes: { [exampleJob.id]: "Follow up with the hiring manager" },
+      coverLetterDrafts: { [exampleJob.id]: { interest: "The product", evidence: "Shipped a feature", draft: "Dear team", updatedAt: "2026-10-02T12:00:00.000Z" } },
       liveJobs: [exampleJob],
     };
 
@@ -91,5 +92,15 @@ describe("local state storage", () => {
       ...defaultState(),
       applicationNotes: { "gh-example-1": "x".repeat(2001) },
     })).toBeNull();
+
+    expect(parsePersistedState({
+      ...defaultState(),
+      coverLetterDrafts: { "gh-example-1": { interest: "", evidence: "", draft: "x".repeat(20_001), updatedAt: "2026-10-02T12:00:00.000Z" } },
+    })).toBeNull();
+  });
+
+  it("accepts older saved states without a cover-letter field", () => {
+    const olderState = { profile: defaultState().profile, saved: [], status: {}, liveJobs: [] };
+    expect(parsePersistedState(olderState)).toEqual({ ...olderState, applicationNotes: {}, coverLetterDrafts: {} });
   });
 });
