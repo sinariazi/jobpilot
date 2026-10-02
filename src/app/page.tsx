@@ -22,6 +22,7 @@ export default function Home() {
   const [visibleCount, setVisibleCount] = useState(25);
   const [saved, setSaved] = useState<string[]>([]);
   const [status, setStatus] = useState<Record<string, ApplicationStatus>>({});
+  const [applicationNotes, setApplicationNotes] = useState<Record<string, string>>({});
   const [profileOpen, setProfileOpen] = useState(false);
   const [activeView, setActiveView] = useState<"overview" | "applications">("overview");
   const [liveJobs, setLiveJobs] = useState<Job[]>([]);
@@ -68,6 +69,7 @@ export default function Home() {
                 profile: legacy.profile ?? defaultProfile,
                 saved: legacy.saved ?? [],
                 status: legacy.status ?? {},
+                applicationNotes: legacy.applicationNotes ?? {},
                 liveJobs: [],
               }),
             });
@@ -81,6 +83,7 @@ export default function Home() {
         setProfile(restored.profile);
         setSaved(restored.saved);
         setStatus(restored.status);
+        setApplicationNotes(restored.applicationNotes ?? {});
         setLiveJobs(restored.liveJobs ?? []);
         setSelectedId(restored.liveJobs?.[0]?.id ?? "");
         setStorageMessage(migrated ? "Existing browser data moved to a private local file." : "Saved on this device.");
@@ -97,7 +100,7 @@ export default function Home() {
   useEffect(() => {
     if (!stateLoaded) return;
     let cancelled = false;
-    const snapshot = { profile, saved, status, liveJobs } satisfies PersistedState;
+    const snapshot = { profile, saved, status, applicationNotes, liveJobs } satisfies PersistedState;
     const timeout = window.setTimeout(() => {
       setStorageMessage("Saving on this device…");
       saveQueue.current = saveQueue.current.catch(() => undefined).then(async () => {
@@ -120,7 +123,7 @@ export default function Home() {
       cancelled = true;
       window.clearTimeout(timeout);
     };
-  }, [profile, saved, status, liveJobs, stateLoaded]);
+  }, [profile, saved, status, applicationNotes, liveJobs, stateLoaded]);
 
   const preferredJobs = useMemo(() => jobs.filter((job) => matchesPreferredLocation(job.location, profile.locations, job.mode, job.source)), [jobs, profile.locations]);
   const ranked = useMemo(() => preferredJobs.map((job) => ({ job, ...scoreJob(job, candidateSkills), roleMatch: matchesTargetRole(job, profile.roles) }))
@@ -218,6 +221,7 @@ export default function Home() {
       setProfile(result.profile);
       setSaved(result.saved);
       setStatus(result.status);
+      setApplicationNotes(result.applicationNotes ?? {});
       setLiveJobs(result.liveJobs);
       setSelectedId(result.liveJobs[0]?.id ?? "");
       setStorageMessage("Backup restored and saved on this device.");
@@ -295,7 +299,7 @@ export default function Home() {
             <>
               <div className="greeting-row"><div><div className="eyebrow">YOUR JOB SEARCH</div><h1>Applications <span>tracker.</span></h1><p className="subheading">Track saved roles and move each one through your review process.</p></div><button className="primary-button" onClick={() => setActiveView("overview")}>＋ Find jobs</button></div>
               <div className="application-summary"><strong>{applicationJobs.length}</strong><span>roles in your tracker</span><span className="summary-divider"/><span>{applicationGroups.find((group) => group.title === "Applied")?.items.length ?? 0} applied</span><span>{saved.length} saved</span></div>
-              <div className="application-board">{applicationGroups.map((group) => <section className="application-column" key={group.title}><div className="application-column-heading"><h2>{group.title}</h2><span>{group.items.length}</span></div>{group.items.length ? group.items.map((job) => <article className="application-card" key={job.id}><div className="application-company"><div className={`company-logo logo-${job.source.toLowerCase()}`}>{job.company.slice(0, 1)}</div><div><strong>{job.company}</strong><span>{job.location}</span></div></div><h3>{job.role}</h3><div className="application-card-footer"><span>{job.source}</span><select aria-label={`Update ${job.company} application status`} value={status[job.id] ?? "Needs review"} onChange={(event) => setStatus((current) => ({ ...current, [job.id]: event.target.value as ApplicationStatus }))}><option>Needs review</option><option>Approved to prepare</option><option>Applied</option><option>Rejected</option></select></div></article>) : <p className="application-empty">No roles here yet.</p>}</section>)}</div>
+              <div className="application-board">{applicationGroups.map((group) => <section className="application-column" key={group.title}><div className="application-column-heading"><h2>{group.title}</h2><span>{group.items.length}</span></div>{group.items.length ? group.items.map((job) => <article className="application-card" key={job.id}><div className="application-company"><div className={`company-logo logo-${job.source.toLowerCase()}`}>{job.company.slice(0, 1)}</div><div><strong>{job.company}</strong><span>{job.location}</span></div></div><h3>{job.role}</h3><details className="application-notes"><summary>{applicationNotes[job.id]?.trim() ? "Edit notes" : "Add a note"}</summary><label><span className="visually-hidden">Notes for {job.role} at {job.company}</span><textarea maxLength={2000} rows={3} value={applicationNotes[job.id] ?? ""} onChange={(event) => setApplicationNotes((current) => ({ ...current, [job.id]: event.target.value }))} placeholder="Interview details, next steps, or why you saved this role…"/></label></details><div className="application-card-footer"><span>{job.source}</span><select aria-label={`Update ${job.company} application status`} value={status[job.id] ?? "Needs review"} onChange={(event) => setStatus((current) => ({ ...current, [job.id]: event.target.value as ApplicationStatus }))}><option>Needs review</option><option>Approved to prepare</option><option>Applied</option><option>Rejected</option></select></div></article>) : <p className="application-empty">No roles here yet.</p>}</section>)}</div>
               <p className="application-footnote">Status changes are saved on this device. “Applied” is a manual record; Jobpilot never submits applications.</p>
             </>
           ) : <>
