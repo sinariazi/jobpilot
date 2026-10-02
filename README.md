@@ -25,7 +25,7 @@ A local-first job-search assistant built with Next.js and TypeScript. It searche
 - Add pagination or incremental loading for large result sets.
 - Add OCR for scanned/image-only CVs; current parsing requires selectable text.
 - Improve layout-aware parsing for multi-column CVs and more heading formats; extraction is heuristic and suggestions require user review.
-- Encrypt local data before supporting CVs or other sensitive personal information.
+- Encrypt local profile and tracker data, which can include sensitive details accepted from a CV.
 - Draft application documents for user review; AI-assisted drafting is not implemented.
 - Add export and backup/restore for the local profile and application tracker.
 - Add accessibility and responsive-layout review across supported browsers and screen sizes.
