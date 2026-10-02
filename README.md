@@ -2,7 +2,7 @@
 
 A local-first job-search assistant built with Next.js and TypeScript. It searches multiple public job feeds automatically, filters listings against the candidate's preferred locations, and ranks roles using profile target titles and transparent skill matching.
 
-> **Current scope:** Jobpilot searches public feeds from Arbeitnow (Europe-wide), Remotive (remote), and Jobicy (Europe remote). This improves discovery without requiring employer names, but it does not cover every employer or job board. CV import extracts reviewable suggestions from text-based files in the browser. The app creates an editable cover-letter template from the selected role, exact profile skill overlaps, and details entered by the user; it does not use an AI model or submit applications. The profile, review decisions, saved jobs, and fetched listings are stored in a local file on this device.
+> **Current scope:** Jobpilot is an early-stage, local-first job-search and application-preparation agent. It searches public feeds from Arbeitnow (Europe-wide), Remotive (remote), and Jobicy (Europe remote), but does not cover every employer or vacancy. Matching is deterministic, not AI. With an OpenAI API key and model configured by the operator, the app can draft a cover letter after the user explicitly agrees to send selected job details and profile fields to OpenAI. CV import currently extracts role and skill suggestions only. Jobpilot does not yet tailor CVs or submit applications.
 
 ## Working now
 
@@ -16,6 +16,7 @@ A local-first job-search assistant built with Next.js and TypeScript. It searche
 - Exports and restores a versioned JSON backup of the local profile, listings, saved jobs, application statuses, notes, and cover-letter drafts; restores are validated and require confirmation.
 - Includes a manual application tracker with status and private per-job notes. It never submits an application.
 - Creates an editable cover-letter first draft for a selected job using its role and company, exact profile skill overlaps, and user-entered interest and experience details. Missing personal claims are shown as placeholders; drafts are saved locally and included in backups.
+- Can create an AI-written cover-letter draft through the server-side OpenAI API when `OPENAI_API_KEY` and `OPENAI_MODEL` are configured. Before each draft, the user must consent to sending the selected job description, their name and skills, and entered notes. The CV file is not sent. An offline template remains available without API credentials.
 - Migrates prior browser-local profile and review state on first launch.
 - Lint, typecheck, Vitest, and production build run in GitHub Actions.
 
@@ -29,7 +30,9 @@ A local-first job-search assistant built with Next.js and TypeScript. It searche
 - Add OCR for scanned/image-only CVs; current parsing requires selectable text.
 - Improve layout-aware parsing for multi-column CVs and more heading formats; extraction is heuristic and suggestions require user review.
 - Encrypt local profile and tracker data, which can include sensitive details accepted from a CV.
-- Add tailored CV generation and richer application document editing; current cover-letter drafting is a local template and does not use AI.
+- Tailor and export the candidate's CV using verified CV source material; CV import currently extracts role and skill suggestions only.
+- Add application-form preparation and employer-specific ATS integrations. Jobpilot currently opens the original posting but does not fill or submit external forms.
+- Improve AI drafting with editable user preferences, structured outputs, and stronger source-to-claim verification; the current AI feature only drafts a cover letter.
 - Add accessibility and responsive-layout review across supported browsers and screen sizes.
 - Add automated end-to-end tests for the main job search, details, profile, and tracking workflows.
 - Add optional follow-up dates and reminders to the application tracker.
@@ -57,7 +60,11 @@ Open <http://localhost:3000>.
 
 The app stores data in `~/.jobpilot/state.json` (the current user's home directory). You can change the folder with `JOBPILOT_DATA_DIR`. Keep the app bound to `localhost`; don't expose it on your network.
 
-**Privacy:** CV parsing runs in the browser. The selected file and extracted full text are held in memory for parsing and are not uploaded or saved. If you accept suggestions and save the profile, those role and skill fields are written to the local JSON state file, which is not encrypted. Cover-letter source notes and drafts are also stored locally and in downloaded backups, which are unencrypted JSON. Nothing from the candidate profile is sent to job feed providers. The old browser-local profile is moved to the local file on first launch and removed from browser storage after that succeeds.
+**Privacy:** CV parsing runs in the browser. The selected file and extracted full text are held in memory for parsing and are not uploaded or saved. If you accept suggestions and save the profile, those role and skill fields are written to the local JSON state file, which is not encrypted. Cover-letter source notes and drafts are also stored locally and in downloaded backups, which are unencrypted JSON. Jobpilot sends no candidate data to job-feed providers. For AI cover-letter drafting, Jobpilot sends the selected job description, profile name and skills, and the entered interest/evidence notes to OpenAI only after the user checks the explicit consent box. The CV file and full extracted text are not sent. OpenAI API usage is subject to the user's OpenAI account terms and charges. The old browser-local profile is moved to the local file on first launch and removed from browser storage after that succeeds.
+
+## AI cover-letter setup
+
+Copy `.env.example` to `.env.local`, then set `OPENAI_API_KEY` and `OPENAI_MODEL` to credentials and a model available to your OpenAI API account. Restart the development server after changing the environment file. The API key is read by the server and is never sent to the browser. Without both settings, AI drafting is disabled; use the offline template instead. Keep `.env.local` private and never commit it.
 
 ## Search jobs
 
