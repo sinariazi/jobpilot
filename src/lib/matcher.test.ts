@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { scoreJob } from "./matcher";
+import { matchesTargetRole, scoreJob } from "./matcher";
 import type { Job } from "./types";
 
 const role: Job = {
@@ -18,5 +18,16 @@ describe("scoreJob", () => {
 
   it("handles an empty candidate profile without dividing by zero", () => {
     expect(scoreJob(role, []).score).toBe(0);
+  });
+});
+
+describe("matchesTargetRole", () => {
+  it("matches one of the user's entered target titles without partial-word matches", () => {
+    expect(matchesTargetRole({ ...role, role: "Senior Product Manager" }, "Product Manager; Data Analyst")).toBe(true);
+    expect(matchesTargetRole({ ...role, role: "Product Management Intern" }, "Product Manager")).toBe(false);
+  });
+
+  it("does not mark roles when no target roles are configured", () => {
+    expect(matchesTargetRole(role, "  ")).toBe(false);
   });
 });

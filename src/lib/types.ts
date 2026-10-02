@@ -8,6 +8,7 @@ export type Job = {
   source: string;
   department?: string;
   sourceUrl?: string;
+  sourceAttributionUrl?: string;
   retrievedAt?: string;
   summary: string;
   description?: string;
