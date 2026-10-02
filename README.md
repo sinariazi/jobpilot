@@ -8,6 +8,7 @@ A local-first job-search assistant built with Next.js and TypeScript. It searche
 
 - Searches three broad public job feeds automatically; no company names, board slugs, or employer setup are required. Each listing links to its provider or original listing, with visible source attribution.
 - Filters listings using locations in the editable candidate profile. New profiles have no location preference until the user enters one.
+- Filters loaded listings by keywords, posting age, work mode, and department when those feed details are available. Results appear in batches of 25; **Show more** reveals additional jobs already fetched.
 - Ranks target role title matches first, then skills explicitly mentioned in the job title, then overall profile skill coverage. The UI marks title evidence; the percentage is a text overlap indicator, not a probability of getting the job.
 - Imports text-based PDF, DOCX, and TXT CVs in the browser and proposes past role titles and skills for review. The CV file and extracted full text are not uploaded or saved; only fields the user accepts and then saves are written to the local profile.
 - Caches the Remotive feed for six hours in keeping with its published request guidance, the Jobicy feed for at least one hour in keeping with its polling guidance, and Arbeitnow feeds for 30 minutes.
@@ -54,11 +55,19 @@ Open <http://localhost:3000>.
 
 The app stores data in `~/.jobpilot/state.json` (the current user's home directory). You can change the folder with `JOBPILOT_DATA_DIR`. Keep the app bound to `localhost`; don't expose it on your network.
 
-**Privacy:** CV parsing runs in the browser. The selected file and extracted full text are held in memory for parsing and are not uploaded or saved. If you accept suggestions and save the profile, those role and skill fields are written to the local JSON state file, which is not encrypted. Nothing from the candidate profile is sent to job feed providers. The old browser-local profile is moved to the local file on first launch and removed from browser storage after that succeeds.
+**Privacy:** CV parsing runs in the browser. The selected file and extracted full text are held in memory for parsing and are not uploaded or saved. If you accept suggestions and save the profile, those role and skill fields are written to the local JSON state file, which is not encrypted. Downloaded backups are also unencrypted JSON. Nothing from the candidate profile is sent to job feed providers. The old browser-local profile is moved to the local file on first launch and removed from browser storage after that succeeds.
 
 ## Search jobs
 
-Select **Search jobs now** in the overview. Jobpilot retrieves listings from public feeds and filters them against preferred locations in the local profile. Add target role titles to rank those titles first and skills to see exact text matches. The app preserves each provider's job URL and displays source attribution. Remotive listings are delayed by 24 hours; its public API asks consumers to request data no more than four times per day, so the app caches that feed for six hours. Jobicy requests are cached for at least one hour per its polling guidance.
+Select **Search jobs now** in the overview. Jobpilot retrieves listings from public feeds and filters them against preferred locations in the local profile. Add target role titles to rank title matches first. Skills named in a job title are prioritized next, followed by overall profile skill coverage; the displayed percentage is the share of profile skills found in the posting text.
+
+Use the keyword box to search role, company, location, and department text. The posting-age filter offers any date, the last 7 days, or the last 30 days; listings without a publication date are omitted when a date range is selected. Work-mode filtering uses the feed's mode and location text, so an employer's listing is the source of truth. Department choices come from the current results and appear only when a feed provides department information. **Show more jobs** displays 25 more entries from the retrieved batch; it does not request another batch from the providers.
+
+The app preserves each provider's job URL and displays source attribution. Remotive listings are delayed by 24 hours; its public API asks consumers to request data no more than four times per day, so the app caches that feed for six hours. Jobicy requests are cached for at least one hour per its polling guidance.
+
+## Back up or restore local data
+
+Open **Candidate profile** and use the **Data backup** controls. **Download backup** saves a versioned JSON file containing the profile, fetched listings, saved jobs, and application statuses. **Restore backup** accepts a Jobpilot backup, validates it, and asks for confirmation before replacing the current local state. Keep backup files private: they contain profile data and are not encrypted.
 
 ## Development checks
 
