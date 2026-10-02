@@ -1,7 +1,7 @@
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import type { ApplicationStatus, CandidateProfile, Job, PersistedState } from "./types";
+import type { ApplicationStatus, CandidateProfile, CoverLetterDraftRecord, Job, PersistedState } from "./types";
 import { defaultProfile } from "./types";
 
 const STORAGE_VERSION = 1;
@@ -16,7 +16,7 @@ const allowedStatuses = new Set<ApplicationStatus>([
 export type LoadedState = PersistedState & { initialized: boolean };
 
 export function defaultState(): LoadedState {
-  return { profile: defaultProfile, saved: [], status: {}, applicationNotes: {}, liveJobs: [], initialized: false };
+  return { profile: defaultProfile, saved: [], status: {}, applicationNotes: {}, coverLetterDrafts: {}, liveJobs: [], initialized: false };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -92,6 +92,17 @@ export function parsePersistedState(value: unknown): PersistedState | null {
   if (statusEntries.length > MAX_TRACKED_JOBS || statusEntries.some(([id, status]) => !id || id.length > 300 || typeof status !== "string" || !allowedStatuses.has(status as ApplicationStatus))) return null;
   const applicationNotes = value.applicationNotes === undefined ? {} : value.applicationNotes;
   if (!isRecord(applicationNotes) || Object.entries(applicationNotes).length > MAX_TRACKED_JOBS || Object.entries(applicationNotes).some(([id, note]) => !id || id.length > 300 || typeof note !== "string" || note.length > 2000)) return null;
+  const coverLetterDrafts = value.coverLetterDrafts === undefined ? {} : value.coverLetterDrafts;
+  if (!isRecord(coverLetterDrafts) || Object.entries(coverLetterDrafts).length > MAX_TRACKED_JOBS) return null;
+  const parsedDrafts: Record<string, CoverLetterDraftRecord> = {};
+  for (const [id, entry] of Object.entries(coverLetterDrafts)) {
+    if (!id || id.length > 300 || !isRecord(entry)
+      || typeof entry.interest !== "string" || entry.interest.length > 2000
+      || typeof entry.evidence !== "string" || entry.evidence.length > 4000
+      || typeof entry.draft !== "string" || entry.draft.length > 20_000
+      || typeof entry.updatedAt !== "string" || !Number.isFinite(Date.parse(entry.updatedAt))) return null;
+    parsedDrafts[id] = { interest: entry.interest, evidence: entry.evidence, draft: entry.draft, updatedAt: entry.updatedAt };
+  }
   if (value.liveJobs !== undefined && (!Array.isArray(value.liveJobs) || value.liveJobs.length > MAX_TRACKED_JOBS)) return null;
   const liveJobs = value.liveJobs === undefined ? [] : value.liveJobs.map(parseJob);
   if (liveJobs.some((job) => job === null)) return null;
@@ -100,6 +111,7 @@ export function parsePersistedState(value: unknown): PersistedState | null {
     saved,
     status: Object.fromEntries(statusEntries) as Record<string, ApplicationStatus>,
     applicationNotes: Object.fromEntries(Object.entries(applicationNotes)) as Record<string, string>,
+    coverLetterDrafts: parsedDrafts,
     liveJobs: liveJobs as Job[],
   };
 }
