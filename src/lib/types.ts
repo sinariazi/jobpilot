@@ -5,6 +5,7 @@ export type Job = {
   location: string;
   mode: string;
   posted: string;
+  postedAt?: string;
   source: string;
   department?: string;
   sourceUrl?: string;
