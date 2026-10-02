@@ -12,6 +12,7 @@ A local-first job-search assistant built with Next.js and TypeScript. It searche
 - Imports text-based PDF, DOCX, and TXT CVs in the browser and proposes past role titles and skills for review. The CV file and extracted full text are not uploaded or saved; only fields the user accepts and then saves are written to the local profile.
 - Caches the Remotive feed for six hours in keeping with its published request guidance, the Jobicy feed for at least one hour in keeping with its polling guidance, and Arbeitnow feeds for 30 minutes.
 - Saves live listings, saved jobs, application statuses, and the candidate profile to local JSON storage.
+- Exports and restores a versioned JSON backup of the local profile, listings, saved jobs, and application statuses; restores are validated and require confirmation.
 - Includes a manual application tracker. It never submits an application.
 - Migrates prior browser-local profile and review state on first launch.
 - Lint, typecheck, Vitest, and production build run in GitHub Actions.
@@ -27,7 +28,6 @@ A local-first job-search assistant built with Next.js and TypeScript. It searche
 - Improve layout-aware parsing for multi-column CVs and more heading formats; extraction is heuristic and suggestions require user review.
 - Encrypt local profile and tracker data, which can include sensitive details accepted from a CV.
 - Draft application documents for user review; AI-assisted drafting is not implemented.
-- Add export and backup/restore for the local profile and application tracker.
 - Add accessibility and responsive-layout review across supported browsers and screen sizes.
 - Add automated end-to-end tests for the main job search, details, profile, and tracking workflows.
 - Decide whether application submission will remain manual; the current tracker never submits applications.
