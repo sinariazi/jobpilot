@@ -6,6 +6,7 @@ const state: PersistedState = {
   profile: { name: "Candidate", roles: "Engineer", locations: "Vienna", skills: "TypeScript" },
   saved: ["job-1"],
   status: { "job-1": "Applied" },
+  applicationNotes: { "job-1": "Interview scheduled" },
   liveJobs: [],
 };
 
