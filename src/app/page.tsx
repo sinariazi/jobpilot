@@ -47,9 +47,10 @@ export default function Home() {
   const [includeCvSkills, setIncludeCvSkills] = useState(true);
   const [coverLetterOpen, setCoverLetterOpen] = useState(false);
   const [coverLetterMessage, setCoverLetterMessage] = useState("");
-  const [aiDraftAvailable, setAiDraftAvailable] = useState(false);
+  const [localAiModels, setLocalAiModels] = useState<string[]>([]);
+  const [selectedAiModel, setSelectedAiModel] = useState("");
+  const [localAiStatus, setLocalAiStatus] = useState("Checking for Ollama on this laptop…");
   const [aiDrafting, setAiDrafting] = useState(false);
-  const [aiConsent, setAiConsent] = useState(false);
   const candidateSkills = useMemo(() => profile.skills.split(",").map((skill) => skill.trim()).filter(Boolean), [profile.skills]);
   const jobs = useMemo(() => {
     const unique = new Map<string, Job>();
@@ -59,7 +60,6 @@ export default function Home() {
 
   function selectJob(jobId: string) {
     setSelectedId(jobId);
-    setAiConsent(false);
     setCoverLetterMessage("");
   }
 
@@ -114,9 +114,15 @@ export default function Home() {
   useEffect(() => {
     let cancelled = false;
     void fetch("/api/application/draft", { cache: "no-store" })
-      .then((response) => response.json() as Promise<{ available?: boolean }>)
-      .then((result) => { if (!cancelled) setAiDraftAvailable(result.available === true); })
-      .catch(() => { if (!cancelled) setAiDraftAvailable(false); });
+      .then((response) => response.json() as Promise<{ available?: boolean; models?: string[]; preferredModel?: string; message?: string }>)
+      .then((result) => {
+        if (cancelled) return;
+        const models = result.models ?? [];
+        setLocalAiModels(models);
+        setSelectedAiModel((current) => current && models.includes(current) ? current : result.preferredModel && models.includes(result.preferredModel) ? result.preferredModel : models[0] ?? "");
+        setLocalAiStatus(result.message ?? (models.length ? "Local Ollama model ready on this laptop." : ""));
+      })
+      .catch(() => { if (!cancelled) { setLocalAiModels([]); setLocalAiStatus("Could not check for local Ollama models."); } });
     return () => { cancelled = true; };
   }, []);
 
@@ -223,7 +229,7 @@ export default function Home() {
   }
 
   async function generateAiCoverLetter() {
-    if (!selected || !aiConsent || aiDrafting) return;
+    if (!selected || !localAiModels.includes(selectedAiModel) || aiDrafting) return;
     setAiDrafting(true);
     setCoverLetterMessage("Drafting with the configured AI provider…");
     try {
@@ -231,6 +237,7 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          model: selectedAiModel,
           job: {
             company: selected.job.company,
             role: selected.job.role,
@@ -468,12 +475,13 @@ export default function Home() {
                   <section className="cover-letter-draft" key={selected.job.id}>
                   <div className="cover-letter-heading"><div><h4>Cover letter draft</h4><p>Build an editable first draft for this role.</p></div><button type="button" className="secondary-button" onClick={() => setCoverLetterOpen((open) => !open)}>{coverLetterOpen ? "Close" : "Create draft"}</button></div>
                   {coverLetterOpen && <>
-                    <p className="cover-letter-help">Add a reason and a specific, truthful experience example. AI drafting uses the configured OpenAI API; the offline template remains available as a fallback. Review every claim before use.</p>
+                    <p className="cover-letter-help">Add a reason and a specific, truthful experience example. AI drafting runs through Ollama on this laptop. Review every claim before use.</p>
                     <label>Why are you interested in this role or company?<textarea rows={2} maxLength={2000} value={selectedCoverLetter?.interest ?? ""} onChange={(event) => updateSelectedCoverLetter({ interest: event.target.value })} placeholder="Add a specific reason…" /></label>
                     <label>Relevant example and outcome from your experience<textarea rows={2} maxLength={4000} value={selectedCoverLetter?.evidence ?? ""} onChange={(event) => updateSelectedCoverLetter({ evidence: event.target.value })} placeholder="Describe your contribution and the result…" /></label>
-                    <label className="ai-consent"><input type="checkbox" checked={aiConsent} onChange={(event) => setAiConsent(event.target.checked)} disabled={!aiDraftAvailable || aiDrafting}/> I agree to send this job’s details, my name and skills, and the notes above to OpenAI for drafting. The CV file is not sent.</label>
-                    {!aiDraftAvailable && <p className="cover-letter-help">AI is not configured. Add the server-side OpenAI settings described in the README; the offline draft can still be used.</p>}
-                    <div className="cover-letter-actions"><button type="button" className="primary-button cover-letter-generate" onClick={() => void generateAiCoverLetter()} disabled={!aiDraftAvailable || !aiConsent || aiDrafting}>{aiDrafting ? "Drafting…" : "Generate with AI"}</button><button type="button" className="secondary-button cover-letter-generate" onClick={buildCoverLetter}>Use offline template</button></div>
+                    <label className="local-model-select">Local AI model<select value={selectedAiModel} onChange={(event) => setSelectedAiModel(event.target.value)} disabled={!localAiModels.length || aiDrafting}><option value="">Choose an installed model</option>{localAiModels.map((model) => <option key={model} value={model}>{model}</option>)}</select></label>
+                    <p className="cover-letter-help">Job details and profile text are processed by Ollama at this laptop’s local address. The CV file is not sent to the model.</p>
+                    {localAiStatus && <p className="cover-letter-message" role="status">{localAiStatus}</p>}
+                    <div className="cover-letter-actions"><button type="button" className="primary-button cover-letter-generate" onClick={() => void generateAiCoverLetter()} disabled={!localAiModels.includes(selectedAiModel) || aiDrafting}>{aiDrafting ? "Generating locally…" : "Generate on this laptop"}</button><button type="button" className="secondary-button cover-letter-generate" onClick={buildCoverLetter}>Use simple template</button></div>
                     {selectedCoverLetter?.draft && <><label>Draft text<textarea rows={11} maxLength={20000} value={selectedCoverLetter.draft} onChange={(event) => updateSelectedCoverLetter({ draft: event.target.value })} /></label><div className="cover-letter-actions"><button type="button" className="secondary-button" onClick={() => void copyCoverLetter()}>Copy</button><button type="button" className="secondary-button" onClick={downloadCoverLetter}>Download .txt</button></div><p className="cover-letter-help">Saved on this device · Updated {new Date(selectedCoverLetter.updatedAt).toLocaleString()}</p></>}
                     {coverLetterMessage && <p className="cover-letter-message" role="status">{coverLetterMessage}</p>}
                   </>}
