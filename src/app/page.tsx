@@ -8,6 +8,7 @@ import { matchesPreferredLocation } from "@/lib/locations";
 import { matchesDepartment, matchesPostedWithin, matchesWorkMode, type PostedWithin, type WorkMode } from "@/lib/job-filters";
 import type { CvSuggestions } from "@/lib/cv-parser";
 import { createBackup, parseBackup } from "@/lib/backup";
+import { createCoverLetterDraft } from "@/lib/cover-letter";
 
 const LEGACY_STORAGE_KEY = "jobpilot-local-v1";
 const MAX_BACKUP_BYTES = 23_000_000;
@@ -43,6 +44,11 @@ export default function Home() {
   const [backupBusy, setBackupBusy] = useState(false);
   const [includeCvRoles, setIncludeCvRoles] = useState(true);
   const [includeCvSkills, setIncludeCvSkills] = useState(true);
+  const [coverLetterOpen, setCoverLetterOpen] = useState(false);
+  const [coverLetterReason, setCoverLetterReason] = useState("");
+  const [coverLetterEvidence, setCoverLetterEvidence] = useState("");
+  const [coverLetterDraft, setCoverLetterDraft] = useState("");
+  const [coverLetterMessage, setCoverLetterMessage] = useState("");
   const candidateSkills = useMemo(() => profile.skills.split(",").map((skill) => skill.trim()).filter(Boolean), [profile.skills]);
   const jobs = useMemo(() => {
     const unique = new Map<string, Job>();
@@ -183,6 +189,40 @@ export default function Home() {
     link.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     setBackupMessage("Backup downloaded. Store the file somewhere safe; it contains your local profile and job tracking data.");
+  }
+
+  function buildCoverLetter() {
+    if (!selected) return;
+    setCoverLetterDraft(createCoverLetterDraft({
+      candidateName: profile.name,
+      role: selected.job.role,
+      company: selected.job.company,
+      matchedSkills: selected.matched,
+      reason: coverLetterReason,
+      evidence: coverLetterEvidence,
+    }));
+    setCoverLetterMessage("Draft created. Review every statement and replace any placeholders before use.");
+  }
+
+  async function copyCoverLetter() {
+    try {
+      await navigator.clipboard.writeText(coverLetterDraft);
+      setCoverLetterMessage("Draft copied to clipboard.");
+    } catch {
+      setCoverLetterMessage("Clipboard access is unavailable. Select and copy the draft text manually.");
+    }
+  }
+
+  function downloadCoverLetter() {
+    if (!selected || !coverLetterDraft) return;
+    const safeName = `${selected.job.company}-${selected.job.role}`.replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/g, "").toLowerCase() || "application";
+    const url = URL.createObjectURL(new Blob([coverLetterDraft], { type: "text/plain;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `cover-letter-${safeName}.txt`;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setCoverLetterMessage("Draft downloaded as a text file.");
   }
 
   async function restoreBackup(event: React.ChangeEvent<HTMLInputElement>) {
@@ -346,7 +386,7 @@ export default function Home() {
 
             {selected ? (
               <aside className="detail-card">
-                <div className="detail-actions">
+                    <div className="detail-actions">
                 <span className="detail-source"><i /> {selected.job.source} listing · <a href={selected.job.sourceAttributionUrl ?? selected.job.sourceUrl} target="_blank" rel="noreferrer">source</a></span>
                   <button className="icon-button" onClick={() => setSaved((current) => current.includes(selected.job.id) ? current.filter((id) => id !== selected.job.id) : [...current, selected.job.id])} aria-label="Save selected job">{saved.includes(selected.job.id) ? "★" : "☆"}</button>
                 </div>
@@ -362,6 +402,17 @@ export default function Home() {
                 {selected.missing.length > 0 && <><div className="evidence-label gap-label">PROFILE SKILLS NOT MENTIONED <span>{selected.missing.length}</span></div><div className="evidence-pills missing-pills">{selected.missing.map((skill) => <span key={skill}>! {skill}</span>)}</div><p className="match-caveat">A skill missing from the posting text is not proof that the job requires it.</p></>}
                 <div className="divider"/>
                 <div id="job-description" className="description"><h4>Job description</h4><p className="job-description-text">{selected.job.description ?? selected.job.summary}</p></div>
+                  <section className="cover-letter-draft" key={selected.job.id}>
+                  <div className="cover-letter-heading"><div><h4>Cover letter draft</h4><p>Build an editable first draft for this role.</p></div><button type="button" className="secondary-button" onClick={() => setCoverLetterOpen((open) => !open)}>{coverLetterOpen ? "Close" : "Create draft"}</button></div>
+                  {coverLetterOpen && <>
+                    <p className="cover-letter-help">This local template uses the selected job, exact profile skill overlaps, and your details below. It does not generate facts. Review and edit it before use.</p>
+                    <label>Why are you interested in this role or company?<textarea rows={2} value={coverLetterReason} onChange={(event) => setCoverLetterReason(event.target.value)} placeholder="Add a specific reason…" /></label>
+                    <label>Relevant example and outcome from your experience<textarea rows={2} value={coverLetterEvidence} onChange={(event) => setCoverLetterEvidence(event.target.value)} placeholder="Describe your contribution and the result…" /></label>
+                    <button type="button" className="primary-button cover-letter-generate" onClick={buildCoverLetter}>Generate editable draft</button>
+                    {coverLetterDraft && <><label>Draft text<textarea rows={11} value={coverLetterDraft} onChange={(event) => setCoverLetterDraft(event.target.value)} /></label><div className="cover-letter-actions"><button type="button" className="secondary-button" onClick={() => void copyCoverLetter()}>Copy</button><button type="button" className="secondary-button" onClick={downloadCoverLetter}>Download .txt</button></div></>}
+                    {coverLetterMessage && <p className="cover-letter-message" role="status">{coverLetterMessage}</p>}
+                  </>}
+                </section>
                 <div className="review-note"><span>◉</span><p><strong>Human review required</strong><br/>Approval only authorizes preparation; it does not submit an application.</p></div>
               </aside>
             ) : <aside className="detail-card empty-detail">Select a job to inspect its match evidence.</aside>}
