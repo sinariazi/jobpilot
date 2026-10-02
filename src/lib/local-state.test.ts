@@ -45,6 +45,7 @@ describe("local state storage", () => {
       profile: { name: "Candidate", roles: "Engineer", locations: "Vienna", skills: "TypeScript" },
       saved: [exampleJob.id],
       status: { [exampleJob.id]: "Approved to prepare" },
+      applicationNotes: { [exampleJob.id]: "Follow up with the hiring manager" },
       liveJobs: [exampleJob],
     };
 
@@ -84,6 +85,11 @@ describe("local state storage", () => {
     expect(parsePersistedState({
       ...defaultState(),
       liveJobs: [{ ...exampleJob, sourceUrl: "javascript:alert(1)" }],
+    })).toBeNull();
+
+    expect(parsePersistedState({
+      ...defaultState(),
+      applicationNotes: { "gh-example-1": "x".repeat(2001) },
     })).toBeNull();
   });
 });
