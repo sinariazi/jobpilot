@@ -28,6 +28,7 @@ export type PersistedState = {
   profile: CandidateProfile;
   saved: string[];
   status: Record<string, ApplicationStatus>;
+  applicationNotes?: Record<string, string>;
   liveJobs: Job[];
 };
 
