@@ -9,7 +9,7 @@ const role: Job = {
 
 describe("scoreJob", () => {
   it("scores only profile skills explicitly mentioned in the job text", () => {
-    expect(scoreJob(role, ["TypeScript", "React", "Java"])).toEqual({ score: 67, matched: ["TypeScript", "React"], missing: ["Java"] });
+    expect(scoreJob(role, ["TypeScript", "React", "Java"])).toEqual({ score: 67, matched: ["TypeScript", "React"], missing: ["Java"], titleMatched: [] });
   });
 
   it("matches case-insensitively and ignores punctuation differences", () => {
@@ -17,7 +17,12 @@ describe("scoreJob", () => {
   });
 
   it("handles an empty candidate profile without dividing by zero", () => {
-    expect(scoreJob(role, []).score).toBe(0);
+    expect(scoreJob(role, [])).toEqual({ score: 0, matched: [], missing: [], titleMatched: [] });
+  });
+
+  it("marks profile skills mentioned in the job title so they can rank ahead of description-only matches", () => {
+    const result = scoreJob({ ...role, role: "Senior TypeScript Engineer" }, ["TypeScript", "React"]);
+    expect(result).toEqual({ score: 100, matched: ["TypeScript", "React"], missing: [], titleMatched: ["TypeScript"] });
   });
 });
 
