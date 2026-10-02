@@ -24,6 +24,7 @@ const exampleJob: Job = {
   location: "Remote — Europe",
   mode: "Remote",
   posted: "Today",
+  postedAt: "2026-10-02T09:00:00.000Z",
   source: "Greenhouse",
   sourceUrl: "https://boards.greenhouse.io/example/jobs/1",
   retrievedAt: "2026-10-02T09:00:00.000Z",
