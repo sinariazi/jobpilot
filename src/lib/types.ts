@@ -24,11 +24,19 @@ export type CandidateProfile = {
 
 export type ApplicationStatus = "Needs review" | "Approved to prepare" | "Applied" | "Rejected";
 
+export type CoverLetterDraftRecord = {
+  interest: string;
+  evidence: string;
+  draft: string;
+  updatedAt: string;
+};
+
 export type PersistedState = {
   profile: CandidateProfile;
   saved: string[];
   status: Record<string, ApplicationStatus>;
   applicationNotes?: Record<string, string>;
+  coverLetterDrafts?: Record<string, CoverLetterDraftRecord>;
   liveJobs: Job[];
 };
 
