@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ApplicationStatus, CandidateProfile, Job, PersistedState } from "@/lib/types";
+import type { ApplicationStatus, CandidateProfile, CoverLetterDraftRecord, Job, PersistedState } from "@/lib/types";
 import { defaultProfile } from "@/lib/types";
 import { matchesTargetRole, scoreJob } from "@/lib/matcher";
 import { matchesPreferredLocation } from "@/lib/locations";
@@ -24,6 +24,7 @@ export default function Home() {
   const [saved, setSaved] = useState<string[]>([]);
   const [status, setStatus] = useState<Record<string, ApplicationStatus>>({});
   const [applicationNotes, setApplicationNotes] = useState<Record<string, string>>({});
+  const [coverLetterDrafts, setCoverLetterDrafts] = useState<Record<string, CoverLetterDraftRecord>>({});
   const [profileOpen, setProfileOpen] = useState(false);
   const [activeView, setActiveView] = useState<"overview" | "applications">("overview");
   const [liveJobs, setLiveJobs] = useState<Job[]>([]);
@@ -45,9 +46,6 @@ export default function Home() {
   const [includeCvRoles, setIncludeCvRoles] = useState(true);
   const [includeCvSkills, setIncludeCvSkills] = useState(true);
   const [coverLetterOpen, setCoverLetterOpen] = useState(false);
-  const [coverLetterReason, setCoverLetterReason] = useState("");
-  const [coverLetterEvidence, setCoverLetterEvidence] = useState("");
-  const [coverLetterDraft, setCoverLetterDraft] = useState("");
   const [coverLetterMessage, setCoverLetterMessage] = useState("");
   const candidateSkills = useMemo(() => profile.skills.split(",").map((skill) => skill.trim()).filter(Boolean), [profile.skills]);
   const jobs = useMemo(() => {
@@ -90,6 +88,7 @@ export default function Home() {
         setSaved(restored.saved);
         setStatus(restored.status);
         setApplicationNotes(restored.applicationNotes ?? {});
+        setCoverLetterDrafts(restored.coverLetterDrafts ?? {});
         setLiveJobs(restored.liveJobs ?? []);
         setSelectedId(restored.liveJobs?.[0]?.id ?? "");
         setStorageMessage(migrated ? "Existing browser data moved to a private local file." : "Saved on this device.");
@@ -106,7 +105,7 @@ export default function Home() {
   useEffect(() => {
     if (!stateLoaded) return;
     let cancelled = false;
-    const snapshot = { profile, saved, status, applicationNotes, liveJobs } satisfies PersistedState;
+    const snapshot = { profile, saved, status, applicationNotes, coverLetterDrafts, liveJobs } satisfies PersistedState;
     const timeout = window.setTimeout(() => {
       setStorageMessage("Saving on this device…");
       saveQueue.current = saveQueue.current.catch(() => undefined).then(async () => {
@@ -129,7 +128,7 @@ export default function Home() {
       cancelled = true;
       window.clearTimeout(timeout);
     };
-  }, [profile, saved, status, applicationNotes, liveJobs, stateLoaded]);
+  }, [profile, saved, status, applicationNotes, coverLetterDrafts, liveJobs, stateLoaded]);
 
   const preferredJobs = useMemo(() => jobs.filter((job) => matchesPreferredLocation(job.location, profile.locations, job.mode, job.source)), [jobs, profile.locations]);
   const ranked = useMemo(() => preferredJobs.map((job) => ({ job, ...scoreJob(job, candidateSkills), roleMatch: matchesTargetRole(job, profile.roles) }))
@@ -139,6 +138,7 @@ export default function Home() {
   const visibleJobs = filteredRanked.slice(0, visibleCount);
   const departments = useMemo(() => [...new Set(preferredJobs.map((job) => job.department?.trim()).filter((value): value is string => Boolean(value)))].sort((a, b) => a.localeCompare(b)), [preferredJobs]);
   const selected = filteredRanked.find(({ job }) => job.id === selectedId) ?? filteredRanked[0];
+  const selectedCoverLetter = selected ? coverLetterDrafts[selected.job.id] : undefined;
   const matchedJobs = preferredJobs.filter((job) => scoreJob(job, candidateSkills).matched.length > 0).length;
   const reviewedCount = preferredJobs.filter((job) => status[job.id]).length;
   const applicationJobs = jobs.filter((job) => saved.includes(job.id) || status[job.id]);
@@ -181,7 +181,7 @@ export default function Home() {
   }
 
   function downloadBackup() {
-    const backup = createBackup({ profile, saved, status, liveJobs });
+    const backup = createBackup({ profile, saved, status, applicationNotes, coverLetterDrafts, liveJobs });
     const url = URL.createObjectURL(new Blob([backup], { type: "application/json" }));
     const link = document.createElement("a");
     link.href = url;
@@ -193,20 +193,32 @@ export default function Home() {
 
   function buildCoverLetter() {
     if (!selected) return;
-    setCoverLetterDraft(createCoverLetterDraft({
-      candidateName: profile.name,
-      role: selected.job.role,
-      company: selected.job.company,
-      matchedSkills: selected.matched,
-      reason: coverLetterReason,
-      evidence: coverLetterEvidence,
-    }));
+    setCoverLetterDrafts((current) => {
+      const prior = current[selected.job.id] ?? { interest: "", evidence: "", draft: "", updatedAt: "" };
+      return { ...current, [selected.job.id]: {
+        ...prior,
+        draft: createCoverLetterDraft({ candidateName: profile.name, role: selected.job.role, company: selected.job.company, matchedSkills: selected.matched, reason: prior.interest, evidence: prior.evidence }),
+        updatedAt: new Date().toISOString(),
+      } };
+    });
     setCoverLetterMessage("Draft created. Review every statement and replace any placeholders before use.");
+  }
+
+  function updateSelectedCoverLetter(patch: Partial<CoverLetterDraftRecord>) {
+    if (!selected) return;
+    setCoverLetterDrafts((current) => ({
+      ...current,
+      [selected.job.id]: {
+        ...(current[selected.job.id] ?? { interest: "", evidence: "", draft: "", updatedAt: "" }),
+        ...patch,
+        updatedAt: new Date().toISOString(),
+      },
+    }));
   }
 
   async function copyCoverLetter() {
     try {
-      await navigator.clipboard.writeText(coverLetterDraft);
+      await navigator.clipboard.writeText(coverLetterDrafts[selected?.job.id ?? ""]?.draft ?? "");
       setCoverLetterMessage("Draft copied to clipboard.");
     } catch {
       setCoverLetterMessage("Clipboard access is unavailable. Select and copy the draft text manually.");
@@ -214,9 +226,10 @@ export default function Home() {
   }
 
   function downloadCoverLetter() {
-    if (!selected || !coverLetterDraft) return;
+    const draft = coverLetterDrafts[selected?.job.id ?? ""]?.draft;
+    if (!selected || !draft) return;
     const safeName = `${selected.job.company}-${selected.job.role}`.replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/g, "").toLowerCase() || "application";
-    const url = URL.createObjectURL(new Blob([coverLetterDraft], { type: "text/plain;charset=utf-8" }));
+    const url = URL.createObjectURL(new Blob([draft], { type: "text/plain;charset=utf-8" }));
     const link = document.createElement("a");
     link.href = url;
     link.download = `cover-letter-${safeName}.txt`;
@@ -262,6 +275,7 @@ export default function Home() {
       setSaved(result.saved);
       setStatus(result.status);
       setApplicationNotes(result.applicationNotes ?? {});
+      setCoverLetterDrafts(result.coverLetterDrafts ?? {});
       setLiveJobs(result.liveJobs);
       setSelectedId(result.liveJobs[0]?.id ?? "");
       setStorageMessage("Backup restored and saved on this device.");
@@ -406,10 +420,10 @@ export default function Home() {
                   <div className="cover-letter-heading"><div><h4>Cover letter draft</h4><p>Build an editable first draft for this role.</p></div><button type="button" className="secondary-button" onClick={() => setCoverLetterOpen((open) => !open)}>{coverLetterOpen ? "Close" : "Create draft"}</button></div>
                   {coverLetterOpen && <>
                     <p className="cover-letter-help">This local template uses the selected job, exact profile skill overlaps, and your details below. It does not generate facts. Review and edit it before use.</p>
-                    <label>Why are you interested in this role or company?<textarea rows={2} value={coverLetterReason} onChange={(event) => setCoverLetterReason(event.target.value)} placeholder="Add a specific reason…" /></label>
-                    <label>Relevant example and outcome from your experience<textarea rows={2} value={coverLetterEvidence} onChange={(event) => setCoverLetterEvidence(event.target.value)} placeholder="Describe your contribution and the result…" /></label>
+                    <label>Why are you interested in this role or company?<textarea rows={2} maxLength={2000} value={selectedCoverLetter?.interest ?? ""} onChange={(event) => updateSelectedCoverLetter({ interest: event.target.value })} placeholder="Add a specific reason…" /></label>
+                    <label>Relevant example and outcome from your experience<textarea rows={2} maxLength={4000} value={selectedCoverLetter?.evidence ?? ""} onChange={(event) => updateSelectedCoverLetter({ evidence: event.target.value })} placeholder="Describe your contribution and the result…" /></label>
                     <button type="button" className="primary-button cover-letter-generate" onClick={buildCoverLetter}>Generate editable draft</button>
-                    {coverLetterDraft && <><label>Draft text<textarea rows={11} value={coverLetterDraft} onChange={(event) => setCoverLetterDraft(event.target.value)} /></label><div className="cover-letter-actions"><button type="button" className="secondary-button" onClick={() => void copyCoverLetter()}>Copy</button><button type="button" className="secondary-button" onClick={downloadCoverLetter}>Download .txt</button></div></>}
+                    {selectedCoverLetter?.draft && <><label>Draft text<textarea rows={11} maxLength={20000} value={selectedCoverLetter.draft} onChange={(event) => updateSelectedCoverLetter({ draft: event.target.value })} /></label><div className="cover-letter-actions"><button type="button" className="secondary-button" onClick={() => void copyCoverLetter()}>Copy</button><button type="button" className="secondary-button" onClick={downloadCoverLetter}>Download .txt</button></div><p className="cover-letter-help">Saved on this device · Updated {new Date(selectedCoverLetter.updatedAt).toLocaleString()}</p></>}
                     {coverLetterMessage && <p className="cover-letter-message" role="status">{coverLetterMessage}</p>}
                   </>}
                 </section>
