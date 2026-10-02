@@ -6,7 +6,7 @@ A local-first job-search assistant built with Next.js and TypeScript. It fetches
 
 ## Working now
 
-- Fetches live listings from Greenhouse board slugs entered by the user. No fake job cards or preset boards are included.
+- Searches an upstream company directory for Greenhouse boards, supports selecting multiple employers, and keeps manual board links as a fallback. The directory is cached for up to 24 hours and may be incomplete or stale. No fake job cards or preset boards are included.
 - Filters listings using locations in the editable candidate profile. New profiles have no location preference until the user enters one.
 - Sorts jobs by exact, normalized mentions of user-entered skills in the role title and description. The UI shows which entered skills were mentioned; this is a text overlap indicator, not a probability of getting the job.
 - Saves live listings, saved jobs, application statuses, and the candidate profile to local JSON storage.
@@ -18,7 +18,7 @@ A local-first job-search assistant built with Next.js and TypeScript. It fetches
 
 - Use candidate target roles when ranking listings; they are saved but currently do not affect results.
 - Evaluate semantic skill matching and add explainable ranking criteria; ranking currently counts exact normalized skill mentions only.
-- Discover job boards and listings automatically; users currently enter Greenhouse board slugs themselves.
+- Verify and broaden the external Greenhouse company directory; companies can change job platforms or board links can become stale.
 - Add job-source adapters beyond Greenhouse.
 - Add filters for date, work mode, and department; the current search box only searches title, company, and location.
 - Add pagination or incremental loading for large result sets.
@@ -30,7 +30,7 @@ A local-first job-search assistant built with Next.js and TypeScript. It fetches
 - Add automated end-to-end tests for the main job search, details, profile, and tracking workflows.
 - Decide whether application submission will remain manual; the current tracker never submits applications.
 
-Greenhouse board slugs are entered explicitly. The app does not crawl job boards. Target roles are stored but do not currently affect ranking.
+The company directory is searched locally by the app server after it downloads the public data file; the search query is not sent to that data provider. The app fetches public job postings only for companies the user selects. Target roles are stored but do not currently affect ranking.
 
 ## Tech stack
 
@@ -73,4 +73,4 @@ GitHub Actions runs these checks for pushes and pull requests.
 
 ## Privacy and repository contents
 
-This repository contains no seeded job listings, employer boards, or personal candidate facts. The generic profile label is a UI default; all candidate preferences come from the user's profile. Greenhouse is the only implemented listings integration and its public API endpoint is an integration constant. Test fixtures use example values only to verify behavior. Do not commit a real CV, personal job-search profile, credentials, or `.env` files. Local state is stored outside the repository.
+This repository contains no seeded job listings, employer boards, or personal candidate facts. Searchable company records are fetched from the [OpenJobs company directory](https://github.com/outscal/OpenJobs) (MIT licensed) and are not bundled into this repository. The generic profile label is a UI default; all candidate preferences come from the user's profile. Greenhouse is the only implemented listings integration and its public API endpoint is an integration constant. Test fixtures use example values only to verify behavior. Do not commit a real CV, personal job-search profile, credentials, or `.env` files. Local state is stored outside the repository.

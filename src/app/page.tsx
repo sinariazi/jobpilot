@@ -6,6 +6,7 @@ import { defaultProfile } from "@/lib/types";
 import { scoreJob } from "@/lib/matcher";
 import { matchesPreferredLocation } from "@/lib/locations";
 import { parseGreenhouseBoardReference } from "@/lib/greenhouse-input";
+import type { GreenhouseCompany } from "@/lib/company-directory";
 
 const LEGACY_STORAGE_KEY = "jobpilot-local-v1";
 
@@ -19,6 +20,11 @@ export default function Home() {
   const [activeView, setActiveView] = useState<"overview" | "applications">("overview");
   const [liveJobs, setLiveJobs] = useState<Job[]>([]);
   const [greenhouseSlugs, setGreenhouseSlugs] = useState("");
+  const [companyQuery, setCompanyQuery] = useState("");
+  const [companyResults, setCompanyResults] = useState<GreenhouseCompany[]>([]);
+  const [selectedCompanies, setSelectedCompanies] = useState<GreenhouseCompany[]>([]);
+  const [directoryLoading, setDirectoryLoading] = useState(false);
+  const [directoryError, setDirectoryError] = useState("");
   const [loadingJobs, setLoadingJobs] = useState(false);
   const [stateLoaded, setStateLoaded] = useState(false);
   const [storageMessage, setStorageMessage] = useState("Loading saved data from this device…");
@@ -32,6 +38,37 @@ export default function Home() {
     liveJobs.forEach((job) => unique.set(job.sourceUrl ?? job.id, job));
     return [...unique.values()];
   }, [liveJobs]);
+
+  useEffect(() => {
+    const queryText = companyQuery.trim();
+    if (queryText.length < 2) return;
+
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => {
+      setDirectoryLoading(true);
+      setDirectoryError("");
+      void fetch(`/api/companies/greenhouse?query=${encodeURIComponent(queryText)}`, { signal: controller.signal })
+        .then(async (response) => {
+          const result = await response.json() as { companies?: GreenhouseCompany[]; error?: string };
+          if (!response.ok) throw new Error(result.error ?? "Company search failed.");
+          setCompanyResults(result.companies ?? []);
+        })
+        .catch((error: unknown) => {
+          if (!controller.signal.aborted) {
+            setCompanyResults([]);
+            setDirectoryError(error instanceof Error ? error.message : "Company search is temporarily unavailable.");
+          }
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setDirectoryLoading(false);
+        });
+    }, 250);
+
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [companyQuery]);
 
   useEffect(() => {
     let cancelled = false;
@@ -129,8 +166,13 @@ export default function Home() {
   async function fetchLiveJobs() {
     const enteredBoards = greenhouseSlugs.split(",").map((entry) => entry.trim()).filter(Boolean);
     const slugs = enteredBoards.map(parseGreenhouseBoardReference);
-    if (enteredBoards.length === 0 || slugs.some((slug) => slug === null)) {
+    if (slugs.some((slug) => slug === null)) {
       setSourceErrors(["Paste a Greenhouse board link or board ID. Other job-board websites are not supported yet."]);
+      return;
+    }
+    const boards = [...new Set([...selectedCompanies.map((company) => company.slug), ...slugs.filter((slug): slug is string => slug !== null)])];
+    if (boards.length === 0) {
+      setSourceErrors(["Search for and select at least one company, or paste a Greenhouse board link."]);
       return;
     }
     setLoadingJobs(true);
@@ -140,7 +182,7 @@ export default function Home() {
       const response = await fetch("/api/jobs/greenhouse", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ slugs }),
+        body: JSON.stringify({ slugs: boards }),
       });
       const result = await response.json() as { jobs?: Job[]; errors?: string[]; error?: string };
       if (!response.ok) throw new Error(result.error ?? "Could not fetch jobs.");
@@ -156,6 +198,12 @@ export default function Home() {
     } finally {
       setLoadingJobs(false);
     }
+  }
+
+  function toggleCompany(company: GreenhouseCompany) {
+    setSelectedCompanies((current) => current.some((item) => item.slug === company.slug)
+      ? current.filter((item) => item.slug !== company.slug)
+      : [...current, company]);
   }
 
   return (
@@ -184,29 +232,35 @@ export default function Home() {
               <p className="application-footnote">Status changes are saved on this device. “Applied” is a manual record; Jobpilot never submits applications.</p>
             </>
           ) : <>
-          <div className="greeting-row"><div><div className="eyebrow">{new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric" }).format(new Date()).toUpperCase()}</div><h1>Your next opportunity <span>starts here.</span></h1><p className="subheading">A focused view of live roles that match your preferences.</p></div><button className="primary-button" onClick={() => document.getElementById("greenhouse-slugs")?.focus()}><span>＋</span> Find new jobs</button></div>
+          <div className="greeting-row"><div><div className="eyebrow">{new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric" }).format(new Date()).toUpperCase()}</div><h1>Your next opportunity <span>starts here.</span></h1><p className="subheading">A focused view of live roles that match your preferences.</p></div><button className="primary-button" onClick={() => document.getElementById("company-search")?.focus()}><span>＋</span> Find new jobs</button></div>
 
           <section className="source-panel">
             <div>
               <span className="eyebrow">JOB SOURCES</span>
-              <strong>Find jobs from a company</strong>
-              <p>Jobpilot currently connects to public Greenhouse job boards. You can paste a full board link or its board ID.</p>
+              <strong>Search companies and find jobs</strong>
+              <p>Search the company directory and select one or more employers. Jobpilot will check their public Greenhouse listings.</p>
             </div>
-            <details className="source-help">
-              <summary>Where do I find the link?</summary>
-              <ol>
-                <li>Open the company’s website and go to its Careers or Jobs page.</li>
-                <li>If the jobs page is hosted on Greenhouse, copy its web address.</li>
-                <li>Paste the link below. You can add multiple links separated by commas.</li>
-              </ol>
-              <p>A Greenhouse link looks like <code>boards.greenhouse.io/company-name</code>. You can also paste an individual job link. If the company uses another hiring platform, it is not supported yet.</p>
-            </details>
-            <label className="source-input-label" htmlFor="greenhouse-slugs">Company job-board links</label>
+            <label className="source-input-label" htmlFor="company-search">Company name</label>
             <div className="source-controls">
-              <input id="greenhouse-slugs" value={greenhouseSlugs} onChange={(event) => setGreenhouseSlugs(event.target.value)} aria-label="Company job-board links" aria-describedby="source-input-help" placeholder="Paste a Greenhouse board or job link" />
-              <button className="secondary-button" disabled={loadingJobs || !greenhouseSlugs.trim()} onClick={fetchLiveJobs}>{loadingJobs ? "Loading jobs…" : "Load jobs"}</button>
+              <input id="company-search" value={companyQuery} onChange={(event) => { setCompanyQuery(event.target.value); setCompanyResults([]); setDirectoryError(""); setDirectoryLoading(false); }} aria-label="Search companies" aria-describedby="source-input-help" placeholder="Start typing a company name" autoComplete="off" />
+              <button className="secondary-button" disabled={loadingJobs || (!selectedCompanies.length && !greenhouseSlugs.trim())} onClick={fetchLiveJobs}>{loadingJobs ? "Loading jobs…" : `Load jobs${selectedCompanies.length ? ` (${selectedCompanies.length} selected)` : ""}`}</button>
             </div>
-            <p id="source-input-help" className="source-input-help">Jobs are filtered using your preferred locations in Candidate profile.</p>
+            <p id="source-input-help" className="source-input-help">Type at least two letters. Job results are filtered using your preferred locations in Candidate profile.</p>
+            <p className="directory-credit">Directory data: <a href="https://github.com/outscal/OpenJobs" target="_blank" rel="noreferrer">OpenJobs</a>. Listings are checked when you load them.</p>
+            {directoryLoading && <p className="directory-status" role="status">Searching companies…</p>}
+            {directoryError && <p className="directory-error" role="alert">{directoryError}</p>}
+            {!directoryLoading && !directoryError && companyQuery.trim().length >= 2 && companyResults.length === 0 && <p className="directory-status" role="status">No Greenhouse companies found. Try another name or add a link below.</p>}
+            {companyResults.length > 0 && <ul className="company-picker-results">{companyResults.map((company) => {
+              const checked = selectedCompanies.some((item) => item.slug === company.slug);
+              return <li key={company.slug}><label><input type="checkbox" checked={checked} onChange={() => toggleCompany(company)} /><span><strong>{company.name}</strong><small>{company.slug}</small></span></label></li>;
+            })}</ul>}
+            {selectedCompanies.length > 0 && <div className="selected-companies"><span>Selected companies</span><ul>{selectedCompanies.map((company) => <li key={company.slug}>{company.name}<button type="button" aria-label={`Remove ${company.name}`} onClick={() => toggleCompany(company)}>×</button></li>)}</ul></div>}
+            <details className="source-help">
+              <summary>Can’t find a company?</summary>
+              <p>Only companies with a public Greenhouse board appear in this directory. If the company is missing, paste its Greenhouse board or job link here. Other hiring platforms are not supported yet.</p>
+              <label className="source-input-label" htmlFor="greenhouse-slugs">Greenhouse board or job link</label>
+              <input id="greenhouse-slugs" className="manual-board-input" value={greenhouseSlugs} onChange={(event) => setGreenhouseSlugs(event.target.value)} aria-label="Greenhouse board or job link" placeholder="boards.greenhouse.io/company-name" />
+            </details>
             {sourceMessage && <p className="source-message" role="status">{sourceMessage}</p>}
             {sourceErrors.length > 0 && <ul className="source-errors" role="alert">{sourceErrors.map((error) => <li key={error}>{error}</li>)}</ul>}
             <p className="source-message" role="status">{storageMessage}</p>
