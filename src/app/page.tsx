@@ -5,6 +5,7 @@ import type { ApplicationStatus, CandidateProfile, Job, PersistedState } from "@
 import { defaultProfile } from "@/lib/types";
 import { scoreJob } from "@/lib/matcher";
 import { matchesPreferredLocation } from "@/lib/locations";
+import { parseGreenhouseBoardReference } from "@/lib/greenhouse-input";
 
 const LEGACY_STORAGE_KEY = "jobpilot-local-v1";
 
@@ -126,6 +127,12 @@ export default function Home() {
   }
 
   async function fetchLiveJobs() {
+    const enteredBoards = greenhouseSlugs.split(",").map((entry) => entry.trim()).filter(Boolean);
+    const slugs = enteredBoards.map(parseGreenhouseBoardReference);
+    if (enteredBoards.length === 0 || slugs.some((slug) => slug === null)) {
+      setSourceErrors(["Paste a Greenhouse board link or board ID. Other job-board websites are not supported yet."]);
+      return;
+    }
     setLoadingJobs(true);
     setSourceMessage("");
     setSourceErrors([]);
@@ -133,14 +140,16 @@ export default function Home() {
       const response = await fetch("/api/jobs/greenhouse", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ slugs: greenhouseSlugs.split(",").map((slug) => slug.trim()).filter(Boolean) }),
+        body: JSON.stringify({ slugs }),
       });
       const result = await response.json() as { jobs?: Job[]; errors?: string[]; error?: string };
       if (!response.ok) throw new Error(result.error ?? "Could not fetch jobs.");
       setLiveJobs(result.jobs ?? []);
       setSourceErrors(result.errors ?? []);
       const matchingJobs = (result.jobs ?? []).filter((job) => matchesPreferredLocation(job.location, profile.locations));
-      setSourceMessage(`Loaded ${result.jobs?.length ?? 0} live listing${result.jobs?.length === 1 ? "" : "s"}; ${matchingJobs.length} match your preferred locations.`);
+      setSourceMessage(result.jobs?.length
+        ? `Found ${result.jobs.length} live listing${result.jobs.length === 1 ? "" : "s"}; ${matchingJobs.length} match your preferred locations.`
+        : "No open jobs were found on these company boards. Try another company’s Careers page.");
       setSelectedId(matchingJobs[0]?.id ?? "");
     } catch (error) {
       setSourceMessage(error instanceof Error ? error.message : "Could not fetch listings.");
@@ -177,7 +186,31 @@ export default function Home() {
           ) : <>
           <div className="greeting-row"><div><div className="eyebrow">{new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric" }).format(new Date()).toUpperCase()}</div><h1>Your next opportunity <span>starts here.</span></h1><p className="subheading">A focused view of live roles that match your preferences.</p></div><button className="primary-button" onClick={() => document.getElementById("greenhouse-slugs")?.focus()}><span>＋</span> Find new jobs</button></div>
 
-          <section className="source-panel"><div><strong>Search live Greenhouse listings</strong><p>Enter one or more Greenhouse board slugs, separated by commas. Results are limited to the locations in your candidate profile.</p></div><div className="source-controls"><input id="greenhouse-slugs" value={greenhouseSlugs} onChange={(event) => setGreenhouseSlugs(event.target.value)} aria-label="Greenhouse board slugs" placeholder="Greenhouse board slugs"/><button className="secondary-button" disabled={loadingJobs || !greenhouseSlugs.trim()} onClick={fetchLiveJobs}>{loadingJobs ? "Fetching…" : "Fetch listings"}</button></div>{sourceMessage && <p className="source-message" role="status">{sourceMessage}</p>}{sourceErrors.length > 0 && <ul className="source-errors">{sourceErrors.map((error) => <li key={error}>{error}</li>)}</ul>}<p className="source-message" role="status">{storageMessage}</p></section>
+          <section className="source-panel">
+            <div>
+              <span className="eyebrow">JOB SOURCES</span>
+              <strong>Find jobs from a company</strong>
+              <p>Jobpilot currently connects to public Greenhouse job boards. You can paste a full board link or its board ID.</p>
+            </div>
+            <details className="source-help">
+              <summary>Where do I find the link?</summary>
+              <ol>
+                <li>Open the company’s website and go to its Careers or Jobs page.</li>
+                <li>If the jobs page is hosted on Greenhouse, copy its web address.</li>
+                <li>Paste the link below. You can add multiple links separated by commas.</li>
+              </ol>
+              <p>A Greenhouse link looks like <code>boards.greenhouse.io/company-name</code>. You can also paste an individual job link. If the company uses another hiring platform, it is not supported yet.</p>
+            </details>
+            <label className="source-input-label" htmlFor="greenhouse-slugs">Company job-board links</label>
+            <div className="source-controls">
+              <input id="greenhouse-slugs" value={greenhouseSlugs} onChange={(event) => setGreenhouseSlugs(event.target.value)} aria-label="Company job-board links" aria-describedby="source-input-help" placeholder="Paste a Greenhouse board or job link" />
+              <button className="secondary-button" disabled={loadingJobs || !greenhouseSlugs.trim()} onClick={fetchLiveJobs}>{loadingJobs ? "Loading jobs…" : "Load jobs"}</button>
+            </div>
+            <p id="source-input-help" className="source-input-help">Jobs are filtered using your preferred locations in Candidate profile.</p>
+            {sourceMessage && <p className="source-message" role="status">{sourceMessage}</p>}
+            {sourceErrors.length > 0 && <ul className="source-errors" role="alert">{sourceErrors.map((error) => <li key={error}>{error}</li>)}</ul>}
+            <p className="source-message" role="status">{storageMessage}</p>
+          </section>
 
           <div className="stats-grid">
             <div className="stat-card"><div className="stat-label">JOBS REVIEWED</div><div className="stat-bottom"><strong>{reviewedCount}</strong><span className="stat-note">of {preferredJobs.length} live jobs in your locations</span></div></div>
@@ -191,7 +224,7 @@ export default function Home() {
             <section className="jobs-column">
               <div className="filters"><label className="search-box"><span>⌕</span><input id="job-search" placeholder="Search roles or companies..." value={query} onChange={(event) => setQuery(event.target.value)} /></label><span className="location-filter">Locations: {profile.locations || "Any"}</span></div>
               <div className="job-list">{ranked.map(({ job, score, matched }) => <article key={job.id} className={`job-card ${selected?.job.id === job.id ? "selected" : ""}`}><button type="button" className="job-card-main" aria-pressed={selected?.job.id === job.id} onClick={() => { setSelectedId(job.id); setStatus((current) => current[job.id] ? current : { ...current, [job.id]: "Needs review" }); }}><div className="job-card-top"><div className={`company-logo logo-${job.source.toLowerCase()}`}>{job.company.slice(0, 1)}</div><span className="match-tag">{score}% match</span></div><div className="job-title">{job.role}</div><div className="company-name">{job.company} <span>·</span> {job.location}</div><div className="job-meta"><span>◷ {job.posted}</span><span>⌂ {job.mode}</span><span className="source-tag">{job.source} · live</span></div></button><div className="job-card-bottom"><div className="skill-pills">{matched.slice(0, 3).map((skill) => <span key={skill}>{skill}</span>)}{matched.length > 3 && <span className="more-skills">+{matched.length - 3}</span>}</div><button type="button" className={`bookmark ${saved.includes(job.id) ? "bookmarked" : ""}`} onClick={() => setSaved((current) => current.includes(job.id) ? current.filter((id) => id !== job.id) : [...current, job.id])} aria-label={saved.includes(job.id) ? "Remove saved job" : "Save job"} aria-pressed={saved.includes(job.id)}>{saved.includes(job.id) ? "★" : "☆"}</button></div></article>)}</div>
-              {ranked.length === 0 && <div className="empty-state">{liveJobs.length === 0 ? "No live listings loaded yet. Enter a Greenhouse board slug above and fetch listings." : query ? "No live jobs match that search. Try another role or company." : `No fetched jobs match ${profile.locations || "your preferred locations"}. Edit the Candidate profile or search boards that hire there.`}</div>}
+              {ranked.length === 0 && <div className="empty-state">{liveJobs.length === 0 ? "No jobs loaded yet. Add a company job-board link above to get started." : query ? "No live jobs match that search. Try another role or company." : `No fetched jobs match ${profile.locations || "your preferred locations"}. Edit the Candidate profile or try another company board.`}</div>}
             </section>
 
             {selected ? (
