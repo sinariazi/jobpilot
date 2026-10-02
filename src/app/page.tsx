@@ -104,7 +104,7 @@ export default function Home() {
     };
   }, [profile, saved, status, liveJobs, stateLoaded]);
 
-  const preferredJobs = useMemo(() => jobs.filter((job) => matchesPreferredLocation(job.location, profile.locations)), [jobs, profile.locations]);
+  const preferredJobs = useMemo(() => jobs.filter((job) => matchesPreferredLocation(job.location, profile.locations, job.mode, job.source)), [jobs, profile.locations]);
   const ranked = useMemo(() => preferredJobs.map((job) => ({ job, ...scoreJob(job, candidateSkills), roleMatch: matchesTargetRole(job, profile.roles) }))
     .filter(({ job }) => `${job.role} ${job.company} ${job.location}`.toLowerCase().includes(query.toLowerCase()))
     .sort((a, b) => Number(b.roleMatch) - Number(a.roleMatch) || b.score - a.score), [query, candidateSkills, preferredJobs, profile.roles]);
@@ -134,7 +134,7 @@ export default function Home() {
       if (!response.ok) throw new Error(result.error ?? "Could not fetch jobs.");
       setLiveJobs(result.jobs ?? []);
       setSourceErrors(result.errors ?? []);
-      const matchingJobs = (result.jobs ?? []).filter((job) => matchesPreferredLocation(job.location, profile.locations));
+      const matchingJobs = (result.jobs ?? []).filter((job) => matchesPreferredLocation(job.location, profile.locations, job.mode, job.source));
       setSourceMessage(result.jobs?.length
         ? `Searched public job feeds and found ${result.jobs.length} listings; ${matchingJobs.length} match your preferred locations. Your target roles are ranked first.`
         : "No listings came back from the public job feeds. Try again later.");

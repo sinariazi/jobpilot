@@ -11,4 +11,14 @@ describe("preferred job locations", () => {
   it("does not match partial country names", () => {
     expect(matchesPreferredLocation("Remote Australia", "Austria")).toBe(false);
   });
+
+  it("matches remote Europe against a Europe-wide remote listing", () => {
+    expect(matchesPreferredLocation("Europe", "Vienna, Austria; Remote Europe", "Remote", "Jobicy")).toBe(true);
+    expect(matchesPreferredLocation("Vienna, Austria", "Vienna, Austria; Remote Europe", "Remote", "Arbeitnow")).toBe(true);
+    expect(matchesPreferredLocation("Remote", "Vienna, Austria; Remote Europe", "Remote", "Remotive")).toBe(true);
+  });
+
+  it("does not match a remote listing with an explicit conflicting region", () => {
+    expect(matchesPreferredLocation("United States", "Vienna, Austria; Remote Europe", "Remote", "Remotive")).toBe(false);
+  });
 });
