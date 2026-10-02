@@ -16,7 +16,7 @@ const allowedStatuses = new Set<ApplicationStatus>([
 export type LoadedState = PersistedState & { initialized: boolean };
 
 export function defaultState(): LoadedState {
-  return { profile: defaultProfile, saved: [], status: {}, liveJobs: [], initialized: false };
+  return { profile: defaultProfile, saved: [], status: {}, applicationNotes: {}, liveJobs: [], initialized: false };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -90,6 +90,8 @@ export function parsePersistedState(value: unknown): PersistedState | null {
   if (!profile || !saved || !isRecord(value.status)) return null;
   const statusEntries = Object.entries(value.status);
   if (statusEntries.length > MAX_TRACKED_JOBS || statusEntries.some(([id, status]) => !id || id.length > 300 || typeof status !== "string" || !allowedStatuses.has(status as ApplicationStatus))) return null;
+  const applicationNotes = value.applicationNotes === undefined ? {} : value.applicationNotes;
+  if (!isRecord(applicationNotes) || Object.entries(applicationNotes).length > MAX_TRACKED_JOBS || Object.entries(applicationNotes).some(([id, note]) => !id || id.length > 300 || typeof note !== "string" || note.length > 2000)) return null;
   if (value.liveJobs !== undefined && (!Array.isArray(value.liveJobs) || value.liveJobs.length > MAX_TRACKED_JOBS)) return null;
   const liveJobs = value.liveJobs === undefined ? [] : value.liveJobs.map(parseJob);
   if (liveJobs.some((job) => job === null)) return null;
@@ -97,6 +99,7 @@ export function parsePersistedState(value: unknown): PersistedState | null {
     profile,
     saved,
     status: Object.fromEntries(statusEntries) as Record<string, ApplicationStatus>,
+    applicationNotes: Object.fromEntries(Object.entries(applicationNotes)) as Record<string, string>,
     liveJobs: liveJobs as Job[],
   };
 }
