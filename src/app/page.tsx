@@ -16,6 +16,7 @@ export default function Home() {
   const [saved, setSaved] = useState<string[]>([]);
   const [status, setStatus] = useState<Record<string, ApplicationStatus>>({});
   const [profileOpen, setProfileOpen] = useState(false);
+  const [activeView, setActiveView] = useState<"overview" | "applications">("overview");
   const [liveJobs, setLiveJobs] = useState<Job[]>([]);
   const [greenhouseSlugs, setGreenhouseSlugs] = useState("stripe, linear, notion");
   const [loadingJobs, setLoadingJobs] = useState(false);
@@ -109,6 +110,13 @@ export default function Home() {
   const selected = ranked.find(({ job }) => job.id === selectedId) ?? ranked[0];
   const strongMatches = jobs.filter((job) => scoreJob(job, candidateSkills).score >= 75).length;
   const reviewedCount = Object.keys(status).length;
+  const applicationJobs = jobs.filter((job) => saved.includes(job.id) || status[job.id]);
+  const applicationGroups: Array<{ title: string; items: Job[] }> = [
+    { title: "Needs review", items: applicationJobs.filter((job) => !status[job.id] || status[job.id] === "Needs review") },
+    { title: "Approved to prepare", items: applicationJobs.filter((job) => status[job.id] === "Approved to prepare") },
+    { title: "Applied", items: applicationJobs.filter((job) => status[job.id] === "Applied") },
+    { title: "Rejected", items: applicationJobs.filter((job) => status[job.id] === "Rejected") },
+  ];
 
   function openProfile() {
     setProfileDraft(profile);
@@ -143,9 +151,9 @@ export default function Home() {
       <aside className="sidebar">
         <div className="brand"><span className="brand-mark">J</span><span>jobpilot<span className="brand-dot">.</span></span></div>
         <div className="sidebar-label">WORKSPACE</div>
-        <button className="nav-item active"><span>▦</span> Overview</button>
-        <button className="nav-item"><span>⌕</span> Job matches <b className="nav-count">{ranked.length}</b></button>
-        <button className="nav-item"><span>▤</span> Applications <span className="nav-soon">Soon</span></button>
+        <button className={`nav-item ${activeView === "overview" ? "active" : ""}`} onClick={() => setActiveView("overview")}><span>▦</span> Overview</button>
+        <button className="nav-item" onClick={() => setActiveView("overview")}><span>⌕</span> Job matches <b className="nav-count">{ranked.length}</b></button>
+        <button className={`nav-item ${activeView === "applications" ? "active" : ""}`} onClick={() => setActiveView("applications")}><span>▤</span> Applications <b className="nav-count">{applicationJobs.length}</b></button>
         <button className="nav-item" onClick={openProfile}><span>♧</span> Candidate profile</button>
         <div className="sidebar-bottom">
           <div className="local-status"><i /> Local workspace <span>●</span></div>
@@ -154,8 +162,16 @@ export default function Home() {
       </aside>
 
       <section className="main-panel">
-        <header className="topbar"><div className="breadcrumb">Workspace <span>/</span> Overview</div><div className="topbar-right"><span className="privacy-pill"><i /> LOCAL ONLY</span><button className="icon-button" aria-label="Edit candidate profile" onClick={openProfile}>⚙</button><div className="avatar small">{profile.name.split(/\s+/).map((part) => part[0]).slice(0, 2).join("").toUpperCase()}</div></div></header>
+        <header className="topbar"><div className="breadcrumb">Workspace <span>/</span> {activeView === "applications" ? "Applications" : "Overview"}</div><div className="topbar-right"><span className="privacy-pill"><i /> LOCAL ONLY</span><button className="icon-button" aria-label="Edit candidate profile" onClick={openProfile}>⚙</button><div className="avatar small">{profile.name.split(/\s+/).map((part) => part[0]).slice(0, 2).join("").toUpperCase()}</div></div></header>
         <div className="content">
+          {activeView === "applications" ? (
+            <>
+              <div className="greeting-row"><div><div className="eyebrow">YOUR JOB SEARCH</div><h1>Applications <span>tracker.</span></h1><p className="subheading">Track saved roles and move each one through your review process.</p></div><button className="primary-button" onClick={() => setActiveView("overview")}>＋ Find jobs</button></div>
+              <div className="application-summary"><strong>{applicationJobs.length}</strong><span>roles in your tracker</span><span className="summary-divider"/><span>{applicationGroups.find((group) => group.title === "Applied")?.items.length ?? 0} applied</span><span>{saved.length} saved</span></div>
+              <div className="application-board">{applicationGroups.map((group) => <section className="application-column" key={group.title}><div className="application-column-heading"><h2>{group.title}</h2><span>{group.items.length}</span></div>{group.items.length ? group.items.map((job) => <article className="application-card" key={job.id}><div className="application-company"><div className={`company-logo logo-${job.source.toLowerCase()}`}>{job.company.slice(0, 1)}</div><div><strong>{job.company}</strong><span>{job.location}</span></div></div><h3>{job.role}</h3><div className="application-card-footer"><span>{job.source}{job.isLive ? " · live" : " · sample"}</span><select aria-label={`Update ${job.company} application status`} value={status[job.id] ?? "Needs review"} onChange={(event) => setStatus((current) => ({ ...current, [job.id]: event.target.value as ApplicationStatus }))}><option>Needs review</option><option>Approved to prepare</option><option>Applied</option><option>Rejected</option></select></div></article>) : <p className="application-empty">No roles here yet.</p>}</section>)}</div>
+              <p className="application-footnote">Status changes are saved on this device. “Applied” is a manual record; Jobpilot never submits applications.</p>
+            </>
+          ) : <>
           <div className="greeting-row"><div><div className="eyebrow">FRIDAY, OCTOBER 2</div><h1>Your next opportunity <span>starts here.</span></h1><p className="subheading">A focused view of roles that fit your experience and career direction.</p></div><button className="primary-button" onClick={() => document.getElementById("greenhouse-slugs")?.focus()}><span>＋</span> Find new jobs</button></div>
 
           <section className="source-panel"><div><strong>Connect a public Greenhouse board</strong><p>Enter employer board slugs, separated by commas. Example: jobs.acme.com → <code>acme</code></p></div><div className="source-controls"><input id="greenhouse-slugs" value={greenhouseSlugs} onChange={(event) => setGreenhouseSlugs(event.target.value)} aria-label="Greenhouse board slugs" placeholder="company-slug, another-slug"/><button className="secondary-button" disabled={loadingJobs || !greenhouseSlugs.trim()} onClick={fetchLiveJobs}>{loadingJobs ? "Fetching…" : "Fetch listings"}</button></div>{sourceMessage && <p className="source-message" role="status">{sourceMessage}</p>}{sourceErrors.length > 0 && <ul className="source-errors">{sourceErrors.map((error) => <li key={error}>{error}</li>)}</ul>}<p className="source-message" role="status">{storageMessage}</p></section>
@@ -200,6 +216,7 @@ export default function Home() {
             ) : <aside className="detail-card empty-detail">Select a job to inspect its match evidence.</aside>}
           </div>
           <footer className="page-footer"><span>JOBPILOT <b>·</b> LOCAL-FIRST JOB SEARCH</span><span>Sample data · Nothing is submitted automatically</span></footer>
+          </>}
         </div>
       </section>
       {profileOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setProfileOpen(false); }}><section className="profile-modal" role="dialog" aria-modal="true" aria-labelledby="profile-title"><div className="modal-heading"><div><span className="eyebrow">YOUR LOCAL SEARCH PROFILE</span><h2 id="profile-title">Candidate profile</h2><p>These editable details are stored in a file on this device.</p></div><button className="icon-button" onClick={() => setProfileOpen(false)} aria-label="Close profile">×</button></div><label>Display name<input value={profileDraft.name} onChange={(event) => setProfileDraft({ ...profileDraft, name: event.target.value })}/></label><label>Target roles<textarea rows={2} value={profileDraft.roles} onChange={(event) => setProfileDraft({ ...profileDraft, roles: event.target.value })}/></label><label>Preferred locations<textarea rows={2} value={profileDraft.locations} onChange={(event) => setProfileDraft({ ...profileDraft, locations: event.target.value })}/></label><label>Skills <span className="field-hint">Separate skills with commas. Matching updates immediately after saving.</span><textarea rows={4} value={profileDraft.skills} onChange={(event) => setProfileDraft({ ...profileDraft, skills: event.target.value })}/></label><div className="modal-actions"><button className="secondary-button" onClick={() => setProfileDraft(defaultProfile)}>Reset demo profile</button><button className="primary-button" onClick={() => { setProfile({ ...profileDraft, name: profileDraft.name.trim() || "Candidate" }); setProfileOpen(false); }}>Save profile</button></div><p className="privacy-explainer">Local files are not encrypted. Avoid importing a real CV or storing sensitive personal data until encryption is implemented.</p></section></div>}
