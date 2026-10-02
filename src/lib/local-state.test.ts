@@ -27,9 +27,11 @@ const exampleJob: Job = {
   source: "Greenhouse",
   sourceUrl: "https://boards.greenhouse.io/example/jobs/1",
   retrievedAt: "2026-10-02T09:00:00.000Z",
+  department: "Engineering",
   skills: ["TypeScript", "React"],
   required: ["TypeScript"],
   summary: "Build a product feature.",
+  description: "What you will do:\n\nBuild and ship product features.",
   isLive: true,
 };
 

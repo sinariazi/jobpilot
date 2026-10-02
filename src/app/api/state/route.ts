@@ -3,7 +3,7 @@ import { loadLocalState, parsePersistedState, saveLocalState } from "@/lib/local
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const MAX_BODY_LENGTH = 5_000_000;
+const MAX_BODY_LENGTH = 24_000_000;
 
 export async function GET() {
   try {

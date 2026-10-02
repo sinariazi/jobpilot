@@ -66,6 +66,8 @@ function parseJob(value: unknown): Job | null {
     }
   }
   if (value.retrievedAt !== undefined && !boundedString(value.retrievedAt, 50)) return null;
+  if (value.department !== undefined && !boundedString(value.department, 500)) return null;
+  if (value.description !== undefined && (typeof value.description !== "string" || value.description.length > 8000)) return null;
   if (value.isLive !== undefined && typeof value.isLive !== "boolean") return null;
   return {
     id: (value.id as string).trim(),
@@ -75,7 +77,9 @@ function parseJob(value: unknown): Job | null {
     mode: (value.mode as string).trim(),
     posted: (value.posted as string).trim(),
     source: (value.source as string).trim(),
+    ...(typeof value.department === "string" ? { department: value.department.trim() } : {}),
     summary: (value.summary as string).trim(),
+    ...(typeof value.description === "string" ? { description: value.description.trim() } : {}),
     skills,
     required,
     ...(typeof value.sourceUrl === "string" ? { sourceUrl: value.sourceUrl } : {}),

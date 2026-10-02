@@ -6,11 +6,13 @@ export type Job = {
   mode: string;
   posted: string;
   source: string;
+  department?: string;
   sourceUrl?: string;
   retrievedAt?: string;
   skills: string[];
   required: string[];
   summary: string;
+  description?: string;
   isLive?: boolean;
 };
 
