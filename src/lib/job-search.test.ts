@@ -19,6 +19,8 @@ describe("searchPublicJobs", () => {
     expect(result.jobs.map((job) => job.source).sort()).toEqual(["Arbeitnow", "Jobicy", "Remotive"]);
     expect(result.jobs.find((job) => job.source === "Arbeitnow")?.sourceAttributionUrl).toBe("https://www.arbeitnow.com/");
     expect(result.jobs.find((job) => job.source === "Remotive")?.sourceUrl).toBe("https://remotive.com/remote-jobs/role-b");
+    expect(result.jobs.find((job) => job.source === "Remotive")?.mode).toBe("Remote · full_time");
+    expect(result.jobs.find((job) => job.source === "Jobicy")?.mode).toBe("Remote · full-time");
     expect(result.jobs.find((job) => job.source === "Jobicy")?.description).toBe("Lead a team");
     expect(result.errors).toEqual([]);
     expect(requests.filter(({ url }) => url.includes("arbeitnow")).every(({ options }) => options?.cache === "no-store" && !("next" in (options ?? {})))).toBe(true);
