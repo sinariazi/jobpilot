@@ -63,6 +63,7 @@ function parseJob(value: unknown): Job | null {
     }
   }
   if (value.retrievedAt !== undefined && !boundedString(value.retrievedAt, 50)) return null;
+  if (value.postedAt !== undefined && (!boundedString(value.postedAt, 50) || !Number.isFinite(Date.parse(value.postedAt)))) return null;
   if (value.department !== undefined && !boundedString(value.department, 500)) return null;
   if (value.description !== undefined && (typeof value.description !== "string" || value.description.length > 8000)) return null;
   return {
@@ -72,6 +73,7 @@ function parseJob(value: unknown): Job | null {
     location: (value.location as string).trim(),
     mode: (value.mode as string).trim(),
     posted: (value.posted as string).trim(),
+    ...(typeof value.postedAt === "string" ? { postedAt: value.postedAt } : {}),
     source: (value.source as string).trim(),
     ...(typeof value.department === "string" ? { department: value.department.trim() } : {}),
     summary: (value.summary as string).trim(),
