@@ -1,44 +1,27 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import type { CandidateProfile, Job } from "@/lib/types";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { ApplicationStatus, CandidateProfile, Job, PersistedState } from "@/lib/types";
+import { defaultProfile } from "@/lib/types";
 import { demoJobs } from "@/lib/jobs";
 import { scoreJob } from "@/lib/matcher";
 
-const defaultProfile: CandidateProfile = {
-  name: "Demo Candidate",
-  roles: "Full-Stack Engineer, AI Engineer, Solution Architect",
-  locations: "Vienna, Austria; Remote Europe",
-  skills: "TypeScript, React, Next.js, Node.js, PostgreSQL, AWS, Docker, Kubernetes, CI/CD, REST APIs, System design, Playwright",
-};
-
-const STORAGE_KEY = "jobpilot-local-v1";
-
-function readStoredState() {
-  if (typeof window === "undefined") return { profile: defaultProfile, saved: [] as string[], status: {} as Record<string, string> };
-  try {
-    const stored = window.localStorage.getItem(STORAGE_KEY);
-    if (!stored) return { profile: defaultProfile, saved: [] as string[], status: {} as Record<string, string> };
-    const parsed = JSON.parse(stored) as { profile?: CandidateProfile; saved?: string[]; status?: Record<string, string> };
-    return { profile: parsed.profile ?? defaultProfile, saved: parsed.saved ?? [], status: parsed.status ?? {} };
-  } catch {
-    window.localStorage.removeItem(STORAGE_KEY);
-    return { profile: defaultProfile, saved: [] as string[], status: {} as Record<string, string> };
-  }
-}
+const LEGACY_STORAGE_KEY = "jobpilot-local-v1";
 
 export default function Home() {
-  const [initialState] = useState(readStoredState);
-  const [profile, setProfile] = useState<CandidateProfile>(initialState.profile);
+  const [profile, setProfile] = useState<CandidateProfile>(defaultProfile);
   const [selectedId, setSelectedId] = useState(demoJobs[0].id);
   const [query, setQuery] = useState("");
   const [location, setLocation] = useState("All locations");
-  const [saved, setSaved] = useState<string[]>(initialState.saved);
-  const [status, setStatus] = useState<Record<string, string>>(initialState.status);
+  const [saved, setSaved] = useState<string[]>([]);
+  const [status, setStatus] = useState<Record<string, ApplicationStatus>>({});
   const [profileOpen, setProfileOpen] = useState(false);
   const [liveJobs, setLiveJobs] = useState<Job[]>([]);
   const [greenhouseSlugs, setGreenhouseSlugs] = useState("stripe, linear, notion");
   const [loadingJobs, setLoadingJobs] = useState(false);
+  const [stateLoaded, setStateLoaded] = useState(false);
+  const [storageMessage, setStorageMessage] = useState("Loading saved data from this device…");
+  const saveQueue = useRef<Promise<void>>(Promise.resolve());
   const [sourceMessage, setSourceMessage] = useState("");
   const [sourceErrors, setSourceErrors] = useState<string[]>([]);
   const [profileDraft, setProfileDraft] = useState<CandidateProfile>(defaultProfile);
@@ -50,8 +33,74 @@ export default function Home() {
   }, [liveJobs]);
 
   useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ profile, saved, status }));
-  }, [profile, saved, status]);
+    let cancelled = false;
+    async function restoreState() {
+      try {
+        const response = await fetch("/api/state", { cache: "no-store" });
+        if (!response.ok) throw new Error("Could not load the local state file.");
+        let restored = await response.json() as PersistedState & { initialized: boolean };
+        let migrated = false;
+        if (!restored.initialized) {
+          const legacyValue = window.localStorage.getItem(LEGACY_STORAGE_KEY);
+          if (legacyValue) {
+            const legacy = JSON.parse(legacyValue) as Partial<PersistedState>;
+            const migration = await fetch("/api/state", {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                profile: legacy.profile ?? defaultProfile,
+                saved: legacy.saved ?? [],
+                status: legacy.status ?? {},
+                liveJobs: [],
+              }),
+            });
+            if (!migration.ok) throw new Error("Could not move your existing browser data to the local state file.");
+            restored = await migration.json() as PersistedState & { initialized: boolean };
+            window.localStorage.removeItem(LEGACY_STORAGE_KEY);
+            migrated = true;
+          }
+        }
+        if (cancelled) return;
+        setProfile(restored.profile);
+        setSaved(restored.saved);
+        setStatus(restored.status);
+        setLiveJobs(restored.liveJobs ?? []);
+        setSelectedId(restored.liveJobs?.[0]?.id ?? demoJobs[0].id);
+        setStorageMessage(migrated ? "Existing browser data moved to a private local file." : "Saved on this device.");
+        setStateLoaded(true);
+      } catch (error) {
+        if (cancelled) return;
+        setStorageMessage(error instanceof Error ? error.message : "Could not load local data. Changes are not being saved.");
+      }
+    }
+    void restoreState();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!stateLoaded) return;
+    let cancelled = false;
+    const snapshot = { profile, saved, status, liveJobs } satisfies PersistedState;
+    const timeout = window.setTimeout(() => {
+      setStorageMessage("Saving on this device…");
+      saveQueue.current = saveQueue.current.catch(() => undefined).then(async () => {
+        const response = await fetch("/api/state", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(snapshot),
+        });
+        if (!response.ok) throw new Error("Could not save local data.");
+      }).then(() => {
+        if (!cancelled) setStorageMessage("Saved on this device.");
+      }).catch((error: unknown) => {
+        if (!cancelled) setStorageMessage(error instanceof Error ? error.message : "Could not save local data.");
+      });
+    }, 350);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+    };
+  }, [profile, saved, status, liveJobs, stateLoaded]);
 
   const ranked = useMemo(() => jobs.map((job) => ({ job, ...scoreJob(job, candidateSkills) }))
     .filter(({ job }) => `${job.role} ${job.company} ${job.location}`.toLowerCase().includes(query.toLowerCase()))
@@ -109,7 +158,7 @@ export default function Home() {
         <div className="content">
           <div className="greeting-row"><div><div className="eyebrow">FRIDAY, OCTOBER 2</div><h1>Your next opportunity <span>starts here.</span></h1><p className="subheading">A focused view of roles that fit your experience and career direction.</p></div><button className="primary-button" onClick={() => document.getElementById("greenhouse-slugs")?.focus()}><span>＋</span> Find new jobs</button></div>
 
-          <section className="source-panel"><div><strong>Connect a public Greenhouse board</strong><p>Enter employer board slugs, separated by commas. Example: jobs.acme.com → <code>acme</code></p></div><div className="source-controls"><input id="greenhouse-slugs" value={greenhouseSlugs} onChange={(event) => setGreenhouseSlugs(event.target.value)} aria-label="Greenhouse board slugs" placeholder="company-slug, another-slug"/><button className="secondary-button" disabled={loadingJobs || !greenhouseSlugs.trim()} onClick={fetchLiveJobs}>{loadingJobs ? "Fetching…" : "Fetch listings"}</button></div>{sourceMessage && <p className="source-message" role="status">{sourceMessage}</p>}{sourceErrors.length > 0 && <ul className="source-errors">{sourceErrors.map((error) => <li key={error}>{error}</li>)}</ul>}</section>
+          <section className="source-panel"><div><strong>Connect a public Greenhouse board</strong><p>Enter employer board slugs, separated by commas. Example: jobs.acme.com → <code>acme</code></p></div><div className="source-controls"><input id="greenhouse-slugs" value={greenhouseSlugs} onChange={(event) => setGreenhouseSlugs(event.target.value)} aria-label="Greenhouse board slugs" placeholder="company-slug, another-slug"/><button className="secondary-button" disabled={loadingJobs || !greenhouseSlugs.trim()} onClick={fetchLiveJobs}>{loadingJobs ? "Fetching…" : "Fetch listings"}</button></div>{sourceMessage && <p className="source-message" role="status">{sourceMessage}</p>}{sourceErrors.length > 0 && <ul className="source-errors">{sourceErrors.map((error) => <li key={error}>{error}</li>)}</ul>}<p className="source-message" role="status">{storageMessage}</p></section>
 
           <div className="stats-grid">
             <div className="stat-card"><div className="stat-label">JOBS REVIEWED <span>ⓘ</span></div><div className="stat-bottom"><strong>{reviewedCount}</strong><span className="stat-note">of {jobs.length} sample jobs</span></div><div className="mini-bars"><i/><i/><i/><i/><i/><i/><i/></div></div>
@@ -153,7 +202,7 @@ export default function Home() {
           <footer className="page-footer"><span>JOBPILOT <b>·</b> LOCAL-FIRST JOB SEARCH</span><span>Sample data · Nothing is submitted automatically</span></footer>
         </div>
       </section>
-      {profileOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setProfileOpen(false); }}><section className="profile-modal" role="dialog" aria-modal="true" aria-labelledby="profile-title"><div className="modal-heading"><div><span className="eyebrow">YOUR LOCAL SEARCH PROFILE</span><h2 id="profile-title">Candidate profile</h2><p>These editable details stay in this browser on this device.</p></div><button className="icon-button" onClick={() => setProfileOpen(false)} aria-label="Close profile">×</button></div><label>Display name<input value={profileDraft.name} onChange={(event) => setProfileDraft({ ...profileDraft, name: event.target.value })}/></label><label>Target roles<textarea rows={2} value={profileDraft.roles} onChange={(event) => setProfileDraft({ ...profileDraft, roles: event.target.value })}/></label><label>Preferred locations<textarea rows={2} value={profileDraft.locations} onChange={(event) => setProfileDraft({ ...profileDraft, locations: event.target.value })}/></label><label>Skills <span className="field-hint">Separate skills with commas. Matching updates immediately after saving.</span><textarea rows={4} value={profileDraft.skills} onChange={(event) => setProfileDraft({ ...profileDraft, skills: event.target.value })}/></label><div className="modal-actions"><button className="secondary-button" onClick={() => setProfileDraft(defaultProfile)}>Reset demo profile</button><button className="primary-button" onClick={() => { setProfile({ ...profileDraft, name: profileDraft.name.trim() || "Candidate" }); setProfileOpen(false); }}>Save profile</button></div><p className="privacy-explainer">Local storage is convenient for this prototype, but it is not encrypted. Avoid using a shared browser or storing sensitive personal data here.</p></section></div>}
+      {profileOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setProfileOpen(false); }}><section className="profile-modal" role="dialog" aria-modal="true" aria-labelledby="profile-title"><div className="modal-heading"><div><span className="eyebrow">YOUR LOCAL SEARCH PROFILE</span><h2 id="profile-title">Candidate profile</h2><p>These editable details are stored in a file on this device.</p></div><button className="icon-button" onClick={() => setProfileOpen(false)} aria-label="Close profile">×</button></div><label>Display name<input value={profileDraft.name} onChange={(event) => setProfileDraft({ ...profileDraft, name: event.target.value })}/></label><label>Target roles<textarea rows={2} value={profileDraft.roles} onChange={(event) => setProfileDraft({ ...profileDraft, roles: event.target.value })}/></label><label>Preferred locations<textarea rows={2} value={profileDraft.locations} onChange={(event) => setProfileDraft({ ...profileDraft, locations: event.target.value })}/></label><label>Skills <span className="field-hint">Separate skills with commas. Matching updates immediately after saving.</span><textarea rows={4} value={profileDraft.skills} onChange={(event) => setProfileDraft({ ...profileDraft, skills: event.target.value })}/></label><div className="modal-actions"><button className="secondary-button" onClick={() => setProfileDraft(defaultProfile)}>Reset demo profile</button><button className="primary-button" onClick={() => { setProfile({ ...profileDraft, name: profileDraft.name.trim() || "Candidate" }); setProfileOpen(false); }}>Save profile</button></div><p className="privacy-explainer">Local files are not encrypted. Avoid importing a real CV or storing sensitive personal data until encryption is implemented.</p></section></div>}
     </main>
   );
 }

@@ -20,3 +20,19 @@ export type CandidateProfile = {
   locations: string;
   skills: string;
 };
+
+export type ApplicationStatus = "Needs review" | "Approved to prepare" | "Applied" | "Rejected";
+
+export type PersistedState = {
+  profile: CandidateProfile;
+  saved: string[];
+  status: Record<string, ApplicationStatus>;
+  liveJobs: Job[];
+};
+
+export const defaultProfile: CandidateProfile = {
+  name: "Demo Candidate",
+  roles: "Full-Stack Engineer, AI Engineer, Solution Architect",
+  locations: "Remote Europe",
+  skills: "TypeScript, React, Next.js, Node.js, PostgreSQL, AWS, Docker, Kubernetes, CI/CD, REST APIs, System design, Playwright",
+};
