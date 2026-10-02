@@ -8,7 +8,7 @@ A local-first job-search assistant built with Next.js and TypeScript. It searche
 
 - Searches three broad public job feeds automatically; no company names, board slugs, or employer setup are required. Each listing links to its provider or original listing, with visible source attribution.
 - Filters listings using locations in the editable candidate profile. New profiles have no location preference until the user enters one.
-- Ranks matching target role titles first, then sorts by exact, normalized mentions of user-entered skills in the role title and description. The UI shows which skills were mentioned; this is a text overlap indicator, not a probability of getting the job.
+- Ranks target role title matches first, then skills explicitly mentioned in the job title, then overall profile skill coverage. The UI marks title evidence; the percentage is a text overlap indicator, not a probability of getting the job.
 - Imports text-based PDF, DOCX, and TXT CVs in the browser and proposes past role titles and skills for review. The CV file and extracted full text are not uploaded or saved; only fields the user accepts and then saves are written to the local profile.
 - Caches the Remotive feed for six hours in keeping with its published request guidance, the Jobicy feed for at least one hour in keeping with its polling guidance, and Arbeitnow feeds for 30 minutes.
 - Saves live listings, saved jobs, application statuses, and the candidate profile to local JSON storage.
@@ -18,7 +18,7 @@ A local-first job-search assistant built with Next.js and TypeScript. It searche
 
 ## TODO
 
-- Evaluate semantic skill matching and add explainable ranking criteria; ranking currently counts exact normalized skill mentions only.
+- Add semantic skill matching; matching currently counts exact normalized phrases only, though ranking shows and prioritizes title evidence.
 - Add a licensed, broad-coverage job search provider to find roles beyond the current public feeds and geographies; public feeds do not contain every employer or vacancy.
 - Add more job-source adapters after checking each provider's API and display/attribution terms.
 - Add further filters only when source feeds provide reliable structured fields; current filters cover posting age, inferred work mode, and available department tags.
