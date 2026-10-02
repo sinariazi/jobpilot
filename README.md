@@ -12,10 +12,10 @@ A local-first job-search assistant built with Next.js and TypeScript. It searche
 - Ranks target role title matches first, then skills explicitly mentioned in the job title, then overall profile skill coverage. The UI marks title evidence; the percentage is a text overlap indicator, not a probability of getting the job.
 - Imports text-based PDF, DOCX, and TXT CVs in the browser and proposes past role titles and skills for review. The CV file and extracted full text are not uploaded or saved; only fields the user accepts and then saves are written to the local profile.
 - Caches the Remotive feed for six hours in keeping with its published request guidance, the Jobicy feed for at least one hour in keeping with its polling guidance, and Arbeitnow feeds for 30 minutes.
-- Saves live listings, saved jobs, application statuses, and the candidate profile to local JSON storage.
-- Exports and restores a versioned JSON backup of the local profile, listings, saved jobs, and application statuses; restores are validated and require confirmation.
+- Saves live listings, saved jobs, application statuses, per-job notes, and editable cover-letter drafts to local JSON storage.
+- Exports and restores a versioned JSON backup of the local profile, listings, saved jobs, application statuses, notes, and cover-letter drafts; restores are validated and require confirmation.
 - Includes a manual application tracker with status and private per-job notes. It never submits an application.
-- Creates an editable cover-letter first draft for a selected job using its role and company, exact profile skill overlaps, and user-entered interest and experience details. Missing personal claims are shown as placeholders; drafts stay in browser memory unless copied or downloaded.
+- Creates an editable cover-letter first draft for a selected job using its role and company, exact profile skill overlaps, and user-entered interest and experience details. Missing personal claims are shown as placeholders; drafts are saved locally and included in backups.
 - Migrates prior browser-local profile and review state on first launch.
 - Lint, typecheck, Vitest, and production build run in GitHub Actions.
 
@@ -57,7 +57,7 @@ Open <http://localhost:3000>.
 
 The app stores data in `~/.jobpilot/state.json` (the current user's home directory). You can change the folder with `JOBPILOT_DATA_DIR`. Keep the app bound to `localhost`; don't expose it on your network.
 
-**Privacy:** CV parsing runs in the browser. The selected file and extracted full text are held in memory for parsing and are not uploaded or saved. If you accept suggestions and save the profile, those role and skill fields are written to the local JSON state file, which is not encrypted. Downloaded backups are also unencrypted JSON. Nothing from the candidate profile is sent to job feed providers. The old browser-local profile is moved to the local file on first launch and removed from browser storage after that succeeds.
+**Privacy:** CV parsing runs in the browser. The selected file and extracted full text are held in memory for parsing and are not uploaded or saved. If you accept suggestions and save the profile, those role and skill fields are written to the local JSON state file, which is not encrypted. Cover-letter source notes and drafts are also stored locally and in downloaded backups, which are unencrypted JSON. Nothing from the candidate profile is sent to job feed providers. The old browser-local profile is moved to the local file on first launch and removed from browser storage after that succeeds.
 
 ## Search jobs
 
@@ -69,7 +69,7 @@ The app preserves each provider's job URL and displays source attribution. Remot
 
 ## Back up or restore local data
 
-Open **Candidate profile** and use the **Data backup** controls. **Download backup** saves a versioned JSON file containing the profile, fetched listings, saved jobs, and application statuses. **Restore backup** accepts a Jobpilot backup, validates it, and asks for confirmation before replacing the current local state. Keep backup files private: they contain profile data and are not encrypted.
+Open **Candidate profile** and use the **Data backup** controls. **Download backup** saves a versioned JSON file containing the profile, fetched listings, saved jobs, application statuses, notes, and cover-letter drafts. **Restore backup** accepts a Jobpilot backup, validates it, and asks for confirmation before replacing the current local state. Keep backup files private: they contain profile data and are not encrypted.
 
 ## Development checks
 
