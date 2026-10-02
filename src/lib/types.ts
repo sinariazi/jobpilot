@@ -32,6 +32,6 @@ export type PersistedState = {
 export const defaultProfile: CandidateProfile = {
   name: "Candidate",
   roles: "",
-  locations: "Austria",
+  locations: "",
   skills: "",
 };

@@ -7,7 +7,7 @@ A local-first job-search assistant built with Next.js and TypeScript. It fetches
 ## Working now
 
 - Fetches live listings from Greenhouse board slugs entered by the user. No fake job cards or preset boards are included.
-- Filters listings using locations in the editable candidate profile. New profiles default to Austria; preferences can be changed.
+- Filters listings using locations in the editable candidate profile. New profiles have no location preference until the user enters one.
 - Sorts jobs by exact, normalized mentions of user-entered skills in the role title and description. The UI shows which entered skills were mentioned; this is a text overlap indicator, not a probability of getting the job.
 - Saves live listings, saved jobs, application statuses, and the candidate profile to local JSON storage.
 - Includes a manual application tracker. It never submits an application.
@@ -73,4 +73,4 @@ GitHub Actions runs these checks for pushes and pull requests.
 
 ## Privacy and repository contents
 
-This repository contains no seeded job listings, employer boards, or personal candidate facts. The generic profile label and Austria location are editable defaults; Austria remains the initial preference because that is the current requested profile setting. Greenhouse is the only implemented listings integration and its public API endpoint is an integration constant. Test fixtures use example values only to verify behavior. Do not commit a real CV, personal job-search profile, credentials, or `.env` files. Local state is stored outside the repository.
+This repository contains no seeded job listings, employer boards, or personal candidate facts. The generic profile label is a UI default; all candidate preferences come from the user's profile. Greenhouse is the only implemented listings integration and its public API endpoint is an integration constant. Test fixtures use example values only to verify behavior. Do not commit a real CV, personal job-search profile, credentials, or `.env` files. Local state is stored outside the repository.
