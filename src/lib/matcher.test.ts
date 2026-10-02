@@ -4,19 +4,19 @@ import type { Job } from "./types";
 
 const role: Job = {
   id: "test", company: "Example", role: "Engineer", location: "Vienna", mode: "Hybrid", posted: "Today", source: "Test",
-  skills: ["TypeScript", "Node.js", "React"], required: ["TypeScript", "Node.js"], summary: "Test role",
+  summary: "Seeking TypeScript and Node.js experience. React is helpful.",
 };
 
 describe("scoreJob", () => {
-  it("returns a transparent score with matched and missing requirements", () => {
-    expect(scoreJob(role, ["TypeScript", "React"])).toEqual({ score: 59, matched: ["TypeScript", "React"], missing: ["Node.js"] });
+  it("scores only profile skills explicitly mentioned in the job text", () => {
+    expect(scoreJob(role, ["TypeScript", "React", "Java"])).toEqual({ score: 67, matched: ["TypeScript", "React"], missing: ["Java"] });
   });
 
-  it("matches case-insensitively and treats JS suffixes consistently", () => {
-    expect(scoreJob(role, ["TYPESCRIPT", "node.js", "react"]).score).toBe(100);
+  it("matches case-insensitively and ignores punctuation differences", () => {
+    expect(scoreJob(role, ["TYPESCRIPT", "nodejs", "react"]).score).toBe(100);
   });
 
-  it("handles jobs with no skill data without dividing by zero", () => {
-    expect(scoreJob({ ...role, skills: [], required: [] }, []).score).toBe(0);
+  it("handles an empty candidate profile without dividing by zero", () => {
+    expect(scoreJob(role, []).score).toBe(0);
   });
 });

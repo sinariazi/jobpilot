@@ -18,7 +18,7 @@ async function temporaryDirectory() {
 }
 
 const exampleJob: Job = {
-  id: "gh-demo-1",
+  id: "gh-example-1",
   company: "Example Co",
   role: "Full-Stack Engineer",
   location: "Remote — Europe",
@@ -28,15 +28,12 @@ const exampleJob: Job = {
   sourceUrl: "https://boards.greenhouse.io/example/jobs/1",
   retrievedAt: "2026-10-02T09:00:00.000Z",
   department: "Engineering",
-  skills: ["TypeScript", "React"],
-  required: ["TypeScript"],
   summary: "Build a product feature.",
   description: "What you will do:\n\nBuild and ship product features.",
-  isLive: true,
 };
 
 describe("local state storage", () => {
-  it("returns demo defaults before a local state file exists", async () => {
+  it("returns default profile data before a local state file exists", async () => {
     const state = await loadLocalState(await temporaryDirectory());
     expect(state).toEqual(defaultState());
   });
@@ -44,7 +41,7 @@ describe("local state storage", () => {
   it("persists profile, reviews, saved jobs, and fetched listings between reads", async () => {
     const dataDirectory = await temporaryDirectory();
     const state: PersistedState = {
-      profile: { name: "Demo Candidate", roles: "Engineer", locations: "Vienna", skills: "TypeScript" },
+      profile: { name: "Candidate", roles: "Engineer", locations: "Vienna", skills: "TypeScript" },
       saved: [exampleJob.id],
       status: { [exampleJob.id]: "Approved to prepare" },
       liveJobs: [exampleJob],
@@ -60,7 +57,7 @@ describe("local state storage", () => {
   it("persists Greenhouse result batches larger than 500 jobs", async () => {
     const manyJobs = Array.from({ length: 711 }, (_, index) => ({
       ...exampleJob,
-      id: `gh-demo-${index}`,
+      id: `gh-example-${index}`,
       sourceUrl: `https://boards.greenhouse.io/example/jobs/${index}`,
     }));
     const dataDirectory = await temporaryDirectory();
@@ -79,7 +76,7 @@ describe("local state storage", () => {
     const base = {
       ...defaultState(),
       initialized: undefined,
-      status: { "gh-demo-1": "Submitted without confirmation" },
+      status: { "gh-example-1": "Submitted without confirmation" },
     };
     expect(parsePersistedState(base)).toBeNull();
 

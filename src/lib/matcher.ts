@@ -1,14 +1,18 @@
 import type { Job } from "./types";
 
 export function normalizeSkill(value: string) {
-  return value.toLowerCase().replace(/\.js/g, "js").trim();
+  return value.toLocaleLowerCase().replace(/\.js\b/g, "js").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 }
 
 export function scoreJob(job: Job, candidateSkills: string[]) {
-  const skills = candidateSkills.map(normalizeSkill);
-  const matched = job.skills.filter((skill) => skills.includes(normalizeSkill(skill)));
-  const missing = job.required.filter((skill) => !skills.includes(normalizeSkill(skill)));
-  const requiredMatches = job.required.length - missing.length;
-  const score = Math.round((matched.length / Math.max(job.skills.length, 1)) * 55 + (requiredMatches / Math.max(job.required.length, 1)) * 45);
+  const skills = [...new Set(candidateSkills.map((skill) => skill.trim()).filter(Boolean))];
+  const posting = normalizeSkill(`${job.role} ${job.summary} ${job.description ?? ""}`);
+  const containsPhrase = (skill: string) => {
+    const phrase = normalizeSkill(skill);
+    return phrase.length > 0 && ` ${posting} `.includes(` ${phrase} `);
+  };
+  const matched = skills.filter(containsPhrase);
+  const missing = skills.filter((skill) => !containsPhrase(skill));
+  const score = Math.round((matched.length / Math.max(skills.length, 1)) * 100);
   return { score, matched, missing };
 }

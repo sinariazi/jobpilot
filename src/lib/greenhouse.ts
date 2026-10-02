@@ -33,12 +33,6 @@ export function descriptionText(value: string) {
     .slice(0, 8000);
 }
 
-function inferSkills(text: string) {
-  const catalog = ["TypeScript", "JavaScript", "React", "Next.js", "Node.js", "Python", "PostgreSQL", "AWS", "Azure", "Docker", "Kubernetes", "Kafka", "CI/CD", "GraphQL", "REST APIs", "Playwright", "LLM", "AI", "system design", "observability"];
-  const lowered = text.toLowerCase();
-  return catalog.filter((skill) => lowered.includes(skill.toLowerCase()));
-}
-
 export async function fetchGreenhouseJobs(slugs: string[]): Promise<{ jobs: Job[]; errors: string[] }> {
   const fetchedAt = new Date().toISOString();
   const results = await Promise.all(slugs.map(async (rawSlug) => {
@@ -55,7 +49,6 @@ export async function fetchGreenhouseJobs(slugs: string[]): Promise<{ jobs: Job[
       const jobs = (payload.jobs ?? []).map((posting): Job => {
         const description = descriptionText(posting.content ?? "");
         const summary = description.slice(0, 1200) || "Open the original posting for the full role description.";
-        const text = `${posting.title} ${summary}`;
         return {
           id: `gh-${slug}-${posting.id}`,
           company: slug.replace(/-/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase()),
@@ -67,11 +60,8 @@ export async function fetchGreenhouseJobs(slugs: string[]): Promise<{ jobs: Job[
           ...(posting.departments?.length ? { department: posting.departments.map((department) => department.name).join(", ").slice(0, 500) } : {}),
           sourceUrl: posting.absolute_url,
           retrievedAt: fetchedAt,
-          skills: inferSkills(text),
-          required: inferSkills(`${posting.title} ${description}`).slice(0, 6),
           summary,
           ...(description ? { description } : {}),
-          isLive: true,
         };
       });
       return { jobs, error: "" };

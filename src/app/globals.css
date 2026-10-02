@@ -13,3 +13,5 @@
 @media(max-width:1050px){.application-board{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:520px){.application-board{grid-template-columns:1fr}.application-summary{flex-wrap:wrap;gap:7px}.application-card-footer select{max-width:165px}}
 .job-card-main{display:block;width:100%;padding:0;border:0;background:transparent;color:inherit;text-align:left}.job-card-main:focus-visible,.bookmark:focus-visible{outline:2px solid #65a47a;outline-offset:3px;border-radius:4px}.bookmark{border:0;background:transparent;cursor:pointer}.detail-status-label{display:flex;align-items:center;gap:7px;font-size:8px;color:#7b857e}.detail-status-label select{max-width:155px;border:1px solid #dde5df;border-radius:5px;padding:8px 9px;background:#fff;color:#496653;font-size:9px}.job-description-text{white-space:pre-line;line-height:1.65!important;color:#59645c!important}
+.location-filter{align-self:center;color:#667169;font-size:9px;white-space:nowrap;padding:0 10px}
+.match-caveat{font-size:8px!important;color:#8a8478!important;margin-top:7px!important}

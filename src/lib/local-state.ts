@@ -54,9 +54,6 @@ function parseJob(value: unknown): Job | null {
     ["mode", 100], ["posted", 100], ["source", 100], ["summary", 4000],
   ];
   if (!textFields.every(([key, max]) => boundedString(value[key], max))) return null;
-  const skills = parseStringArray(value.skills, 80, 100);
-  const required = parseStringArray(value.required, 80, 100);
-  if (!skills || !required) return null;
   if (value.sourceUrl !== undefined) {
     if (!boundedString(value.sourceUrl, 2048)) return null;
     try {
@@ -68,7 +65,6 @@ function parseJob(value: unknown): Job | null {
   if (value.retrievedAt !== undefined && !boundedString(value.retrievedAt, 50)) return null;
   if (value.department !== undefined && !boundedString(value.department, 500)) return null;
   if (value.description !== undefined && (typeof value.description !== "string" || value.description.length > 8000)) return null;
-  if (value.isLive !== undefined && typeof value.isLive !== "boolean") return null;
   return {
     id: (value.id as string).trim(),
     company: (value.company as string).trim(),
@@ -80,11 +76,8 @@ function parseJob(value: unknown): Job | null {
     ...(typeof value.department === "string" ? { department: value.department.trim() } : {}),
     summary: (value.summary as string).trim(),
     ...(typeof value.description === "string" ? { description: value.description.trim() } : {}),
-    skills,
-    required,
     ...(typeof value.sourceUrl === "string" ? { sourceUrl: value.sourceUrl } : {}),
     ...(typeof value.retrievedAt === "string" ? { retrievedAt: value.retrievedAt } : {}),
-    ...(typeof value.isLive === "boolean" ? { isLive: value.isLive } : {}),
   };
 }
 

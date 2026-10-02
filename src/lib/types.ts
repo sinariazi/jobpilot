@@ -9,11 +9,8 @@ export type Job = {
   department?: string;
   sourceUrl?: string;
   retrievedAt?: string;
-  skills: string[];
-  required: string[];
   summary: string;
   description?: string;
-  isLive?: boolean;
 };
 
 export type CandidateProfile = {
@@ -33,8 +30,8 @@ export type PersistedState = {
 };
 
 export const defaultProfile: CandidateProfile = {
-  name: "Demo Candidate",
-  roles: "Full-Stack Engineer, AI Engineer, Solution Architect",
-  locations: "Remote Europe",
-  skills: "TypeScript, React, Next.js, Node.js, PostgreSQL, AWS, Docker, Kubernetes, CI/CD, REST APIs, System design, Playwright",
+  name: "Candidate",
+  roles: "",
+  locations: "Austria",
+  skills: "",
 };
