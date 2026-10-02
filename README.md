@@ -14,7 +14,7 @@ A local-first job-search assistant built with Next.js and TypeScript. It searche
 - Caches the Remotive feed for six hours in keeping with its published request guidance, the Jobicy feed for at least one hour in keeping with its polling guidance, and Arbeitnow feeds for 30 minutes.
 - Saves live listings, saved jobs, application statuses, and the candidate profile to local JSON storage.
 - Exports and restores a versioned JSON backup of the local profile, listings, saved jobs, and application statuses; restores are validated and require confirmation.
-- Includes a manual application tracker. It never submits an application.
+- Includes a manual application tracker with status and private per-job notes. It never submits an application.
 - Migrates prior browser-local profile and review state on first launch.
 - Lint, typecheck, Vitest, and production build run in GitHub Actions.
 
@@ -31,6 +31,7 @@ A local-first job-search assistant built with Next.js and TypeScript. It searche
 - Draft application documents for user review; AI-assisted drafting is not implemented.
 - Add accessibility and responsive-layout review across supported browsers and screen sizes.
 - Add automated end-to-end tests for the main job search, details, profile, and tracking workflows.
+- Add optional follow-up dates and reminders to the application tracker.
 - Decide whether application submission will remain manual; the current tracker never submits applications.
 
 The app fetches public listings from its configured feeds and applies location and role preferences locally. Candidate profile fields are not sent to feed providers. Feed coverage, update frequency, and availability depend on each provider.
