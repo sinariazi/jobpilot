@@ -2,7 +2,7 @@
 
 A local-first job-search assistant built with Next.js and TypeScript. It searches multiple public job feeds automatically, filters listings against the candidate's preferred locations, and ranks roles using profile target titles and transparent skill matching.
 
-> **Current scope:** Jobpilot searches public feeds from Arbeitnow (Europe-wide), Remotive (remote), and Jobicy (Europe remote). This improves discovery without requiring employer names, but it does not cover every employer or job board. CV import extracts reviewable suggestions from text-based files in the browser. It does not generate application documents, submit applications, or use an AI model. The profile, review decisions, saved jobs, and fetched listings are stored in a local file on this device.
+> **Current scope:** Jobpilot searches public feeds from Arbeitnow (Europe-wide), Remotive (remote), and Jobicy (Europe remote). This improves discovery without requiring employer names, but it does not cover every employer or job board. CV import extracts reviewable suggestions from text-based files in the browser. The app creates an editable cover-letter template from the selected role, exact profile skill overlaps, and details entered by the user; it does not use an AI model or submit applications. The profile, review decisions, saved jobs, and fetched listings are stored in a local file on this device.
 
 ## Working now
 
@@ -15,6 +15,7 @@ A local-first job-search assistant built with Next.js and TypeScript. It searche
 - Saves live listings, saved jobs, application statuses, and the candidate profile to local JSON storage.
 - Exports and restores a versioned JSON backup of the local profile, listings, saved jobs, and application statuses; restores are validated and require confirmation.
 - Includes a manual application tracker with status and private per-job notes. It never submits an application.
+- Creates an editable cover-letter first draft for a selected job using its role and company, exact profile skill overlaps, and user-entered interest and experience details. Missing personal claims are shown as placeholders; drafts stay in browser memory unless copied or downloaded.
 - Migrates prior browser-local profile and review state on first launch.
 - Lint, typecheck, Vitest, and production build run in GitHub Actions.
 
@@ -28,7 +29,7 @@ A local-first job-search assistant built with Next.js and TypeScript. It searche
 - Add OCR for scanned/image-only CVs; current parsing requires selectable text.
 - Improve layout-aware parsing for multi-column CVs and more heading formats; extraction is heuristic and suggestions require user review.
 - Encrypt local profile and tracker data, which can include sensitive details accepted from a CV.
-- Draft application documents for user review; AI-assisted drafting is not implemented.
+- Add tailored CV generation and richer application document editing; current cover-letter drafting is a local template and does not use AI.
 - Add accessibility and responsive-layout review across supported browsers and screen sizes.
 - Add automated end-to-end tests for the main job search, details, profile, and tracking workflows.
 - Add optional follow-up dates and reminders to the application tracker.
