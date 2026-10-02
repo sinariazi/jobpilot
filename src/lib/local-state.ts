@@ -5,6 +5,7 @@ import type { ApplicationStatus, CandidateProfile, Job, PersistedState } from ".
 import { defaultProfile } from "./types";
 
 const STORAGE_VERSION = 1;
+const MAX_TRACKED_JOBS = 2_000;
 const allowedStatuses = new Set<ApplicationStatus>([
   "Needs review",
   "Approved to prepare",
@@ -86,11 +87,11 @@ function parseJob(value: unknown): Job | null {
 export function parsePersistedState(value: unknown): PersistedState | null {
   if (!isRecord(value)) return null;
   const profile = parseProfile(value.profile);
-  const saved = parseStringArray(value.saved, 500, 300);
+  const saved = parseStringArray(value.saved, MAX_TRACKED_JOBS, 300);
   if (!profile || !saved || !isRecord(value.status)) return null;
   const statusEntries = Object.entries(value.status);
-  if (statusEntries.length > 500 || statusEntries.some(([id, status]) => !id || id.length > 300 || typeof status !== "string" || !allowedStatuses.has(status as ApplicationStatus))) return null;
-  if (value.liveJobs !== undefined && (!Array.isArray(value.liveJobs) || value.liveJobs.length > 500)) return null;
+  if (statusEntries.length > MAX_TRACKED_JOBS || statusEntries.some(([id, status]) => !id || id.length > 300 || typeof status !== "string" || !allowedStatuses.has(status as ApplicationStatus))) return null;
+  if (value.liveJobs !== undefined && (!Array.isArray(value.liveJobs) || value.liveJobs.length > MAX_TRACKED_JOBS)) return null;
   const liveJobs = value.liveJobs === undefined ? [] : value.liveJobs.map(parseJob);
   if (liveJobs.some((job) => job === null)) return null;
   return {

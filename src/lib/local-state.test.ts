@@ -55,6 +55,19 @@ describe("local state storage", () => {
     }
   });
 
+  it("accepts Greenhouse result batches larger than 500 jobs", () => {
+    const manyJobs = Array.from({ length: 711 }, (_, index) => ({
+      ...exampleJob,
+      id: `gh-demo-${index}`,
+      sourceUrl: `https://boards.greenhouse.io/example/jobs/${index}`,
+    }));
+    const parsed = parsePersistedState({
+      ...defaultState(),
+      liveJobs: manyJobs,
+    });
+    expect(parsed?.liveJobs).toHaveLength(711);
+  });
+
   it("rejects invalid review states and unsafe job posting URLs", () => {
     const base = {
       ...defaultState(),
