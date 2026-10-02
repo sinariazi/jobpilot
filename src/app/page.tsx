@@ -7,8 +7,10 @@ import { matchesTargetRole, scoreJob } from "@/lib/matcher";
 import { matchesPreferredLocation } from "@/lib/locations";
 import { matchesDepartment, matchesPostedWithin, matchesWorkMode, type PostedWithin, type WorkMode } from "@/lib/job-filters";
 import type { CvSuggestions } from "@/lib/cv-parser";
+import { createBackup, parseBackup } from "@/lib/backup";
 
 const LEGACY_STORAGE_KEY = "jobpilot-local-v1";
+const MAX_BACKUP_BYTES = 23_000_000;
 
 export default function Home() {
   const [profile, setProfile] = useState<CandidateProfile>(defaultProfile);
@@ -27,6 +29,7 @@ export default function Home() {
   const [stateLoaded, setStateLoaded] = useState(false);
   const [storageMessage, setStorageMessage] = useState("Loading saved data from this device…");
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
+  const backupInput = useRef<HTMLInputElement>(null);
   const [sourceMessage, setSourceMessage] = useState("");
   const [sourceErrors, setSourceErrors] = useState<string[]>([]);
   const [profileDraft, setProfileDraft] = useState<CandidateProfile>(defaultProfile);
@@ -35,6 +38,8 @@ export default function Home() {
   const [cvParsing, setCvParsing] = useState(false);
   const [cvError, setCvError] = useState("");
   const [cvMessage, setCvMessage] = useState("");
+  const [backupMessage, setBackupMessage] = useState("");
+  const [backupBusy, setBackupBusy] = useState(false);
   const [includeCvRoles, setIncludeCvRoles] = useState(true);
   const [includeCvSkills, setIncludeCvSkills] = useState(true);
   const candidateSkills = useMemo(() => profile.skills.split(",").map((skill) => skill.trim()).filter(Boolean), [profile.skills]);
@@ -163,6 +168,68 @@ export default function Home() {
       setCvError(error instanceof Error ? error.message : "Could not read this CV.");
     } finally {
       setCvParsing(false);
+    }
+  }
+
+  function downloadBackup() {
+    const backup = createBackup({ profile, saved, status, liveJobs });
+    const url = URL.createObjectURL(new Blob([backup], { type: "application/json" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `jobpilot-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setBackupMessage("Backup downloaded. Store the file somewhere safe; it contains your local profile and job tracking data.");
+  }
+
+  async function restoreBackup(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (!file) return;
+    if (file.size > MAX_BACKUP_BYTES) {
+      setBackupMessage("This backup is too large to restore (maximum 23 MB).");
+      return;
+    }
+    let restoredState: PersistedState | null;
+    try {
+      restoredState = parseBackup(await file.text());
+    } catch {
+      setBackupMessage("Could not read the selected backup file.");
+      return;
+    }
+    if (!restoredState) {
+      setBackupMessage("This file is not a valid Jobpilot backup or uses an unsupported backup version.");
+      return;
+    }
+    if (!window.confirm("Restore this backup? It will replace the profile, saved jobs, application statuses, and fetched listings on this device.")) {
+      setBackupMessage("Restore cancelled. Your current data was not changed.");
+      return;
+    }
+    setBackupBusy(true);
+    setBackupMessage("Validating and restoring backup…");
+    const operation = saveQueue.current.catch(() => undefined).then(async () => {
+      const response = await fetch("/api/state", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(restoredState),
+      });
+      const result = await response.json() as PersistedState & { initialized?: boolean; error?: string };
+      if (!response.ok) throw new Error(result.error ?? "The backup data did not pass validation.");
+      setProfile(result.profile);
+      setSaved(result.saved);
+      setStatus(result.status);
+      setLiveJobs(result.liveJobs);
+      setSelectedId(result.liveJobs[0]?.id ?? "");
+      setStorageMessage("Backup restored and saved on this device.");
+    });
+    saveQueue.current = operation.then(() => undefined, () => undefined);
+    try {
+      await operation;
+      setBackupMessage("Backup restored successfully.");
+    } catch (error) {
+      setBackupMessage(error instanceof Error ? error.message : "Could not restore this backup.");
+    } finally {
+      setBackupBusy(false);
     }
   }
 
@@ -299,7 +366,7 @@ export default function Home() {
           </>}
         </div>
       </section>
-      {profileOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setProfileOpen(false); }}><section className="profile-modal" role="dialog" aria-modal="true" aria-labelledby="profile-title"><div className="modal-heading"><div><span className="eyebrow">YOUR LOCAL SEARCH PROFILE</span><h2 id="profile-title">Candidate profile</h2><p>These editable details are stored in a file on this device.</p></div><button className="icon-button" onClick={() => setProfileOpen(false)} aria-label="Close profile">×</button></div><section className="cv-import" aria-labelledby="cv-import-title"><div className="cv-import-heading"><div><h3 id="cv-import-title">Import from CV</h3><p>Extract role titles and skills locally, then review suggestions before saving your profile.</p></div><span className="local-only-tag">ON THIS DEVICE</span></div><label className="cv-file-label" htmlFor="cv-file">{cvParsing ? "Reading CV…" : "Choose a CV file"}<input id="cv-file" type="file" accept=".pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain" onChange={(event) => void parseSelectedCv(event)} disabled={cvParsing}/></label><p className="cv-file-hint">PDF, DOCX, or TXT · up to 12 MB · Scanned PDFs need OCR (not implemented yet)</p>{cvError && <p className="cv-error" role="alert">{cvError}</p>}{cvMessage && <p className="cv-message" role="status">{cvMessage}</p>}{cvSuggestions && <div className="cv-preview"><strong className="cv-file-name">{cvFileName}</strong>{cvSuggestions.pageCount && <span className="cv-page-count">{cvSuggestions.pageCount} PDF pages</span>}<label className="cv-option"><input type="checkbox" checked={includeCvRoles} onChange={(event) => setIncludeCvRoles(event.target.checked)}/> Add past role titles as target role suggestions <small>(review before saving)</small></label><textarea aria-label="Role titles extracted from CV" rows={2} value={cvSuggestions.roles} onChange={(event) => setCvSuggestions({ ...cvSuggestions, roles: event.target.value })} placeholder="No role titles detected"/><label className="cv-option"><input type="checkbox" checked={includeCvSkills} onChange={(event) => setIncludeCvSkills(event.target.checked)}/> Add extracted skills</label><textarea aria-label="Skills extracted from CV" rows={3} value={cvSuggestions.skills} onChange={(event) => setCvSuggestions({ ...cvSuggestions, skills: event.target.value })} placeholder="No skills detected"/>{cvSuggestions.notes.map((note) => <p className="cv-file-hint" key={note}>{note}</p>)}<p className="cv-file-hint">CV addresses are not imported as preferred job locations. Your source file and extracted text are not uploaded or stored by this importer.</p><button type="button" className="secondary-button" onClick={applyCvSuggestions} disabled={(!includeCvRoles || !cvSuggestions.roles) && (!includeCvSkills || !cvSuggestions.skills)}>Add selected suggestions to profile draft</button></div>}</section><label>Display name<input value={profileDraft.name} onChange={(event) => setProfileDraft({ ...profileDraft, name: event.target.value })}/></label><label>Target roles<span className="field-hint">Enter role titles separated by commas, semicolons, or new lines. Matching titles are ranked first.</span><textarea rows={2} value={profileDraft.roles} onChange={(event) => setProfileDraft({ ...profileDraft, roles: event.target.value })}/></label><label>Preferred locations<span className="field-hint">Only jobs matching these work-location preferences are shown. Use semicolons for multiple options. CV addresses are not used.</span><textarea rows={2} value={profileDraft.locations} onChange={(event) => setProfileDraft({ ...profileDraft, locations: event.target.value })}/></label><label>Skills <span className="field-hint">Enter skills separated by commas. Ranking checks for exact mentions in each posting.</span><textarea rows={4} value={profileDraft.skills} onChange={(event) => setProfileDraft({ ...profileDraft, skills: event.target.value })}/></label><div className="modal-actions"><button className="secondary-button" onClick={() => setProfileDraft(defaultProfile)}>Reset default profile</button><button className="primary-button" onClick={() => { setProfile({ ...profileDraft, name: profileDraft.name.trim() || "Candidate" }); setProfileOpen(false); }}>Save profile</button></div><p className="privacy-explainer">The CV itself is parsed in your browser and is not saved. Role and skill suggestions you accept are stored in the local profile file, which is not encrypted.</p></section></div>}
+      {profileOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setProfileOpen(false); }}><section className="profile-modal" role="dialog" aria-modal="true" aria-labelledby="profile-title"><div className="modal-heading"><div><span className="eyebrow">YOUR LOCAL SEARCH PROFILE</span><h2 id="profile-title">Candidate profile</h2><p>These editable details are stored in a file on this device.</p></div><button className="icon-button" onClick={() => setProfileOpen(false)} aria-label="Close profile">×</button></div><section className="cv-import" aria-labelledby="cv-import-title"><div className="cv-import-heading"><div><h3 id="cv-import-title">Import from CV</h3><p>Extract role titles and skills locally, then review suggestions before saving your profile.</p></div><span className="local-only-tag">ON THIS DEVICE</span></div><label className="cv-file-label" htmlFor="cv-file">{cvParsing ? "Reading CV…" : "Choose a CV file"}<input id="cv-file" type="file" accept=".pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain" onChange={(event) => void parseSelectedCv(event)} disabled={cvParsing}/></label><p className="cv-file-hint">PDF, DOCX, or TXT · up to 12 MB · Scanned PDFs need OCR (not implemented yet)</p>{cvError && <p className="cv-error" role="alert">{cvError}</p>}{cvMessage && <p className="cv-message" role="status">{cvMessage}</p>}{cvSuggestions && <div className="cv-preview"><strong className="cv-file-name">{cvFileName}</strong>{cvSuggestions.pageCount && <span className="cv-page-count">{cvSuggestions.pageCount} PDF pages</span>}<label className="cv-option"><input type="checkbox" checked={includeCvRoles} onChange={(event) => setIncludeCvRoles(event.target.checked)}/> Add past role titles as target role suggestions <small>(review before saving)</small></label><textarea aria-label="Role titles extracted from CV" rows={2} value={cvSuggestions.roles} onChange={(event) => setCvSuggestions({ ...cvSuggestions, roles: event.target.value })} placeholder="No role titles detected"/><label className="cv-option"><input type="checkbox" checked={includeCvSkills} onChange={(event) => setIncludeCvSkills(event.target.checked)}/> Add extracted skills</label><textarea aria-label="Skills extracted from CV" rows={3} value={cvSuggestions.skills} onChange={(event) => setCvSuggestions({ ...cvSuggestions, skills: event.target.value })} placeholder="No skills detected"/>{cvSuggestions.notes.map((note) => <p className="cv-file-hint" key={note}>{note}</p>)}<p className="cv-file-hint">CV addresses are not imported as preferred job locations. Your source file and extracted text are not uploaded or stored by this importer.</p><button type="button" className="secondary-button" onClick={applyCvSuggestions} disabled={(!includeCvRoles || !cvSuggestions.roles) && (!includeCvSkills || !cvSuggestions.skills)}>Add selected suggestions to profile draft</button></div>}</section><label>Display name<input value={profileDraft.name} onChange={(event) => setProfileDraft({ ...profileDraft, name: event.target.value })}/></label><label>Target roles<span className="field-hint">Enter role titles separated by commas, semicolons, or new lines. Matching titles are ranked first.</span><textarea rows={2} value={profileDraft.roles} onChange={(event) => setProfileDraft({ ...profileDraft, roles: event.target.value })}/></label><label>Preferred locations<span className="field-hint">Only jobs matching these work-location preferences are shown. Use semicolons for multiple options. CV addresses are not used.</span><textarea rows={2} value={profileDraft.locations} onChange={(event) => setProfileDraft({ ...profileDraft, locations: event.target.value })}/></label><label>Skills <span className="field-hint">Enter skills separated by commas. Ranking checks for exact mentions in each posting.</span><textarea rows={4} value={profileDraft.skills} onChange={(event) => setProfileDraft({ ...profileDraft, skills: event.target.value })}/></label><div className="modal-actions"><button className="secondary-button" onClick={() => setProfileDraft(defaultProfile)}>Reset default profile</button><button className="primary-button" onClick={() => { setProfile({ ...profileDraft, name: profileDraft.name.trim() || "Candidate" }); setProfileOpen(false); }}>Save profile</button></div><section className="data-backup" aria-label="Profile and job data backup"><div><strong>Data backup</strong><p>Download a copy of your profile and job tracker, or restore a previous backup.</p></div><div className="data-backup-actions"><button type="button" className="secondary-button" onClick={downloadBackup}>Download backup</button><button type="button" className="secondary-button" onClick={() => backupInput.current?.click()} disabled={backupBusy}>{backupBusy ? "Restoring…" : "Restore backup"}</button><input ref={backupInput} className="visually-hidden" type="file" accept="application/json,.json" aria-label="Choose Jobpilot backup file" onChange={(event) => void restoreBackup(event)}/></div>{backupMessage && <p role="status">{backupMessage}</p>}</section><p className="privacy-explainer">The CV itself is parsed in your browser and is not saved. Role and skill suggestions you accept are stored in the local profile file, which is not encrypted.</p></section></div>}
     </main>
   );
 }
