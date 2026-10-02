@@ -5,6 +5,7 @@ import type { ApplicationStatus, CandidateProfile, Job, PersistedState } from "@
 import { defaultProfile } from "@/lib/types";
 import { matchesTargetRole, scoreJob } from "@/lib/matcher";
 import { matchesPreferredLocation } from "@/lib/locations";
+import type { CvSuggestions } from "@/lib/cv-parser";
 
 const LEGACY_STORAGE_KEY = "jobpilot-local-v1";
 
@@ -24,6 +25,13 @@ export default function Home() {
   const [sourceMessage, setSourceMessage] = useState("");
   const [sourceErrors, setSourceErrors] = useState<string[]>([]);
   const [profileDraft, setProfileDraft] = useState<CandidateProfile>(defaultProfile);
+  const [cvSuggestions, setCvSuggestions] = useState<CvSuggestions | null>(null);
+  const [cvFileName, setCvFileName] = useState("");
+  const [cvParsing, setCvParsing] = useState(false);
+  const [cvError, setCvError] = useState("");
+  const [cvMessage, setCvMessage] = useState("");
+  const [includeCvRoles, setIncludeCvRoles] = useState(true);
+  const [includeCvSkills, setIncludeCvSkills] = useState(true);
   const candidateSkills = useMemo(() => profile.skills.split(",").map((skill) => skill.trim()).filter(Boolean), [profile.skills]);
   const jobs = useMemo(() => {
     const unique = new Map<string, Job>();
@@ -121,7 +129,50 @@ export default function Home() {
 
   function openProfile() {
     setProfileDraft(profile);
+    setCvSuggestions(null);
+    setCvFileName("");
+    setCvError("");
+    setCvMessage("");
     setProfileOpen(true);
+  }
+
+  async function parseSelectedCv(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (!file) return;
+    setCvParsing(true);
+    setCvError("");
+    setCvMessage("");
+    try {
+      const { parseCvFile } = await import("@/lib/cv-parser");
+      const suggestions = await parseCvFile(file);
+      setCvSuggestions(suggestions);
+      setCvFileName(file.name);
+      setCvMessage("Text extracted in this browser. The CV was not uploaded or saved.");
+    } catch (error) {
+      setCvSuggestions(null);
+      setCvFileName("");
+      setCvError(error instanceof Error ? error.message : "Could not read this CV.");
+    } finally {
+      setCvParsing(false);
+    }
+  }
+
+  function applyCvSuggestions() {
+    if (!cvSuggestions) return;
+    const merge = (current: string, added: string) => {
+      const values = [...current.split(/[,;\n|]+/), ...added.split(/[,;\n|]+/)]
+        .map((value) => value.trim())
+        .filter(Boolean);
+      const unique = new Map(values.map((value) => [value.toLocaleLowerCase(), value]));
+      return [...unique.values()].join(", ");
+    };
+    setProfileDraft((current) => ({
+      ...current,
+      ...(includeCvRoles && cvSuggestions.roles ? { roles: merge(current.roles, cvSuggestions.roles) } : {}),
+      ...(includeCvSkills && cvSuggestions.skills ? { skills: merge(current.skills, cvSuggestions.skills) } : {}),
+    }));
+    setCvMessage("Suggestions added to the profile draft. Review them, then choose Save profile to keep the changes.");
   }
 
   async function fetchLiveJobs() {
@@ -232,7 +283,7 @@ export default function Home() {
           </>}
         </div>
       </section>
-      {profileOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setProfileOpen(false); }}><section className="profile-modal" role="dialog" aria-modal="true" aria-labelledby="profile-title"><div className="modal-heading"><div><span className="eyebrow">YOUR LOCAL SEARCH PROFILE</span><h2 id="profile-title">Candidate profile</h2><p>These editable details are stored in a file on this device.</p></div><button className="icon-button" onClick={() => setProfileOpen(false)} aria-label="Close profile">×</button></div><label>Display name<input value={profileDraft.name} onChange={(event) => setProfileDraft({ ...profileDraft, name: event.target.value })}/></label><label>Target roles<span className="field-hint">Enter role titles separated by commas, semicolons, or new lines. Matching titles are ranked first.</span><textarea rows={2} value={profileDraft.roles} onChange={(event) => setProfileDraft({ ...profileDraft, roles: event.target.value })}/></label><label>Preferred locations<span className="field-hint">Only jobs matching these locations are shown. Separate options with semicolons.</span><textarea rows={2} value={profileDraft.locations} onChange={(event) => setProfileDraft({ ...profileDraft, locations: event.target.value })}/></label><label>Skills <span className="field-hint">Enter skills separated by commas. Ranking checks for exact mentions in each posting.</span><textarea rows={4} value={profileDraft.skills} onChange={(event) => setProfileDraft({ ...profileDraft, skills: event.target.value })}/></label><div className="modal-actions"><button className="secondary-button" onClick={() => setProfileDraft(defaultProfile)}>Reset default profile</button><button className="primary-button" onClick={() => { setProfile({ ...profileDraft, name: profileDraft.name.trim() || "Candidate" }); setProfileOpen(false); }}>Save profile</button></div><p className="privacy-explainer">Local files are not encrypted. Avoid importing a real CV or storing sensitive personal data until encryption is implemented.</p></section></div>}
+      {profileOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setProfileOpen(false); }}><section className="profile-modal" role="dialog" aria-modal="true" aria-labelledby="profile-title"><div className="modal-heading"><div><span className="eyebrow">YOUR LOCAL SEARCH PROFILE</span><h2 id="profile-title">Candidate profile</h2><p>These editable details are stored in a file on this device.</p></div><button className="icon-button" onClick={() => setProfileOpen(false)} aria-label="Close profile">×</button></div><section className="cv-import" aria-labelledby="cv-import-title"><div className="cv-import-heading"><div><h3 id="cv-import-title">Import from CV</h3><p>Extract role titles and skills locally, then review suggestions before saving your profile.</p></div><span className="local-only-tag">ON THIS DEVICE</span></div><label className="cv-file-label" htmlFor="cv-file">{cvParsing ? "Reading CV…" : "Choose a CV file"}<input id="cv-file" type="file" accept=".pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain" onChange={(event) => void parseSelectedCv(event)} disabled={cvParsing}/></label><p className="cv-file-hint">PDF, DOCX, or TXT · up to 12 MB · Scanned PDFs need OCR (not implemented yet)</p>{cvError && <p className="cv-error" role="alert">{cvError}</p>}{cvMessage && <p className="cv-message" role="status">{cvMessage}</p>}{cvSuggestions && <div className="cv-preview"><strong className="cv-file-name">{cvFileName}</strong>{cvSuggestions.pageCount && <span className="cv-page-count">{cvSuggestions.pageCount} PDF pages</span>}<label className="cv-option"><input type="checkbox" checked={includeCvRoles} onChange={(event) => setIncludeCvRoles(event.target.checked)}/> Add past role titles as target role suggestions <small>(review before saving)</small></label><textarea aria-label="Role titles extracted from CV" rows={2} value={cvSuggestions.roles} onChange={(event) => setCvSuggestions({ ...cvSuggestions, roles: event.target.value })} placeholder="No role titles detected"/><label className="cv-option"><input type="checkbox" checked={includeCvSkills} onChange={(event) => setIncludeCvSkills(event.target.checked)}/> Add extracted skills</label><textarea aria-label="Skills extracted from CV" rows={3} value={cvSuggestions.skills} onChange={(event) => setCvSuggestions({ ...cvSuggestions, skills: event.target.value })} placeholder="No skills detected"/>{cvSuggestions.notes.map((note) => <p className="cv-file-hint" key={note}>{note}</p>)}<p className="cv-file-hint">CV addresses are not imported as preferred job locations. Your source file and extracted text are not uploaded or stored by this importer.</p><button type="button" className="secondary-button" onClick={applyCvSuggestions} disabled={(!includeCvRoles || !cvSuggestions.roles) && (!includeCvSkills || !cvSuggestions.skills)}>Add selected suggestions to profile draft</button></div>}</section><label>Display name<input value={profileDraft.name} onChange={(event) => setProfileDraft({ ...profileDraft, name: event.target.value })}/></label><label>Target roles<span className="field-hint">Enter role titles separated by commas, semicolons, or new lines. Matching titles are ranked first.</span><textarea rows={2} value={profileDraft.roles} onChange={(event) => setProfileDraft({ ...profileDraft, roles: event.target.value })}/></label><label>Preferred locations<span className="field-hint">Only jobs matching these work-location preferences are shown. Use semicolons for multiple options. CV addresses are not used.</span><textarea rows={2} value={profileDraft.locations} onChange={(event) => setProfileDraft({ ...profileDraft, locations: event.target.value })}/></label><label>Skills <span className="field-hint">Enter skills separated by commas. Ranking checks for exact mentions in each posting.</span><textarea rows={4} value={profileDraft.skills} onChange={(event) => setProfileDraft({ ...profileDraft, skills: event.target.value })}/></label><div className="modal-actions"><button className="secondary-button" onClick={() => setProfileDraft(defaultProfile)}>Reset default profile</button><button className="primary-button" onClick={() => { setProfile({ ...profileDraft, name: profileDraft.name.trim() || "Candidate" }); setProfileOpen(false); }}>Save profile</button></div><p className="privacy-explainer">The CV itself is parsed in your browser and is not saved. Role and skill suggestions you accept are stored in the local profile file, which is not encrypted.</p></section></div>}
     </main>
   );
 }
