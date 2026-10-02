@@ -47,12 +47,21 @@ export default function Home() {
   const [includeCvSkills, setIncludeCvSkills] = useState(true);
   const [coverLetterOpen, setCoverLetterOpen] = useState(false);
   const [coverLetterMessage, setCoverLetterMessage] = useState("");
+  const [aiDraftAvailable, setAiDraftAvailable] = useState(false);
+  const [aiDrafting, setAiDrafting] = useState(false);
+  const [aiConsent, setAiConsent] = useState(false);
   const candidateSkills = useMemo(() => profile.skills.split(",").map((skill) => skill.trim()).filter(Boolean), [profile.skills]);
   const jobs = useMemo(() => {
     const unique = new Map<string, Job>();
     liveJobs.forEach((job) => unique.set(job.sourceUrl ?? job.id, job));
     return [...unique.values()];
   }, [liveJobs]);
+
+  function selectJob(jobId: string) {
+    setSelectedId(jobId);
+    setAiConsent(false);
+    setCoverLetterMessage("");
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -90,7 +99,7 @@ export default function Home() {
         setApplicationNotes(restored.applicationNotes ?? {});
         setCoverLetterDrafts(restored.coverLetterDrafts ?? {});
         setLiveJobs(restored.liveJobs ?? []);
-        setSelectedId(restored.liveJobs?.[0]?.id ?? "");
+        selectJob(restored.liveJobs?.[0]?.id ?? "");
         setStorageMessage(migrated ? "Existing browser data moved to a private local file." : "Saved on this device.");
         setStateLoaded(true);
       } catch (error) {
@@ -99,6 +108,15 @@ export default function Home() {
       }
     }
     void restoreState();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/application/draft", { cache: "no-store" })
+      .then((response) => response.json() as Promise<{ available?: boolean }>)
+      .then((result) => { if (!cancelled) setAiDraftAvailable(result.available === true); })
+      .catch(() => { if (!cancelled) setAiDraftAvailable(false); });
     return () => { cancelled = true; };
   }, []);
 
@@ -204,6 +222,37 @@ export default function Home() {
     setCoverLetterMessage("Draft created. Review every statement and replace any placeholders before use.");
   }
 
+  async function generateAiCoverLetter() {
+    if (!selected || !aiConsent || aiDrafting) return;
+    setAiDrafting(true);
+    setCoverLetterMessage("Drafting with the configured AI provider…");
+    try {
+      const response = await fetch("/api/application/draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          job: {
+            company: selected.job.company,
+            role: selected.job.role,
+            location: selected.job.location,
+            description: selected.job.description ?? selected.job.summary,
+          },
+          candidate: { name: profile.name, skills: profile.skills },
+          interest: selectedCoverLetter?.interest ?? "",
+          evidence: selectedCoverLetter?.evidence ?? "",
+        }),
+      });
+      const result = await response.json() as { draft?: string; error?: string };
+      if (!response.ok || !result.draft) throw new Error(result.error ?? "The AI provider returned no draft.");
+      updateSelectedCoverLetter({ draft: result.draft });
+      setCoverLetterMessage("AI draft created and saved locally. Verify every claim before use.");
+    } catch (error) {
+      setCoverLetterMessage(error instanceof Error ? error.message : "Could not create the AI draft.");
+    } finally {
+      setAiDrafting(false);
+    }
+  }
+
   function updateSelectedCoverLetter(patch: Partial<CoverLetterDraftRecord>) {
     if (!selected) return;
     setCoverLetterDrafts((current) => ({
@@ -277,7 +326,7 @@ export default function Home() {
       setApplicationNotes(result.applicationNotes ?? {});
       setCoverLetterDrafts(result.coverLetterDrafts ?? {});
       setLiveJobs(result.liveJobs);
-      setSelectedId(result.liveJobs[0]?.id ?? "");
+      selectJob(result.liveJobs[0]?.id ?? "");
       setStorageMessage("Backup restored and saved on this device.");
     });
     saveQueue.current = operation.then(() => undefined, () => undefined);
@@ -323,7 +372,7 @@ export default function Home() {
         ? `Searched public job feeds and found ${result.jobs.length} listings; ${matchingJobs.length} match your preferred locations. Your target roles are ranked first.`
         : "No listings came back from the public job feeds. Try again later.");
       setSourceErrors(result.errors ?? []);
-      setSelectedId(matchingJobs[0]?.id ?? "");
+      selectJob(matchingJobs[0]?.id ?? "");
     } catch (error) {
       setSourceMessage(error instanceof Error ? error.message : "Could not fetch listings.");
     } finally {
@@ -393,7 +442,7 @@ export default function Home() {
                 <span className="location-filter">Locations: {profile.locations || "Any"}</span>
               </div>
               {filteredRanked.length > 0 ? <>
-                <div className="job-list">{visibleJobs.map(({ job, score, matched, titleMatched }) => <article key={job.id} className={`job-card ${selected?.job.id === job.id ? "selected" : ""}`}><button type="button" className="job-card-main" aria-pressed={selected?.job.id === job.id} onClick={() => { setSelectedId(job.id); setStatus((current) => current[job.id] ? current : { ...current, [job.id]: "Needs review" }); }}><div className="job-card-top"><div className={`company-logo logo-${job.source.toLowerCase()}`}>{job.company.slice(0, 1)}</div><span className="match-tag">{score}% match</span></div><div className="job-title">{job.role}</div><div className="company-name">{job.company} <span>·</span> {job.location}</div><div className="job-meta"><span>◷ {job.posted}</span><span>⌂ {job.mode}</span><span className="source-tag">{job.source} · feed</span></div></button><div className="job-card-bottom"><div className="skill-pills">{matched.slice(0, 3).map((skill) => <span className={titleMatched.includes(skill) ? "skill-in-title" : ""} key={skill}>{skill}{titleMatched.includes(skill) && <small>title</small>}</span>)}{matched.length > 3 && <span className="more-skills">+{matched.length - 3}</span>}</div><button type="button" className={`bookmark ${saved.includes(job.id) ? "bookmarked" : ""}`} onClick={() => setSaved((current) => current.includes(job.id) ? current.filter((id) => id !== job.id) : [...current, job.id])} aria-label={saved.includes(job.id) ? "Remove saved job" : "Save job"} aria-pressed={saved.includes(job.id)}>{saved.includes(job.id) ? "★" : "☆"}</button></div></article>)}</div>
+                <div className="job-list">{visibleJobs.map(({ job, score, matched, titleMatched }) => <article key={job.id} className={`job-card ${selected?.job.id === job.id ? "selected" : ""}`}><button type="button" className="job-card-main" aria-pressed={selected?.job.id === job.id} onClick={() => { selectJob(job.id); setStatus((current) => current[job.id] ? current : { ...current, [job.id]: "Needs review" }); }}><div className="job-card-top"><div className={`company-logo logo-${job.source.toLowerCase()}`}>{job.company.slice(0, 1)}</div><span className="match-tag">{score}% match</span></div><div className="job-title">{job.role}</div><div className="company-name">{job.company} <span>·</span> {job.location}</div><div className="job-meta"><span>◷ {job.posted}</span><span>⌂ {job.mode}</span><span className="source-tag">{job.source} · feed</span></div></button><div className="job-card-bottom"><div className="skill-pills">{matched.slice(0, 3).map((skill) => <span className={titleMatched.includes(skill) ? "skill-in-title" : ""} key={skill}>{skill}{titleMatched.includes(skill) && <small>title</small>}</span>)}{matched.length > 3 && <span className="more-skills">+{matched.length - 3}</span>}</div><button type="button" className={`bookmark ${saved.includes(job.id) ? "bookmarked" : ""}`} onClick={() => setSaved((current) => current.includes(job.id) ? current.filter((id) => id !== job.id) : [...current, job.id])} aria-label={saved.includes(job.id) ? "Remove saved job" : "Save job"} aria-pressed={saved.includes(job.id)}>{saved.includes(job.id) ? "★" : "☆"}</button></div></article>)}</div>
                 {visibleJobs.length < filteredRanked.length && <button className="load-more" onClick={() => setVisibleCount((count) => count + 25)}>Show more jobs <span>({filteredRanked.length - visibleJobs.length} remaining)</span></button>}
               </> : <div className="empty-state">{liveJobs.length === 0 ? "No jobs loaded yet. Select “Search jobs now” to check public job feeds." : ranked.length === 0 ? query ? "No live jobs match that search. Try another role or company." : `No fetched jobs match ${profile.locations || "your preferred locations"}. Update your preferred locations or try searching the feeds again.` : "No jobs match these filters. Try a different date, work mode, or department."}</div>}
             </section>
@@ -419,10 +468,12 @@ export default function Home() {
                   <section className="cover-letter-draft" key={selected.job.id}>
                   <div className="cover-letter-heading"><div><h4>Cover letter draft</h4><p>Build an editable first draft for this role.</p></div><button type="button" className="secondary-button" onClick={() => setCoverLetterOpen((open) => !open)}>{coverLetterOpen ? "Close" : "Create draft"}</button></div>
                   {coverLetterOpen && <>
-                    <p className="cover-letter-help">This local template uses the selected job, exact profile skill overlaps, and your details below. It does not generate facts. Review and edit it before use.</p>
+                    <p className="cover-letter-help">Add a reason and a specific, truthful experience example. AI drafting uses the configured OpenAI API; the offline template remains available as a fallback. Review every claim before use.</p>
                     <label>Why are you interested in this role or company?<textarea rows={2} maxLength={2000} value={selectedCoverLetter?.interest ?? ""} onChange={(event) => updateSelectedCoverLetter({ interest: event.target.value })} placeholder="Add a specific reason…" /></label>
                     <label>Relevant example and outcome from your experience<textarea rows={2} maxLength={4000} value={selectedCoverLetter?.evidence ?? ""} onChange={(event) => updateSelectedCoverLetter({ evidence: event.target.value })} placeholder="Describe your contribution and the result…" /></label>
-                    <button type="button" className="primary-button cover-letter-generate" onClick={buildCoverLetter}>Generate editable draft</button>
+                    <label className="ai-consent"><input type="checkbox" checked={aiConsent} onChange={(event) => setAiConsent(event.target.checked)} disabled={!aiDraftAvailable || aiDrafting}/> I agree to send this job’s details, my name and skills, and the notes above to OpenAI for drafting. The CV file is not sent.</label>
+                    {!aiDraftAvailable && <p className="cover-letter-help">AI is not configured. Add the server-side OpenAI settings described in the README; the offline draft can still be used.</p>}
+                    <div className="cover-letter-actions"><button type="button" className="primary-button cover-letter-generate" onClick={() => void generateAiCoverLetter()} disabled={!aiDraftAvailable || !aiConsent || aiDrafting}>{aiDrafting ? "Drafting…" : "Generate with AI"}</button><button type="button" className="secondary-button cover-letter-generate" onClick={buildCoverLetter}>Use offline template</button></div>
                     {selectedCoverLetter?.draft && <><label>Draft text<textarea rows={11} maxLength={20000} value={selectedCoverLetter.draft} onChange={(event) => updateSelectedCoverLetter({ draft: event.target.value })} /></label><div className="cover-letter-actions"><button type="button" className="secondary-button" onClick={() => void copyCoverLetter()}>Copy</button><button type="button" className="secondary-button" onClick={downloadCoverLetter}>Download .txt</button></div><p className="cover-letter-help">Saved on this device · Updated {new Date(selectedCoverLetter.updatedAt).toLocaleString()}</p></>}
                     {coverLetterMessage && <p className="cover-letter-message" role="status">{coverLetterMessage}</p>}
                   </>}
