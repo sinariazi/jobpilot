@@ -49,6 +49,10 @@ export default function Home() {
   const [coverLetterMessage, setCoverLetterMessage] = useState("");
   const [localAiModels, setLocalAiModels] = useState<string[]>([]);
   const [selectedAiModel, setSelectedAiModel] = useState("");
+  const [localAiConnected, setLocalAiConnected] = useState<boolean | null>(null);
+  const [localAiRuntimeVersion, setLocalAiRuntimeVersion] = useState("");
+  const [localAiModelDetails, setLocalAiModelDetails] = useState<Record<string, { details?: { family?: string; parameterSize?: string; quantizationLevel?: string } }>>({});
+  const [checkingLocalAi, setCheckingLocalAi] = useState(false);
   const [localAiStatus, setLocalAiStatus] = useState("Checking for Ollama on this laptop…");
   const [aiDrafting, setAiDrafting] = useState(false);
   const candidateSkills = useMemo(() => profile.skills.split(",").map((skill) => skill.trim()).filter(Boolean), [profile.skills]);
@@ -111,19 +115,40 @@ export default function Home() {
     return () => { cancelled = true; };
   }, []);
 
+  async function refreshLocalAiStatus(showChecking = true) {
+    if (showChecking) setCheckingLocalAi(true);
+    try {
+      const response = await fetch("/api/application/draft", { cache: "no-store" });
+      if (!response.ok) throw new Error("Could not check the local AI service.");
+      const result = await response.json() as {
+        connected?: boolean;
+        available?: boolean;
+        models?: Array<string | { name: string; details?: { family?: string; parameterSize?: string; quantizationLevel?: string } }>;
+        preferredModel?: string;
+        runtimeVersion?: string;
+        message?: string;
+      };
+      const names = (result.models ?? []).map((model) => typeof model === "string" ? model : model.name);
+      const details = Object.fromEntries((result.models ?? []).filter((model): model is Exclude<typeof model, string> => typeof model !== "string").map((model) => [model.name, { details: model.details }]));
+      setLocalAiModels(names);
+      setLocalAiModelDetails(details);
+      setLocalAiConnected(result.connected ?? Boolean(result.available));
+      setLocalAiRuntimeVersion(result.runtimeVersion ?? "");
+      setSelectedAiModel((current) => current && names.includes(current) ? current : result.preferredModel && names.includes(result.preferredModel) ? result.preferredModel : names[0] ?? "");
+      setLocalAiStatus(result.message ?? (names.length ? "Ollama is connected and a local model is ready." : "Ollama is connected, but no models are installed."));
+    } catch (error) {
+      setLocalAiModels([]);
+      setLocalAiModelDetails({});
+      setLocalAiConnected(false);
+      setLocalAiRuntimeVersion("");
+      setLocalAiStatus(error instanceof Error ? error.message : "Could not check for local Ollama models.");
+    } finally {
+      if (showChecking) setCheckingLocalAi(false);
+    }
+  }
+
   useEffect(() => {
-    let cancelled = false;
-    void fetch("/api/application/draft", { cache: "no-store" })
-      .then((response) => response.json() as Promise<{ available?: boolean; models?: string[]; preferredModel?: string; message?: string }>)
-      .then((result) => {
-        if (cancelled) return;
-        const models = result.models ?? [];
-        setLocalAiModels(models);
-        setSelectedAiModel((current) => current && models.includes(current) ? current : result.preferredModel && models.includes(result.preferredModel) ? result.preferredModel : models[0] ?? "");
-        setLocalAiStatus(result.message ?? (models.length ? "Local Ollama model ready on this laptop." : ""));
-      })
-      .catch(() => { if (!cancelled) { setLocalAiModels([]); setLocalAiStatus("Could not check for local Ollama models."); } });
-    return () => { cancelled = true; };
+    void Promise.resolve().then(() => refreshLocalAiStatus(false));
   }, []);
 
   useEffect(() => {
@@ -429,6 +454,16 @@ export default function Home() {
             {sourceMessage && <p className="source-message" role="status">{sourceMessage}</p>}
             {sourceErrors.length > 0 && <ul className="source-errors" role="status">{sourceErrors.map((error) => <li key={error}>{error}</li>)}</ul>}
             <p className="source-message" role="status">{storageMessage}</p>
+          </section>
+
+          <section className={`local-ai-panel ${localAiConnected === null ? "ai-checking" : localAiConnected ? "ai-connected" : "ai-disconnected"}`} aria-labelledby="local-ai-title" aria-live="polite">
+            <div className="local-ai-heading"><div><span className="eyebrow">ON-DEVICE AI</span><h2 id="local-ai-title">Local AI status</h2><p>Ollama runs the model on this laptop. Profile and job text stay with the local app.</p></div><button type="button" className="secondary-button" onClick={() => void refreshLocalAiStatus()} disabled={checkingLocalAi}>{checkingLocalAi ? "Checking…" : "↻ Refresh status"}</button></div>
+            <div className="local-ai-facts">
+              <div><span>Connection</span><strong className="ai-connection"><i />{localAiConnected === null ? "Checking" : localAiConnected ? "Connected" : "Not connected"}</strong></div>
+              <div><span>Ollama version</span><strong>{localAiRuntimeVersion ? `v${localAiRuntimeVersion}` : localAiConnected ? "Version unavailable" : "—"}</strong></div>
+              <div><span>Selected model</span><strong>{selectedAiModel || "No model selected"}</strong><small>{selectedAiModel && localAiModelDetails[selectedAiModel]?.details ? [localAiModelDetails[selectedAiModel].details?.family, localAiModelDetails[selectedAiModel].details?.parameterSize, localAiModelDetails[selectedAiModel].details?.quantizationLevel].filter(Boolean).join(" · ") : selectedAiModel ? "Installed locally · version shown in model tag" : "Install a model with Ollama, then refresh"}</small></div>
+            </div>
+            {localAiStatus && <p className="local-ai-message" role="status">{localAiStatus}</p>}
           </section>
 
           <div className="stats-grid">
