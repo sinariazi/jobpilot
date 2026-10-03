@@ -64,7 +64,44 @@ The app stores data in `~/.jobpilot/state.json` (the current user's home directo
 
 ## Local AI setup
 
-Install [Ollama](https://ollama.com/download) on the same laptop as Jobpilot and start it. Download a model that fits your laptop using Ollama, for example `ollama pull <model-name>`. Jobpilot automatically lists models installed in Ollama; choose one in the cover-letter draft panel. No model name is hardcoded, no API key is required, and model inference runs locally. If Ollama uses a non-default local port, set `OLLAMA_BASE_URL` in `.env.local` (copy `.env.example` first), then restart Jobpilot. Jobpilot accepts loopback URLs only and will not send candidate data to a remote Ollama host. Model speed and output quality depend on the model and laptop hardware.
+### 1. Install and start Ollama
+
+Download Ollama for your operating system from [ollama.com/download](https://ollama.com/download), install it, and open the Ollama app. Leave it running while you use Jobpilot. Ollama is the local program that loads and runs the AI model on your laptop.
+
+### 2. Download a model
+
+Open Terminal (on macOS, open **Applications → Utilities → Terminal**) and run this example:
+
+```bash
+ollama pull qwen3:4b
+```
+
+This downloads the model to your laptop. You can choose another model from the [Ollama model library](https://ollama.com/library); larger models can require more disk space and memory. After downloading, check that Ollama can see it:
+
+```bash
+ollama ls
+```
+
+The model name shown by `ollama list` is the name Jobpilot will show you.
+
+### 3. Start Jobpilot and select the model
+
+In the Jobpilot project folder, start the app if it is not already running:
+
+```bash
+npm run dev
+```
+
+Open <http://localhost:3000>, search for jobs, select one, and open **Create draft** in the job details. Choose the installed model from **Local AI model**, enter your interest and a true example from your experience, then select **Generate on this laptop**. Jobpilot saves the draft locally; review it before using it.
+
+### If Jobpilot cannot see the model
+
+1. Make sure the Ollama app is open and still running.
+2. In Terminal, run `ollama ls` and confirm the model appears. If it does not, repeat the `ollama pull <model-name>` command using the model name from the [Ollama library](https://ollama.com/library).
+3. Reload Jobpilot so it checks Ollama again. The model picker lists only models Ollama has installed.
+4. If you changed Ollama's default local address or port, copy `.env.example` to `.env.local`, set `OLLAMA_BASE_URL` to Ollama's **local loopback** address, and restart Jobpilot. Jobpilot rejects remote addresses to keep candidate text on your laptop.
+
+No AI API key or hosted AI account is needed. Jobpilot sends the selected job details, your profile name and skills, and the notes you enter to Ollama on this laptop. It does not send the CV file or full CV text to the model. Job discovery still needs an internet connection. Model speed and output quality depend on your model and laptop hardware.
 
 ## Search jobs
 
