@@ -16,18 +16,33 @@ const input = {
 
 describe("local application draft API", () => {
   it("lists models installed in the local Ollama service", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ models: [{ name: "local-model:latest" }, { name: "another-model" }] }), { status: 200 }));
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ models: [{ name: "local-model:latest", size: 1_000, digest: "abc", details: { family: "llama", parameter_size: "8B", quantization_level: "Q4_K_M" } }, { name: "another-model" }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ version: "0.12.3" }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     const response = await GET();
-    expect(await response.json()).toMatchObject({ available: true, models: ["local-model:latest", "another-model"] });
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("http://127.0.0.1:11434/api/tags");
+    expect(await response.json()).toMatchObject({
+      connected: true,
+      available: true,
+      runtimeVersion: "0.12.3",
+      models: [{ name: "local-model:latest", size: 1_000, digest: "abc", details: { family: "llama", parameterSize: "8B", quantizationLevel: "Q4_K_M" } }, { name: "another-model" }],
+    });
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["http://127.0.0.1:11434/api/tags", "http://127.0.0.1:11434/api/version"]);
+  });
+
+  it("distinguishes a running Ollama service without an installed model", async () => {
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ models: [] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ version: "0.12.3" }), { status: 200 })));
+    const response = await GET();
+    expect(await response.json()).toMatchObject({ connected: true, available: false, models: [], runtimeVersion: "0.12.3" });
   });
 
   it("reports the local model service unavailable when Ollama is stopped", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("connection refused")));
     const response = await GET();
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ available: false, models: [] });
+    expect(await response.json()).toMatchObject({ connected: false, available: false, models: [] });
   });
 
   it("refuses non-loopback inference endpoints", async () => {
