@@ -50,12 +50,34 @@ function parseRequest(value: unknown): DraftRequest | null {
   };
 }
 
-async function readInstalledModels(baseUrl: string) {
+type InstalledModel = {
+  name: string;
+  modifiedAt?: string;
+  size?: number;
+  digest?: string;
+  details?: { family?: string; parameterSize?: string; quantizationLevel?: string };
+};
+
+async function readInstalledModels(baseUrl: string): Promise<InstalledModel[]> {
   const response = await fetch(`${baseUrl}/api/tags`, { cache: "no-store", signal: AbortSignal.timeout(2_000) });
   if (!response.ok) throw new Error("Ollama is unavailable.");
   const payload: unknown = await response.json();
   if (!isRecord(payload) || !Array.isArray(payload.models)) throw new Error("Ollama returned an invalid model list.");
-  return payload.models.flatMap((model) => isRecord(model) && typeof model.name === "string" ? [model.name] : []);
+  return payload.models.flatMap((model): InstalledModel[] => {
+    if (!isRecord(model) || typeof model.name !== "string") return [];
+    const details = isRecord(model.details) ? model.details : undefined;
+    return [{
+      name: model.name,
+      ...(typeof model.modified_at === "string" ? { modifiedAt: model.modified_at } : {}),
+      ...(typeof model.size === "number" ? { size: model.size } : {}),
+      ...(typeof model.digest === "string" ? { digest: model.digest } : {}),
+      ...(details ? { details: {
+        ...(typeof details.family === "string" ? { family: details.family } : {}),
+        ...(typeof details.parameter_size === "string" ? { parameterSize: details.parameter_size } : {}),
+        ...(typeof details.quantization_level === "string" ? { quantizationLevel: details.quantization_level } : {}),
+      } } : {}),
+    }];
+  });
 }
 
 export async function GET() {
@@ -63,10 +85,18 @@ export async function GET() {
   if (!baseUrl) return Response.json({ available: false, models: [], message: "Configure OLLAMA_BASE_URL to a loopback Ollama address." }, { headers: { "Cache-Control": "no-store" } });
   try {
     const models = await readInstalledModels(baseUrl);
+    let runtimeVersion: string | undefined;
+    try {
+      const response = await fetch(`${baseUrl}/api/version`, { cache: "no-store", signal: AbortSignal.timeout(2_000) });
+      const payload: unknown = response.ok ? await response.json() : null;
+      if (isRecord(payload) && typeof payload.version === "string") runtimeVersion = payload.version;
+    } catch {
+      // Older Ollama releases may not expose the version endpoint; model status remains valid.
+    }
     const preferredModel = process.env.OLLAMA_MODEL;
-    return Response.json({ available: models.length > 0, models, ...(preferredModel ? { preferredModel } : {}), ...(!models.length ? { message: "Ollama is running, but no models are installed." } : {}) }, { headers: { "Cache-Control": "no-store" } });
+    return Response.json({ connected: true, available: models.length > 0, models, ...(runtimeVersion ? { runtimeVersion } : {}), ...(preferredModel ? { preferredModel } : {}), ...(!models.length ? { message: "Ollama is connected, but no models are installed." } : {}) }, { headers: { "Cache-Control": "no-store" } });
   } catch {
-    return Response.json({ available: false, models: [], message: "Ollama is not reachable on this laptop. Start Ollama and try again." }, { headers: { "Cache-Control": "no-store" } });
+    return Response.json({ connected: false, available: false, models: [], message: "Ollama is not reachable on this laptop. Start Ollama and try again." }, { headers: { "Cache-Control": "no-store" } });
   }
 }
 
@@ -91,7 +121,7 @@ export async function POST(request: Request) {
 
   try {
     const installedModels = await readInstalledModels(baseUrl);
-    if (!installedModels.includes(input.model)) return Response.json({ error: "That model is not installed in Ollama. Choose an installed model or download it with Ollama first." }, { status: 400 });
+    if (!installedModels.some((model) => model.name === input.model)) return Response.json({ error: "That model is not installed in Ollama. Choose an installed model or download it with Ollama first." }, { status: 400 });
     const upstream = await fetch(`${baseUrl}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
