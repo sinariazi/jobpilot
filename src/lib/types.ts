@@ -38,6 +38,18 @@ export type CoverLetterDraftRecord = {
   updatedAt: string;
 };
 
+export type MatchReview = {
+  jobId: string;
+  company: string;
+  role: string;
+  model: string;
+  cohortKey: string;
+  score: number;
+  predictedRelevant: boolean;
+  reviewedRelevant: boolean;
+  reviewedAt: string;
+};
+
 export type PersistedState = {
   profile: CandidateProfile;
   saved: string[];
@@ -45,6 +57,8 @@ export type PersistedState = {
   applicationNotes?: Record<string, string>;
   applicationFollowUps?: Record<string, string>;
   coverLetterDrafts?: Record<string, CoverLetterDraftRecord>;
+  matchReviews?: MatchReview[];
+  matchCohortKey?: string;
   liveJobs: Job[];
 };
 
