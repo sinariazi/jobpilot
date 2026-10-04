@@ -35,6 +35,11 @@ describe("matchesTargetRole", () => {
   it("does not mark roles when no target roles are configured", () => {
     expect(matchesTargetRole(role, "  ")).toBe(false);
   });
+
+  it("recognizes closely related title wording without matching unrelated titles", () => {
+    expect(matchesTargetRole({ ...role, role: "Staff Software Engineer" }, "Senior Software Engineer")).toBe(true);
+    expect(matchesTargetRole({ ...role, role: "Senior Product Manager" }, "Solution Architect")).toBe(false);
+  });
 });
 
 describe("profile relevance filter", () => {
