@@ -2,14 +2,14 @@
 
 A local-first job-search assistant built with Next.js and TypeScript. It searches multiple public job feeds automatically, filters listings against the candidate's preferred locations and profile evidence, and explains which target roles and skills matched.
 
-> **Current scope:** Jobpilot is an early-stage, local-first job-search and application-preparation agent. It searches public feeds from Arbeitnow (Europe-wide), Remotive (remote), and Jobicy (Europe remote), but does not cover every employer or vacancy. With a CV loaded and Ollama running locally, the selected model assesses job fit and gives evidence-based explanations. CV parsing runs in the browser; extracted text is sent only to Ollama on this laptop for matching. Jobpilot does not yet tailor CVs or submit applications.
+> **Current scope:** Jobpilot is an early-stage, local-first job-search and application-preparation agent. It searches public feeds from Arbeitnow (Europe-wide), Remotive (remote), and Jobicy (Europe remote), but does not cover every employer or vacancy. With a CV loaded and Ollama running locally, the selected model assesses job fit and gives evidence-based explanations. CV parsing runs in the browser; extracted text is sent only to Ollama on this laptop for profile analysis and job matching. Jobpilot does not yet tailor CVs or submit applications.
 
 ## Working now
 
 - Searches three broad public job feeds automatically; no company names, board slugs, or employer setup are required. Each listing links to its provider or original listing, with visible source attribution.
 - Filters listings using locations in the editable candidate profile. An empty location means any location; an unqualified “Remote” listing is not assumed to be available in a specific country.
 - Filters loaded listings by keywords, posting age, work mode, and department when those feed details are available; sorts by best match, newest, or company name. Without a successful CV assessment, “best match” prioritizes target-role matches and exact skill evidence. The fallback percentage measures skill overlap only, not overall fit. Results appear in batches of 25; **Show more** reveals additional jobs already fetched.
-- Imports text-based PDF, DOCX, and TXT CVs in the browser and proposes past role titles and skills for review. The selected file and full text are not saved. Accepted profile suggestions are stored locally.
+- Imports text-based PDF, DOCX, and TXT CVs in the browser. When local Ollama is available, it analyzes the CV, shows a summary and evidence, and automatically fills and saves target roles and skills in the local profile. Name and preferred location are not inferred. The selected file and full text remain in memory and are not saved.
 - When a CV and local Ollama model are available, semantically assesses up to 60 location-eligible jobs per search in batches of four, using at most the first 30,000 CV text characters for responsiveness. Results include a relevance decision, fit estimate, and the CV evidence behind the match; no CV text is stored.
 - Without local AI matching, hides listings without an exact profile signal: a target-role match, a profile skill in the title, or at least one (for profiles with one or two skills) / two (for larger profiles) skills in the title or description. Keyword percentages are text overlap indicators, not probabilities of getting a job.
 - Caches the Remotive feed for six hours in keeping with its published request guidance, the Jobicy feed for at least one hour in keeping with its polling guidance, and Arbeitnow feeds for 30 minutes.
@@ -33,9 +33,9 @@ A local-first job-search assistant built with Next.js and TypeScript. It searche
 - Add OCR for scanned/image-only CVs; current parsing requires selectable text.
 - Improve layout-aware parsing for multi-column CVs and more heading formats; extraction is heuristic and suggestions require user review.
 - Encrypt local profile and tracker data, which can include sensitive details accepted from a CV.
-- Tailor and export the candidate's CV using verified CV source material; CV import currently extracts role and skill suggestions only.
+- Tailor and export the candidate's CV using verified CV source material; current analysis extracts profile evidence but does not generate tailored CV files.
 - Add application-form preparation and employer-specific ATS integrations. Jobpilot currently opens the original posting but does not fill or submit external forms.
-- Improve AI drafting with editable user preferences, structured outputs, and stronger source-to-claim verification; the current AI feature only drafts a cover letter.
+- Improve AI drafting with editable user preferences, structured outputs, and stronger source-to-claim verification; AI drafting currently creates cover-letter text only.
 - Add accessibility and responsive-layout review across supported browsers and screen sizes.
 - Add automated end-to-end tests for the main job search, details, profile, and tracking workflows.
 - Add optional follow-up dates and reminders to the application tracker.
@@ -62,7 +62,7 @@ Open <http://localhost:3000>.
 
 The app stores data in `~/.jobpilot/state.json` (the current user's home directory). You can change the folder with `JOBPILOT_DATA_DIR`. Keep the app bound to `localhost`; don't expose it on your network.
 
-**Privacy:** CV parsing runs in the browser. The selected CV file is never sent to Ollama or saved. When you choose to search with a local model, extracted CV text is sent from the browser to the local Jobpilot app and then to Ollama at a loopback address on the same laptop; it remains in memory and is not written to the local state file. If you accept CV suggestions and save the profile, those role and skill fields are written to the local JSON state file, which is not encrypted. AI match explanations and scores are saved with local job listings, but the CV itself is not. Cover-letter notes and drafts are also stored locally and in unencrypted JSON backups. Jobpilot sends no candidate data to job-feed providers. For AI cover-letter drafting, job details, profile name and skills, and entered interest/evidence notes are sent to local Ollama; full CV text is not included in a cover-letter request. Keep Jobpilot bound to localhost.
+**Privacy:** CV parsing runs in the browser. The selected CV file is never sent to Ollama or saved. Extracted CV text is sent from the browser to the local Jobpilot app and then to Ollama at a loopback address on the same laptop for profile analysis after upload and for job matching when you search; it remains in memory and is not written to the local state file. Extracted role and skill fields are automatically saved to the local JSON state file, which is not encrypted. AI match explanations and scores are saved with local job listings, but the CV itself is not. Cover-letter notes and drafts are also stored locally and in unencrypted JSON backups. Jobpilot sends no candidate data to job-feed providers. For AI cover-letter drafting, job details, profile name and skills, and entered interest/evidence notes are sent to local Ollama; full CV text is not included in a cover-letter request. Keep Jobpilot bound to localhost.
 
 ## Local AI setup
 
@@ -94,7 +94,7 @@ In the Jobpilot project folder, start the app if it is not already running:
 npm run dev
 ```
 
-Open <http://localhost:3000> and choose the installed model in the **Local AI status** panel. Open **Candidate profile → Import from CV** and select a text-based CV. Review any role and skill suggestions; the full CV text stays in memory. Return to the overview and select **Search jobs now**. Jobpilot sends the extracted text only to local Ollama and compares it with up to 60 location-eligible listings. Re-upload your CV after restarting Jobpilot. If the model returns incomplete results, try a smaller installed model; exact profile matches remain visible as a fallback. To draft a cover letter, select a job, open **Create draft**, enter a specific interest and a true experience example, and select **Generate on this laptop**. Review every result; the model's fit assessment can be wrong.
+Open <http://localhost:3000> and choose the installed model in the **Local AI status** panel. Open **Candidate profile → Analyze CV** and select a text-based CV. Jobpilot shows a summary and evidence, then fills and saves target roles and skills automatically; review or edit those fields. The extracted CV text stays in memory. Return to the overview and select **Search jobs now**. Jobpilot sends the extracted text only to local Ollama and compares it with up to 60 location-eligible listings. Re-upload your CV after restarting Jobpilot. If the model returns incomplete results, try a smaller installed model; exact profile matches remain visible as a fallback. To draft a cover letter, select a job, open **Create draft**, enter a specific interest and a true experience example, and select **Generate on this laptop**. Review every result; the model's fit assessment can be wrong.
 
 ### If Jobpilot cannot see the model
 
@@ -103,7 +103,7 @@ Open <http://localhost:3000> and choose the installed model in the **Local AI st
 3. Reload Jobpilot so it checks Ollama again. The model picker lists only models Ollama has installed.
 4. If you changed Ollama's default local address or port, copy `.env.example` to `.env.local`, set `OLLAMA_BASE_URL` to Ollama's **local loopback** address, and restart Jobpilot. Jobpilot rejects remote addresses to keep candidate text on your laptop.
 
-No AI API key or hosted AI account is needed. Jobpilot sends the selected job details, your profile name and skills, and the notes you enter to Ollama on this laptop. It does not send the CV file or full CV text to the model. Job discovery still needs an internet connection. Model speed and output quality depend on your model and laptop hardware.
+No AI API key or hosted AI account is needed. Jobpilot sends extracted CV text to Ollama on this laptop for profile analysis and job matching. It does not send the CV file itself. For cover-letter drafting it sends job details, profile name and skills, and the notes you enter, but not the CV text. Job discovery still needs an internet connection. Model speed and output quality depend on your model and laptop hardware.
 
 ## Search jobs
 
