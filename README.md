@@ -21,7 +21,7 @@ Download and install **Node.js 22.13 or newer** from [nodejs.org](https://nodejs
 1. Download Ollama from [ollama.com/download](https://ollama.com/download) and install it.
 2. Open the Ollama app and leave it running while you use Jobpilot.
 3. Install a local chat model from the [Ollama model library](https://ollama.com/library). For example, open the model's page, follow its **CLI** instructions, and run the shown `ollama pull ...` command in a terminal. Models take disk space and may take several minutes to download.
-4. For automatic CV-to-job scoring, also install a model that Ollama documents as compatible with its `/v1/systemone` decision endpoint. This feature requires Ollama 0.35 or newer. If you skip this, you can still browse jobs, but automatic decision-model scores will not be available.
+4. For automatic CV-to-job scoring, update Ollama to 0.35 or newer and install a decision model that supports `/v1/systemone`, such as `nimble`, `tev1`, or `tev1:0.8b` (run `ollama pull nimble` in Terminal). A normal chat model does not work for this step. If you skip this, you can still browse jobs, but automatic decision-model scores will not be available.
 
 ### 4. Open a terminal in the Jobpilot folder
 
@@ -69,7 +69,7 @@ To use Jobpilot another day, open Ollama, open a terminal in the `jobpilot-main`
 - **`npm` is not recognized / command not found:** Install Node.js from [nodejs.org](https://nodejs.org/), close and reopen the terminal, then try again.
 - **The page does not open:** Make sure the terminal is still running `npm run dev`, then refresh `http://localhost:3000`.
 - **No Ollama models appear:** Open the Ollama app, install a model, and refresh Jobpilot. To check installed models, run `ollama ls` in a terminal.
-- **Decision screening is unavailable:** Update Ollama to 0.35 or newer and select a model compatible with `/v1/systemone`. A chat model may not support decision screening. Jobpilot shows an error and does not send your CV or job text to a hosted AI service instead.
+- **Decision screening returns an error:** Update Ollama to 0.35 or newer and install/select a decision model compatible with `/v1/systemone`, such as `nimble` or `tev1`. Ordinary chat models may appear in Ollama but cannot answer this API. If it still fails, check the local AI status and restart Ollama. Jobpilot does not send your CV or job text to a hosted AI service instead.
 - **Model takes a long time or fails:** Try a smaller model that fits your computer's memory. Jobpilot can still show fetched jobs without AI scores.
 - **Need help with the command window?** Leave the message visible and share the exact error text when asking for help. Do not share your CV or personal profile data.
 

@@ -32,12 +32,18 @@ function unit(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1 ? value : null;
 }
 
+/** Ollama System One score values are probability-weighted rubric indexes: 0..N-1. */
+function rubricScore(value: unknown, criteriaCount: number): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > criteriaCount - 1 || criteriaCount < 2) return null;
+  return value / (criteriaCount - 1);
+}
+
 export function normalizeSystemOneScreenResult(payload: unknown, model: string, weights: MatchWeights): JobScreening | null {
   if (!payload || typeof payload !== "object" || !("answers" in payload)) return null;
   const answers = (payload as SystemOneResponse).answers;
   if (!answers || typeof answers !== "object") return null;
   const record = answers as Record<string, Answer>;
-  const scores = Object.fromEntries(answerNames.map((name) => [name, unit(record[name]?.score)])) as Record<(typeof answerNames)[number], number | null>;
+  const scores = Object.fromEntries(answerNames.map((name) => [name, rubricScore(record[name]?.score, 5)])) as Record<(typeof answerNames)[number], number | null>;
   const disqualifierRisk = unit(record.disqualifier?.noul);
   const information = record.information?.choice;
   if (answerNames.some((name) => scores[name] === null) || disqualifierRisk === null

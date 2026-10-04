@@ -9,7 +9,7 @@ const body = {
   job: { company: "Example", role: "Product Engineer", location: "Vienna", mode: "Hybrid", description: "Build TypeScript products with AWS." },
 };
 const answer = { answers: {
-  skills: { score: 0.9, confidence: 0.8 }, experience: { score: 0.7, confidence: 0.8 }, domain: { score: 0.6, confidence: 0.7 },
+  skills: { score: 3.6, confidence: 0.8 }, experience: { score: 2.8, confidence: 0.8 }, domain: { score: 2.4, confidence: 0.7 },
   disqualifier: { noul: 0.1 }, information: { choice: "sufficient", confidence: 0.9 },
 } };
 function request(value: unknown = body, url = "http://localhost/api/jobs/screen") {
