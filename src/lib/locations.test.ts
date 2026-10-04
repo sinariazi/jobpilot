@@ -12,6 +12,15 @@ describe("preferred job locations", () => {
     expect(matchesPreferredLocation("Remote Australia", "Austria")).toBe(false);
   });
 
+  it("normalizes common English and German city names", () => {
+    expect(matchesPreferredLocation("Wien, Österreich", "Vienna, Austria")).toBe(true);
+    expect(matchesPreferredLocation("Vienna", "Austria")).toBe(true);
+    expect(matchesPreferredLocation("Vienna, Austria", "Wien; Remote Europe")).toBe(true);
+    expect(matchesPreferredLocation("München, Germany", "Munich")).toBe(true);
+    expect(matchesPreferredLocation("Zürich, Switzerland", "Zurich")).toBe(true);
+    expect(matchesPreferredLocation("Genève, Switzerland", "Geneva")).toBe(true);
+  });
+
   it("matches remote Europe against a Europe-wide remote listing", () => {
     expect(matchesPreferredLocation("Europe", "Vienna, Austria; Remote Europe", "Remote", "Jobicy")).toBe(true);
     expect(matchesPreferredLocation("Vienna, Austria", "Vienna, Austria; Remote Europe", "Remote", "Arbeitnow")).toBe(true);
@@ -21,10 +30,7 @@ describe("preferred job locations", () => {
   it("does not match a remote listing with an explicit conflicting region", () => {
     expect(matchesPreferredLocation("United States", "Vienna, Austria; Remote Europe", "Remote", "Remotive")).toBe(false);
   });
-});
 
-
-describe("ambiguous remote location filtering", () => {
   it("does not treat an ambiguous remote listing as available in Austria", () => {
     expect(matchesPreferredLocation("Remote", "Austria", "Remote", "Remotive")).toBe(false);
     expect(matchesPreferredLocation("Remote", "Austria", "Remote", "Arbeitnow")).toBe(false);
