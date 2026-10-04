@@ -52,6 +52,11 @@ export type CandidateProfile = {
   roles: string;
   locations: string;
   skills: string;
+  email?: string;
+  phone?: string;
+  linkedin?: string;
+  portfolio?: string;
+  workAuthorization?: string;
 };
 
 export type ApplicationStatus = "Needs review" | "Approved to prepare" | "Applied" | "Rejected";

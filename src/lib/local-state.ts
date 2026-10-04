@@ -36,11 +36,21 @@ function parseProfile(value: unknown): CandidateProfile | null {
   if (typeof value.roles !== "string" || value.roles.length > 2000) return null;
   if (typeof value.locations !== "string" || value.locations.length > 2000) return null;
   if (typeof value.skills !== "string" || value.skills.length > 4000) return null;
+  if ((value.email !== undefined && (typeof value.email !== "string" || value.email.length > 320))
+    || (value.phone !== undefined && (typeof value.phone !== "string" || value.phone.length > 100))
+    || (value.linkedin !== undefined && (typeof value.linkedin !== "string" || value.linkedin.length > 2048))
+    || (value.portfolio !== undefined && (typeof value.portfolio !== "string" || value.portfolio.length > 2048))
+    || (value.workAuthorization !== undefined && (typeof value.workAuthorization !== "string" || value.workAuthorization.length > 1000))) return null;
   return {
     name: value.name.trim(),
     roles: value.roles.trim(),
     locations: value.locations.trim(),
     skills: value.skills.trim(),
+    ...(typeof value.email === "string" ? { email: value.email.trim() } : {}),
+    ...(typeof value.phone === "string" ? { phone: value.phone.trim() } : {}),
+    ...(typeof value.linkedin === "string" ? { linkedin: value.linkedin.trim() } : {}),
+    ...(typeof value.portfolio === "string" ? { portfolio: value.portfolio.trim() } : {}),
+    ...(typeof value.workAuthorization === "string" ? { workAuthorization: value.workAuthorization.trim() } : {}),
   };
 }
 

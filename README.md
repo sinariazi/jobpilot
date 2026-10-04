@@ -69,7 +69,7 @@ To use Jobpilot another day, open Ollama, open a terminal in the `jobpilot-main`
 - Uses local Ollama `/v1/systemone` decision screening for a fast first estimate, then a local chat model for shortlisted, uncertain, or incomplete cases. You can adjust score weights and detailed-analysis thresholds in the app. Scores are estimates, not hiring probabilities. Low-scoring jobs remain visible.
 - The default score weights are skills 40%, experience 30%, domain fit 20%, and penalty for explicit disqualifiers 10%. Detailed analysis runs by default at scores of 65 or higher, confidence below 60, or whenever important information is missing/unclear. Change these settings in Jobpilot; the score is not a probability of being hired.
 - Shows score breakdowns, confidence when the model provides it, missing information, and detailed matched requirements/gaps with source evidence when available. Verify every result against the original listing.
-- Lets you save jobs, track application status, add private notes and follow-up dates, and create editable cover-letter drafts. It never submits an application.
+- Lets you save jobs, track application status, add private notes and follow-up dates, and create editable cover-letter drafts. The application-preparation panel recognizes Greenhouse, Lever, Ashby, Workday, SmartRecruiters, and Workable URLs, gives a platform-aware checklist, and copies a packet from optional profile contact details and your saved cover letter. Add contact details in **Candidate profile**. Jobpilot never fills or submits employer forms.
 - Stores profile and job-tracker data on this device in `~/.jobpilot/state.json` (or the folder set by `JOBPILOT_DATA_DIR`). The file is not encrypted. Use **Candidate profile → Data backup** to save or restore a local backup.
 
 ## CV privacy and local AI
@@ -94,7 +94,7 @@ Restart Jobpilot and choose English, German, or both in the CV upload section. T
 - Add a licensed job provider with broader employer and geography coverage, after checking provider terms.
 - Encrypt local profile, tracker, and backup data.
 - Tailor and export a CV from verified source material; currently Jobpilot analyzes CVs but does not generate tailored CV files.
-- Add application-form preparation and employer-specific ATS support; Jobpilot currently opens original postings but does not fill external forms.
+- Add a browser extension or equivalent local integration for ATS form prefill. Current ATS recognition is best-effort from the posting URL; preparation is copy/paste and does not access or submit employer forms.
 - Improve cover-letter drafting preferences, structured output, and source-to-claim checks.
 - Review accessibility and responsive layouts across supported browsers and screen sizes.
 - Add end-to-end tests for job search, job details, profile, and tracking.

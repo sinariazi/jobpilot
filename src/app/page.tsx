@@ -12,6 +12,7 @@ import { createCoverLetterDraft } from "@/lib/cover-letter";
 import { jobsToAssess } from "@/lib/job-assessment";
 import { createMatchCohortKey, MAX_MATCH_REVIEWS, summarizeMatchReviews } from "@/lib/match-calibration";
 import { DEFAULT_MATCHING_SETTINGS, shouldRunDetailedAnalysis } from "@/lib/job-screening";
+import { createApplicationPacket, detectAtsPlatform } from "@/lib/application-preparation";
 
 const LEGACY_STORAGE_KEY = "jobpilot-local-v1";
 const MAX_BACKUP_BYTES = 23_000_000;
@@ -91,6 +92,7 @@ export default function Home() {
   const [backupBusy, setBackupBusy] = useState(false);
   const [coverLetterOpen, setCoverLetterOpen] = useState(false);
   const [coverLetterMessage, setCoverLetterMessage] = useState("");
+  const [applicationKitMessage, setApplicationKitMessage] = useState("");
   const [localAiModels, setLocalAiModels] = useState<string[]>([]);
   const [selectedAiModel, setSelectedAiModel] = useState("");
   const [localAiConnected, setLocalAiConnected] = useState<boolean | null>(null);
@@ -619,6 +621,16 @@ export default function Home() {
     }
   }
 
+  async function copyApplicationPacket() {
+    if (!selected) return;
+    try {
+      await navigator.clipboard.writeText(createApplicationPacket(selected.job, profile, selectedCoverLetter?.draft ?? ""));
+      setApplicationKitMessage("Application packet copied. Paste details into the employer form and review each field.");
+    } catch {
+      setApplicationKitMessage("Clipboard access is unavailable. Use the details below to copy manually.");
+    }
+  }
+
   function downloadCoverLetter() {
     const draft = coverLetterDrafts[selected?.job.id ?? ""]?.draft;
     if (!selected || !draft) return;
@@ -941,7 +953,7 @@ export default function Home() {
                 {selected.missing.length > 0 && <><div className="evidence-label gap-label">PROFILE SKILLS NOT MENTIONED <span>{selected.missing.length}</span></div><div className="evidence-pills missing-pills">{selected.missing.map((skill) => <span key={skill}>! {skill}</span>)}</div><p className="match-caveat">A skill missing from the posting text is not proof that the job requires it.</p></>}
                 <div className="divider"/>
                 <div id="job-description" className="description"><h4>Job description</h4><p className="job-description-text">{selected.job.description ?? selected.job.summary}</p></div>
-                  <section className="cover-letter-draft" key={selected.job.id}>
+                <section className="cover-letter-draft" key={selected.job.id}>
                   <div className="cover-letter-heading"><div><h4>Cover letter draft</h4><p>Build an editable first draft for this role.</p></div><button type="button" className="secondary-button" onClick={() => setCoverLetterOpen((open) => !open)}>{coverLetterOpen ? "Close" : "Create draft"}</button></div>
                   {coverLetterOpen && <>
                     <p className="cover-letter-help">Add a reason and a specific, truthful experience example. AI drafting runs through Ollama on this laptop. Review every claim before use.</p>
@@ -954,6 +966,16 @@ export default function Home() {
                     {selectedCoverLetter?.draft && <><label>Draft text<textarea rows={11} maxLength={20000} value={selectedCoverLetter.draft} onChange={(event) => updateSelectedCoverLetter({ draft: event.target.value })} /></label><div className="cover-letter-actions"><button type="button" className="secondary-button" onClick={() => void copyCoverLetter()}>Copy</button><button type="button" className="secondary-button" onClick={downloadCoverLetter}>Download .txt</button></div><p className="cover-letter-help">Saved on this device · Updated {new Date(selectedCoverLetter.updatedAt).toLocaleString()}</p></>}
                     {coverLetterMessage && <p className="cover-letter-message" role="status">{coverLetterMessage}</p>}
                   </>}
+                </section>
+                <section className="application-kit" aria-labelledby="application-kit-title">
+                  <div className="cover-letter-heading"><div><h4 id="application-kit-title">Application preparation</h4><p>Prepare details for the employer form; review and submit there yourself.</p></div><button type="button" className="secondary-button" onClick={() => void copyApplicationPacket()}>Copy application packet</button></div>
+                  {(() => { const guide = detectAtsPlatform(selected.job.sourceUrl); return <>
+                    <p className="ats-detection">Detected application platform: <strong>{guide.label}</strong>{guide.platform !== "unknown" ? " · detected from the posting URL" : " · could not identify it from the posting URL"}</p>
+                    <ul className="ats-checklist">{guide.preparation.map((item) => <li key={item}>{item}</li>)}</ul>
+                  </>; })()}
+                  <div className="application-packet-preview"><strong>Ready to copy</strong><span>{profile.name || "Name not provided"}</span>{profile.email && <span>{profile.email}</span>}{profile.phone && <span>{profile.phone}</span>}{profile.linkedin && <span>{profile.linkedin}</span>}{profile.portfolio && <span>{profile.portfolio}</span>}{profile.workAuthorization && <span>Work eligibility: {profile.workAuthorization}</span>}<small>{selectedCoverLetter?.draft ? "Includes your saved cover-letter draft." : "Create a cover-letter draft above to include it."} CV files are not stored; upload your CV on the employer&apos;s site.</small></div>
+                  {applicationKitMessage && <p className="cover-letter-message" role="status">{applicationKitMessage}</p>}
+                  <button type="button" className="text-button" onClick={openProfile}>Edit application contact details</button>
                 </section>
                 <div className="review-note"><span>◉</span><p><strong>Human review required</strong><br/>Approval only authorizes preparation; it does not submit an application.</p></div>
               </aside>
@@ -981,7 +1003,7 @@ export default function Home() {
           <details className="cv-text-details"><summary>View extracted CV text</summary><pre>{(cvSuggestions.sourceText ?? "").slice(0, 12_000)}</pre>{(cvSuggestions.sourceText?.length ?? 0) > 12_000 && <small>Preview limited to 12,000 characters. The full extracted text remains in memory for local matching.</small>}</details>
           <p className="cv-file-hint">Your preferred location was not inferred from the CV. Profile role and skill fields below were filled automatically and can be edited.</p>
         </div>}
-      </section><label>Display name<input value={profileDraft.name} onChange={(event) => setProfileDraft({ ...profileDraft, name: event.target.value })}/></label><label>Target roles<span className="field-hint">Enter the roles you want to apply for, separated by commas or new lines. Filled automatically from your CV analysis; edit this list to steer job discovery.</span><textarea rows={2} value={profileDraft.roles} onChange={(event) => setProfileDraft({ ...profileDraft, roles: event.target.value })}/></label><label>Preferred locations<span className="field-hint">Enter locations explicitly, for example Austria or Vienna, Austria. Separate alternatives with semicolons. Leave blank to show any location. A bare “Remote” listing is excluded unless you choose Remote.</span><textarea rows={2} value={profileDraft.locations} onChange={(event) => setProfileDraft({ ...profileDraft, locations: event.target.value })}/></label><label>Skills <span className="field-hint">Filled automatically from your CV analysis. Edit these keywords to steer job discovery; local AI also compares the CV text with each job description.</span><textarea rows={4} value={profileDraft.skills} onChange={(event) => setProfileDraft({ ...profileDraft, skills: event.target.value })}/></label><div className="modal-actions"><button className="secondary-button" onClick={() => setProfileDraft(defaultProfile)}>Reset default profile</button><button className="primary-button" onClick={saveProfileDraft}>Save profile</button></div><section className="data-backup" aria-label="Profile and job data backup"><div><strong>Data backup</strong><p>Download a copy of your profile and job tracker, or restore a previous backup.</p></div><div className="data-backup-actions"><button type="button" className="secondary-button" onClick={downloadBackup}>Download backup</button><button type="button" className="secondary-button" onClick={() => backupInput.current?.click()} disabled={backupBusy}>{backupBusy ? "Restoring…" : "Restore backup"}</button><input ref={backupInput} className="visually-hidden" type="file" accept="application/json,.json" aria-label="Choose Jobpilot backup file" onChange={(event) => void restoreBackup(event)}/></div>{backupMessage && <p role="status">{backupMessage}</p>}</section><p className="privacy-explainer">Scanned PDF page images are sent only to Jobpilot on localhost and processed by Tesseract on this laptop; temporary image files are deleted immediately. The CV file and full text are not saved. Extracted text is sent only to local Ollama for profile analysis and job matching. Accepted role and skill suggestions are stored in the local profile file, which is not encrypted.</p></section></div>}
+      </section><label>Display name<input value={profileDraft.name} onChange={(event) => setProfileDraft({ ...profileDraft, name: event.target.value })}/></label><label>Target roles<span className="field-hint">Enter the roles you want to apply for, separated by commas or new lines. Filled automatically from your CV analysis; edit this list to steer job discovery.</span><textarea rows={2} value={profileDraft.roles} onChange={(event) => setProfileDraft({ ...profileDraft, roles: event.target.value })}/></label><label>Preferred locations<span className="field-hint">Enter locations explicitly, for example Austria or Vienna, Austria. Separate alternatives with semicolons. Leave blank to show any location. A bare “Remote” listing is excluded unless you choose Remote.</span><textarea rows={2} value={profileDraft.locations} onChange={(event) => setProfileDraft({ ...profileDraft, locations: event.target.value })}/></label><label>Skills <span className="field-hint">Filled automatically from your CV analysis. Edit these keywords to steer job discovery; local AI also compares the CV text with each job description.</span><textarea rows={4} value={profileDraft.skills} onChange={(event) => setProfileDraft({ ...profileDraft, skills: event.target.value })}/></label><section className="application-contact-fields"><h3>Application contact details</h3><p>Optional details for your copyable application packet. They stay in the local Jobpilot data file.</p><label>Email<input type="email" maxLength={320} autoComplete="email" value={profileDraft.email ?? ""} onChange={(event) => setProfileDraft({ ...profileDraft, email: event.target.value })}/></label><label>Phone<input type="tel" maxLength={100} autoComplete="tel" value={profileDraft.phone ?? ""} onChange={(event) => setProfileDraft({ ...profileDraft, phone: event.target.value })}/></label><label>LinkedIn profile<input type="url" maxLength={2048} value={profileDraft.linkedin ?? ""} onChange={(event) => setProfileDraft({ ...profileDraft, linkedin: event.target.value })}/></label><label>Portfolio or personal website<input type="url" maxLength={2048} value={profileDraft.portfolio ?? ""} onChange={(event) => setProfileDraft({ ...profileDraft, portfolio: event.target.value })}/></label><label>Work authorization or eligibility<textarea rows={2} maxLength={1000} value={profileDraft.workAuthorization ?? ""} onChange={(event) => setProfileDraft({ ...profileDraft, workAuthorization: event.target.value })} placeholder="Add only if you want this in your application packet"/></label></section><div className="modal-actions"><button className="secondary-button" onClick={() => setProfileDraft(defaultProfile)}>Reset default profile</button><button className="primary-button" onClick={saveProfileDraft}>Save profile</button></div><section className="data-backup" aria-label="Profile and job data backup"><div><strong>Data backup</strong><p>Download a copy of your profile and job tracker, or restore a previous backup.</p></div><div className="data-backup-actions"><button type="button" className="secondary-button" onClick={downloadBackup}>Download backup</button><button type="button" className="secondary-button" onClick={() => backupInput.current?.click()} disabled={backupBusy}>{backupBusy ? "Restoring…" : "Restore backup"}</button><input ref={backupInput} className="visually-hidden" type="file" accept="application/json,.json" aria-label="Choose Jobpilot backup file" onChange={(event) => void restoreBackup(event)}/></div>{backupMessage && <p role="status">{backupMessage}</p>}</section><p className="privacy-explainer">Scanned PDF page images are sent only to Jobpilot on localhost and processed by Tesseract on this laptop; temporary image files are deleted immediately. The CV file and full text are not saved. Extracted text is sent only to local Ollama for profile analysis and job matching. Accepted role and skill suggestions are stored in the local profile file, which is not encrypted.</p></section></div>}
     </main>
   );
 }

@@ -45,7 +45,7 @@ describe("local state storage", () => {
   it("persists profile, reviews, saved jobs, and fetched listings between reads", async () => {
     const dataDirectory = await temporaryDirectory();
     const state: PersistedState = {
-      profile: { name: "Candidate", roles: "Engineer", locations: "Vienna", skills: "TypeScript" },
+      profile: { name: "Candidate", roles: "Engineer", locations: "Vienna", skills: "TypeScript", email: "candidate@example.test", phone: "+431234567" },
       saved: [exampleJob.id],
       status: { [exampleJob.id]: "Approved to prepare" },
       applicationNotes: { [exampleJob.id]: "Follow up with the hiring manager" },
@@ -98,6 +98,11 @@ describe("local state storage", () => {
     expect(parsePersistedState({
       ...defaultState(),
       applicationNotes: { "gh-example-1": "x".repeat(2001) },
+    })).toBeNull();
+
+    expect(parsePersistedState({
+      ...defaultState(),
+      profile: { ...defaultState().profile, email: "x".repeat(321) },
     })).toBeNull();
 
     expect(parsePersistedState({
