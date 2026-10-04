@@ -45,6 +45,22 @@ describe("local CV-to-job matching API", () => {
     expect(await response.json()).toEqual({ error: "The local model did not assess every listing. Try another installed model." });
   });
 
+  it("propagates a disconnected browser request to Ollama", async () => {
+    const controller = new AbortController();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ models: [{ name: requestBody.model }] }), { status: 200 }))
+      .mockImplementationOnce(async (_url, init: RequestInit) => {
+        controller.abort();
+        expect(init.signal?.aborted).toBe(true);
+        throw new DOMException("The operation was aborted.", "AbortError");
+      });
+    vi.stubGlobal("fetch", fetchMock);
+    const request = new Request("http://localhost/api/jobs/match", { method: "POST", body: JSON.stringify(requestBody), signal: controller.signal });
+    const response = await POST(request);
+    expect(response.status).toBe(499);
+    expect(await response.json()).toEqual({ error: "Local CV matching was cancelled." });
+  });
+
   it("surfaces a short local Ollama error when inference is rejected", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ models: [{ name: requestBody.model }] }), { status: 200 }))
