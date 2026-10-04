@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ApplicationStatus, CandidateProfile, CoverLetterDraftRecord, Job, PersistedState } from "@/lib/types";
+import type { ApplicationStatus, CandidateProfile, CoverLetterDraftRecord, Job, MatchReview, PersistedState } from "@/lib/types";
 import { defaultProfile } from "@/lib/types";
 import { isRelevantToProfile, jobsForReview, matchesTargetRole, scoreJob } from "@/lib/matcher";
 import { matchesPreferredLocation } from "@/lib/locations";
@@ -9,6 +9,7 @@ import { matchesDepartment, matchesPostedWithin, matchesWorkMode, type PostedWit
 import type { CvSuggestions } from "@/lib/cv-parser";
 import { createBackup, parseBackup } from "@/lib/backup";
 import { createCoverLetterDraft } from "@/lib/cover-letter";
+import { calibratedFitScore, createMatchCohortKey, MAX_MATCH_REVIEWS, MIN_MATCH_REVIEWS_FOR_CALIBRATION, MIN_MATCH_REVIEWS_PER_BAND, summarizeMatchReviews } from "@/lib/match-calibration";
 
 const LEGACY_STORAGE_KEY = "jobpilot-local-v1";
 const MAX_BACKUP_BYTES = 23_000_000;
@@ -34,6 +35,10 @@ function isLocalJobpilotPage() {
   return typeof window !== "undefined" && ["localhost", "127.0.0.1", "[::1]"].includes(window.location.hostname);
 }
 
+function formatRate(rate: number | null) {
+  return rate === null ? "—" : `${Math.round(rate * 100)}%`;
+}
+
 export default function Home() {
   const [profile, setProfile] = useState<CandidateProfile>(defaultProfile);
   const [selectedId, setSelectedId] = useState("");
@@ -48,6 +53,8 @@ export default function Home() {
   const [applicationNotes, setApplicationNotes] = useState<Record<string, string>>({});
   const [applicationFollowUps, setApplicationFollowUps] = useState<Record<string, string>>({});
   const [coverLetterDrafts, setCoverLetterDrafts] = useState<Record<string, CoverLetterDraftRecord>>({});
+  const [matchReviews, setMatchReviews] = useState<MatchReview[]>([]);
+  const [matchCohortKey, setMatchCohortKey] = useState("");
   const [profileOpen, setProfileOpen] = useState(false);
   const [activeView, setActiveView] = useState<"overview" | "applications">("overview");
   const [liveJobs, setLiveJobs] = useState<Job[]>([]);
@@ -140,6 +147,8 @@ export default function Home() {
         setApplicationNotes(restored.applicationNotes ?? {});
         setApplicationFollowUps(restored.applicationFollowUps ?? {});
         setCoverLetterDrafts(restored.coverLetterDrafts ?? {});
+        setMatchReviews(restored.matchReviews ?? []);
+        setMatchCohortKey(restored.matchCohortKey ?? "");
         setLiveJobs(restored.liveJobs ?? []);
         selectJob(restored.liveJobs?.[0]?.id ?? "");
         setStorageMessage(migrated ? "Existing browser data moved to a private local file." : "Saved on this device.");
@@ -196,7 +205,7 @@ export default function Home() {
   useEffect(() => {
     if (!stateLoaded) return;
     let cancelled = false;
-    const snapshot = { profile, saved, status, applicationNotes, applicationFollowUps, coverLetterDrafts, liveJobs } satisfies PersistedState;
+    const snapshot = { profile, saved, status, applicationNotes, applicationFollowUps, coverLetterDrafts, matchReviews, matchCohortKey, liveJobs } satisfies PersistedState;
     const timeout = window.setTimeout(() => {
       setStorageMessage("Saving on this device…");
       saveQueue.current = saveQueue.current.catch(() => undefined).then(async () => {
@@ -219,17 +228,21 @@ export default function Home() {
       cancelled = true;
       window.clearTimeout(timeout);
     };
-  }, [profile, saved, status, applicationNotes, applicationFollowUps, coverLetterDrafts, liveJobs, stateLoaded]);
+  }, [profile, saved, status, applicationNotes, applicationFollowUps, coverLetterDrafts, matchReviews, matchCohortKey, liveJobs, stateLoaded]);
 
   const locationMatchedJobs = useMemo(() => jobs.filter((job) => matchesPreferredLocation(job.location, profile.locations, job.mode, job.source)), [jobs, profile.locations]);
   const localCvAnalysisReady = Boolean(cvText.trim() && localAiModels.includes(selectedAiModel) && isLocalJobpilotPage());
   const hasCurrentCvAssessment = localCvAnalysisReady && cvAnalyzedModel === selectedAiModel;
+  const currentModelReviews = useMemo(() => matchReviews.filter((review) => review.model === selectedAiModel && review.cohortKey === matchCohortKey), [matchReviews, selectedAiModel, matchCohortKey]);
+  const currentModelMetrics = useMemo(() => summarizeMatchReviews(currentModelReviews), [currentModelReviews]);
   // With a current CV assessment, keep every location-eligible listing visible.
   // The model's relevance flag is guidance for ranking and labels, not a hidden filter.
   const preferredJobs = useMemo(() => jobsForReview(locationMatchedJobs, hasCurrentCvAssessment, candidateSkills, profile.roles), [locationMatchedJobs, hasCurrentCvAssessment, candidateSkills, profile.roles]);
   const ranked = useMemo(() => preferredJobs.map((job) => {
     const keywordMatch = scoreJob(job, candidateSkills);
-    return { job, ...keywordMatch, score: hasCurrentCvAssessment && job.aiMatch?.model === selectedAiModel ? job.aiMatch.score : keywordMatch.score, roleMatch: matchesTargetRole(job, profile.roles) };
+    const aiAssessment = hasCurrentCvAssessment && job.aiMatch?.model === selectedAiModel ? job.aiMatch : undefined;
+    const calibratedScore = aiAssessment ? calibratedFitScore(aiAssessment.score, currentModelReviews) : null;
+    return { job, ...keywordMatch, score: calibratedScore ?? aiAssessment?.score ?? keywordMatch.score, scoreCalibrated: calibratedScore !== null, roleMatch: matchesTargetRole(job, profile.roles) };
   })
     .filter(({ job }) => `${job.role} ${job.company} ${job.location} ${job.department ?? ""}`.toLowerCase().includes(query.toLowerCase()))
     .sort((a, b) => {
@@ -238,11 +251,14 @@ export default function Home() {
       return hasCurrentCvAssessment && a.job.aiMatch && b.job.aiMatch
         ? Number(b.job.aiMatch.relevant) - Number(a.job.aiMatch.relevant) || b.score - a.score
         : Number(b.roleMatch) - Number(a.roleMatch) || b.titleMatched.length - a.titleMatched.length || b.score - a.score;
-    }), [query, candidateSkills, preferredJobs, profile.roles, hasCurrentCvAssessment, selectedAiModel, sortBy]);
+    }), [query, candidateSkills, preferredJobs, profile.roles, hasCurrentCvAssessment, selectedAiModel, currentModelReviews, sortBy]);
   const filteredRanked = useMemo(() => ranked.filter(({ job }) => matchesPostedWithin(job, postedWithin) && matchesWorkMode(job, workMode) && matchesDepartment(job, department)), [ranked, postedWithin, workMode, department]);
   const visibleJobs = filteredRanked.slice(0, visibleCount);
   const departments = useMemo(() => [...new Set(preferredJobs.map((job) => job.department?.trim()).filter((value): value is string => Boolean(value)))].sort((a, b) => a.localeCompare(b)), [preferredJobs]);
   const selected = filteredRanked.find(({ job }) => job.id === selectedId) ?? filteredRanked[0];
+  const selectedMatchReview = selected?.job.aiMatch && selected.job.aiMatch.model === selectedAiModel
+    ? currentModelReviews.find((review) => review.jobId === selected.job.id)
+    : undefined;
   const selectedCoverLetter = selected ? coverLetterDrafts[selected.job.id] : undefined;
   const matchedJobs = preferredJobs.filter((job) => scoreJob(job, candidateSkills).matched.length > 0).length;
   const reviewedCount = preferredJobs.filter((job) => status[job.id]).length;
@@ -274,6 +290,29 @@ export default function Home() {
       return next;
     });
   }
+
+  function reviewSelectedMatch(reviewedRelevant: boolean) {
+    if (!selected || !matchCohortKey || !hasCurrentCvAssessment || selected.job.aiMatch?.model !== selectedAiModel) return;
+    const review: MatchReview = {
+      jobId: selected.job.id,
+      company: selected.job.company,
+      role: selected.job.role,
+      model: selected.job.aiMatch.model,
+      cohortKey: matchCohortKey,
+      score: selected.job.aiMatch.score,
+      predictedRelevant: selected.job.aiMatch.relevant,
+      reviewedRelevant,
+      reviewedAt: new Date().toISOString(),
+    };
+    setMatchReviews((current) => [
+      ...current.filter((item) => !(item.jobId === review.jobId && item.model === review.model && item.cohortKey === review.cohortKey)),
+      review,
+    ].slice(-MAX_MATCH_REVIEWS));
+  }
+
+  function clearMatchReviews() {
+    if (window.confirm("Clear all locally stored AI match reviews and calibration data?")) setMatchReviews([]);
+  }
   const emptyJobMessage = locationMatchedJobs.length === 0
     ? profile.locations.trim() ? `No fetched jobs match ${profile.locations}. Check your preferred locations or refresh the feeds.` : "No jobs are available in the current feeds. Try searching again later."
     : hasCurrentCvAssessment
@@ -299,11 +338,13 @@ export default function Home() {
     try {
       const { parseCvFile } = await import("@/lib/cv-parser");
       const suggestions = await parseCvFile(file, { ocrLanguage, onProgress: setCvAnalysisStatus });
+      const cohortKey = await createMatchCohortKey(suggestions.sourceText ?? "");
       const browserRoles = suggestions.roles || profile.roles;
       const browserSkills = suggestions.skills || profile.skills;
       const autoFilledProfile = { ...profile, roles: browserRoles, skills: browserSkills };
       setCvSuggestions(suggestions);
       setCvText(suggestions.sourceText ?? "");
+      setMatchCohortKey(cohortKey);
       setCvAnalyzedModel("");
       setLiveJobs((current) => current.map((job) => ({ ...job, aiMatch: undefined })));
       setCvFileName(file.name);
@@ -368,7 +409,7 @@ export default function Home() {
   }
 
   function downloadBackup() {
-    const backup = createBackup({ profile, saved, status, applicationNotes, applicationFollowUps, coverLetterDrafts, liveJobs });
+    const backup = createBackup({ profile, saved, status, applicationNotes, applicationFollowUps, coverLetterDrafts, matchReviews, matchCohortKey, liveJobs });
     const url = URL.createObjectURL(new Blob([backup], { type: "application/json" }));
     const link = document.createElement("a");
     link.href = url;
@@ -496,6 +537,8 @@ export default function Home() {
       setApplicationNotes(result.applicationNotes ?? {});
       setApplicationFollowUps(result.applicationFollowUps ?? {});
       setCoverLetterDrafts(result.coverLetterDrafts ?? {});
+      setMatchReviews(result.matchReviews ?? []);
+      setMatchCohortKey(result.matchCohortKey ?? "");
       setLiveJobs(result.liveJobs);
       selectJob(result.liveJobs[0]?.id ?? "");
       setStorageMessage("Backup restored and saved on this device.");
@@ -737,7 +780,22 @@ export default function Home() {
             <div className="stat-card source-card"><div className="stat-label">JOB SOURCES <span>ⓘ</span></div><div className="source-logos"><b className="gh">↗</b><span>{liveJobs.length ? `${new Set(liveJobs.map((job) => job.source)).size} feeds searched` : "Ready to search"}</span></div><div className="source-foot">Public job feeds <i/> Europe + remote</div></div>
           </div>
 
-          <div className="section-heading"><div><h2>Job listings <span className="result-count">{filteredRanked.length}</span></h2><p>{hasCurrentCvAssessment ? "Sorted by local AI fit. The estimate can be wrong; review each posting." : "Sort by target role, exact skill overlap, posting date, or company."}</p></div><span className="filter-summary">Showing {visibleJobs.length} of {filteredRanked.length}</span></div>
+          {hasCurrentCvAssessment && <section className="match-calibration-panel" aria-labelledby="match-calibration-title">
+            <div className="match-calibration-heading"><div><span className="eyebrow">LOCAL FEEDBACK</span><h2 id="match-calibration-title">Calibrate match estimates</h2><p>Review assessed jobs in the detail panel. Reviews are stored on this device and grouped by CV and model.</p></div><span className="calibration-sample-count">{currentModelMetrics.total} reviewed</span></div>
+            {currentModelMetrics.total === 0 ? <p className="calibration-empty">No reviewed matches for this CV and model yet. Mark assessed jobs as relevant or not relevant to start measuring errors.</p> : <>
+              <div className="calibration-metrics">
+                <div><span>False positives</span><strong>{currentModelMetrics.falsePositive} · {formatRate(currentModelMetrics.falsePositiveRate)}</strong><small>Model said match; your review said no</small></div>
+                <div><span>False negatives</span><strong>{currentModelMetrics.falseNegative} · {formatRate(currentModelMetrics.falseNegativeRate)}</strong><small>Model said low match; your review said yes</small></div>
+                <div><span>Precision</span><strong>{formatRate(currentModelMetrics.precision)}</strong><small>Of predicted matches, how many you approved</small></div>
+                <div><span>Recall</span><strong>{formatRate(currentModelMetrics.recall)}</strong><small>Of reviewed matches, how many the model found</small></div>
+              </div>
+              <div className="calibration-table-wrap"><table className="calibration-table"><thead><tr><th>Raw fit band</th><th>Reviews</th><th>Avg. raw score</th><th>Your relevant rate</th><th>Adjusted estimate</th></tr></thead><tbody>{currentModelMetrics.bands.map((band) => <tr key={band.low}><td>{band.low}–{band.high}%</td><td>{band.count}</td><td>{band.meanModelScore === null ? "—" : `${Math.round(band.meanModelScore)}%`}</td><td>{formatRate(band.observedRelevantRate)}</td><td>{formatRate(band.calibratedEstimate)}</td></tr>)}</tbody></table></div>
+              <p className="calibration-caveat">Score corrections need at least {MIN_MATCH_REVIEWS_FOR_CALIBRATION} reviews overall and {MIN_MATCH_REVIEWS_PER_BAND} in a score band. This is an experimental correction based only on jobs you chose to review, not a general probability of getting hired.</p>
+              <button type="button" className="secondary-button clear-calibration" onClick={clearMatchReviews}>Clear local review history</button>
+            </>}
+          </section>}
+
+          <div className="section-heading"><div><h2>Job listings <span className="result-count">{filteredRanked.length}</span></h2><p>{hasCurrentCvAssessment ? "Sorted by local AI fit. Reviewed data may adjust the displayed score; the estimate can still be wrong." : "Sort by target role, exact skill overlap, posting date, or company."}</p></div><span className="filter-summary">Showing {visibleJobs.length} of {filteredRanked.length}</span></div>
           <div className="jobs-layout">
             <section className="jobs-column">
               <div className="filters">
@@ -749,7 +807,7 @@ export default function Home() {
                 <span className="location-filter">Locations: {profile.locations || "Any"}</span>
               </div>
               {filteredRanked.length > 0 ? <>
-                <div className="job-list">{visibleJobs.map(({ job, score, matched, titleMatched, roleMatch }) => <article key={job.id} className={`job-card ${selected?.job.id === job.id ? "selected" : ""}`}><button type="button" className="job-card-main" aria-pressed={selected?.job.id === job.id} onClick={() => { selectJob(job.id); setStatus((current) => current[job.id] ? current : { ...current, [job.id]: "Needs review" }); }}><div className="job-card-top"><div className={`company-logo logo-${job.source.toLowerCase()}`}>{job.company.slice(0, 1)}</div><span className="match-tag">{hasCurrentCvAssessment && job.aiMatch?.model === selectedAiModel ? `${score}% AI fit · ${job.aiMatch.relevant ? "potential match" : "low match"}` : hasCurrentCvAssessment ? `${score}% profile overlap · not AI assessed` : roleMatch ? "Target role" : `${score}% skills overlap`}</span></div><div className="job-title">{job.role}</div><div className="company-name">{job.company} <span>·</span> {job.location}</div><div className="job-meta"><span>◷ {job.posted}</span><span>⌂ {job.mode}</span><span className="source-tag">{job.source} · feed</span></div></button><div className="job-card-bottom"><div className="skill-pills">{matched.slice(0, 3).map((skill) => <span className={titleMatched.includes(skill) ? "skill-in-title" : ""} key={skill}>{skill}{titleMatched.includes(skill) && <small>title</small>}</span>)}{matched.length > 3 && <span className="more-skills">+{matched.length - 3}</span>}</div><button type="button" className={`bookmark ${saved.includes(job.id) ? "bookmarked" : ""}`} onClick={() => setSaved((current) => current.includes(job.id) ? current.filter((id) => id !== job.id) : [...current, job.id])} aria-label={saved.includes(job.id) ? "Remove saved job" : "Save job"} aria-pressed={saved.includes(job.id)}>{saved.includes(job.id) ? "★" : "☆"}</button></div></article>)}</div>
+                <div className="job-list">{visibleJobs.map(({ job, score, scoreCalibrated, matched, titleMatched, roleMatch }) => <article key={job.id} className={`job-card ${selected?.job.id === job.id ? "selected" : ""}`}><button type="button" className="job-card-main" aria-pressed={selected?.job.id === job.id} onClick={() => { selectJob(job.id); setStatus((current) => current[job.id] ? current : { ...current, [job.id]: "Needs review" }); }}><div className="job-card-top"><div className={`company-logo logo-${job.source.toLowerCase()}`}>{job.company.slice(0, 1)}</div><span className="match-tag">{hasCurrentCvAssessment && job.aiMatch?.model === selectedAiModel ? `${score}% ${scoreCalibrated ? "calibrated fit" : "AI fit"} · ${job.aiMatch.relevant ? "potential match" : "low match"}` : hasCurrentCvAssessment ? `${score}% profile overlap · not AI assessed` : roleMatch ? "Target role" : `${score}% skills overlap`}</span></div><div className="job-title">{job.role}</div><div className="company-name">{job.company} <span>·</span> {job.location}</div><div className="job-meta"><span>◷ {job.posted}</span><span>⌂ {job.mode}</span><span className="source-tag">{job.source} · feed</span></div></button><div className="job-card-bottom"><div className="skill-pills">{matched.slice(0, 3).map((skill) => <span className={titleMatched.includes(skill) ? "skill-in-title" : ""} key={skill}>{skill}{titleMatched.includes(skill) && <small>title</small>}</span>)}{matched.length > 3 && <span className="more-skills">+{matched.length - 3}</span>}</div><button type="button" className={`bookmark ${saved.includes(job.id) ? "bookmarked" : ""}`} onClick={() => setSaved((current) => current.includes(job.id) ? current.filter((id) => id !== job.id) : [...current, job.id])} aria-label={saved.includes(job.id) ? "Remove saved job" : "Save job"} aria-pressed={saved.includes(job.id)}>{saved.includes(job.id) ? "★" : "☆"}</button></div></article>)}</div>
                 {visibleJobs.length < filteredRanked.length && <button className="load-more" onClick={() => setVisibleCount((count) => count + 25)}>Show more jobs <span>({filteredRanked.length - visibleJobs.length} remaining)</span></button>}
               </> : <div className="empty-state">{liveJobs.length === 0 ? "No jobs loaded yet. Select “Search jobs now” to check public job feeds." : ranked.length === 0 ? query ? "No live jobs match that search. Try another role or company." : emptyJobMessage : "No jobs match these filters. Try a different date, work mode, or department."}</div>}
               {nextArbeitnowPage !== null && <button className="load-more" onClick={() => void fetchMoreJobs()} disabled={loadingMoreJobs || loadingJobs}>{loadingMoreJobs ? "Loading more from Arbeitnow…" : "Load more jobs from Arbeitnow"}</button>}
@@ -766,9 +824,9 @@ export default function Home() {
                 <div className="detail-sub">{selected.job.mode} <i/> Posted {selected.job.posted} {selected.job.retrievedAt && <><i/> Retrieved {new Date(selected.job.retrievedAt).toLocaleString()}</>}</div>
                 <div className="detail-buttons">{selected.job.sourceUrl ? <a href={selected.job.sourceUrl} target="_blank" rel="noreferrer" className="primary-button apply-button">Open original posting ↗</a> : <a href="#job-description" className="primary-button apply-button">Review role details ↓</a>}<label className="detail-status-label">Status<select aria-label={`Application status for ${selected.job.company}`} value={status[selected.job.id] ?? "Needs review"} onChange={(event) => setStatus((current) => ({ ...current, [selected.job.id]: event.target.value as ApplicationStatus }))}><option>Needs review</option><option>Approved to prepare</option><option>Applied</option><option>Rejected</option></select></label></div>
                 <div className="divider"/>
-                <div className="fit-heading"><div><h4>{hasCurrentCvAssessment ? "AI estimated fit" : "Profile skills overlap"} <span className="info-dot">i</span></h4><p>{hasCurrentCvAssessment ? "Local Ollama assessment" : selected.roleMatch ? "Target role matches; percentage shows exact skill mentions only" : "Profile skills mentioned in the posting"}</p></div><div className="score-ring" style={{ "--score": `${selected.score}%` } as React.CSSProperties}><span>{selected.score}%</span></div></div>
+                <div className="fit-heading"><div><h4>{selected.scoreCalibrated ? "Review-calibrated fit" : hasCurrentCvAssessment ? "AI estimated fit" : "Profile skills overlap"} <span className="info-dot">i</span></h4><p>{hasCurrentCvAssessment ? selected.scoreCalibrated ? "Adjusted using your local reviews for this score range" : "Local Ollama estimate; more reviewed jobs can calibrate it" : selected.roleMatch ? "Target role matches; percentage shows exact skill mentions only" : "Profile skills mentioned in the posting"}</p></div><div className="score-ring" style={{ "--score": `${selected.score}%` } as React.CSSProperties}><span>{selected.score}%</span></div></div>
                 <div className="fit-meter"><i style={{ width: `${selected.score}%` }}/></div>
-                {hasCurrentCvAssessment && selected.job.aiMatch?.model === selectedAiModel && <section className="ai-match-explanation" aria-label="Local AI CV match explanation"><div className="ai-match-title"><h4>Local AI assessment</h4><strong>{selected.job.aiMatch.score}% estimated fit · {selected.job.aiMatch.relevant ? "potential match" : "low match"} · {selected.job.aiMatch.model}</strong></div><p>{selected.job.aiMatch.reason}</p><small>CV evidence: {selected.job.aiMatch.cvEvidence}</small><small>AI estimates can be wrong. Verify the original posting and every requirement.</small></section>}
+                {hasCurrentCvAssessment && selected.job.aiMatch?.model === selectedAiModel && <section className="ai-match-explanation" aria-label="Local AI CV match explanation"><div className="ai-match-title"><h4>Local AI assessment</h4><strong>{selected.job.aiMatch.score}% raw estimate{selected.scoreCalibrated ? ` · ${selected.score}% review-calibrated` : ""} · {selected.job.aiMatch.relevant ? "potential match" : "low match"} · {selected.job.aiMatch.model}</strong></div><p>{selected.job.aiMatch.reason}</p><small>CV evidence: {selected.job.aiMatch.cvEvidence}</small><small>AI estimates can be wrong. Verify the original posting and every requirement.</small><div className="match-review-controls"><span>Your review: {selectedMatchReview ? selectedMatchReview.reviewedRelevant ? "Relevant" : "Not relevant" : "Not reviewed"}</span><div><button type="button" className={selectedMatchReview?.reviewedRelevant === true ? "selected-review" : ""} aria-pressed={selectedMatchReview?.reviewedRelevant === true} onClick={() => reviewSelectedMatch(true)}>Relevant</button><button type="button" className={selectedMatchReview?.reviewedRelevant === false ? "selected-review" : ""} aria-pressed={selectedMatchReview?.reviewedRelevant === false} onClick={() => reviewSelectedMatch(false)}>Not relevant</button></div></div></section>}
                 <div className="evidence-label">PROFILE SKILLS MENTIONED IN POSTING <span>{selected.matched.length} found</span></div>
                 <div className="evidence-pills">{selected.matched.map((skill) => <span key={skill}>✓ {skill}{selected.titleMatched.includes(skill) && <small> · title</small>}</span>)}</div>
                 {selected.missing.length > 0 && <><div className="evidence-label gap-label">PROFILE SKILLS NOT MENTIONED <span>{selected.missing.length}</span></div><div className="evidence-pills missing-pills">{selected.missing.map((skill) => <span key={skill}>! {skill}</span>)}</div><p className="match-caveat">A skill missing from the posting text is not proof that the job requires it.</p></>}
