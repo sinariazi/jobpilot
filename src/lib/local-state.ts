@@ -66,6 +66,11 @@ function parseJob(value: unknown): Job | null {
   if (value.postedAt !== undefined && (!boundedString(value.postedAt, 50) || !Number.isFinite(Date.parse(value.postedAt)))) return null;
   if (value.department !== undefined && !boundedString(value.department, 500)) return null;
   if (value.description !== undefined && (typeof value.description !== "string" || value.description.length > 8000)) return null;
+  if (value.aiMatch !== undefined && (!isRecord(value.aiMatch)
+    || !boundedString(value.aiMatch.model, 200)
+    || typeof value.aiMatch.relevant !== "boolean"
+    || typeof value.aiMatch.score !== "number" || !Number.isInteger(value.aiMatch.score) || value.aiMatch.score < 0 || value.aiMatch.score > 100
+    || !boundedString(value.aiMatch.reason, 500) || !boundedString(value.aiMatch.cvEvidence, 300))) return null;
   return {
     id: (value.id as string).trim(),
     company: (value.company as string).trim(),
@@ -80,6 +85,13 @@ function parseJob(value: unknown): Job | null {
     ...(typeof value.description === "string" ? { description: value.description.trim() } : {}),
     ...(typeof value.sourceUrl === "string" ? { sourceUrl: value.sourceUrl } : {}),
     ...(typeof value.retrievedAt === "string" ? { retrievedAt: value.retrievedAt } : {}),
+    ...(isRecord(value.aiMatch) ? { aiMatch: {
+      model: value.aiMatch.model as string,
+      relevant: value.aiMatch.relevant as boolean,
+      score: value.aiMatch.score as number,
+      reason: value.aiMatch.reason as string,
+      cvEvidence: value.aiMatch.cvEvidence as string,
+    } } : {}),
   };
 }
 
