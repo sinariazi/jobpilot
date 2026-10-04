@@ -1,15 +1,15 @@
 # Jobpilot
 
-A local-first job-search assistant built with Next.js and TypeScript. It searches multiple public job feeds automatically, filters listings against the candidate's preferred locations, and ranks roles using profile target titles and transparent skill matching.
+A local-first job-search assistant built with Next.js and TypeScript. It searches multiple public job feeds automatically, filters listings against the candidate's preferred locations and profile evidence, and explains which target roles and skills matched.
 
 > **Current scope:** Jobpilot is an early-stage, local-first job-search and application-preparation agent. It searches public feeds from Arbeitnow (Europe-wide), Remotive (remote), and Jobicy (Europe remote), but does not cover every employer or vacancy. Matching is deterministic. When Ollama is running on the same laptop, Jobpilot can use an installed local model to draft a cover letter; candidate text stays on the laptop. CV import currently extracts role and skill suggestions only. Jobpilot does not yet tailor CVs or submit applications.
 
 ## Working now
 
 - Searches three broad public job feeds automatically; no company names, board slugs, or employer setup are required. Each listing links to its provider or original listing, with visible source attribution.
-- Filters listings using locations in the editable candidate profile. New profiles have no location preference until the user enters one.
+- Filters listings using locations in the editable candidate profile. An empty location means any location; an unqualified “Remote” listing is not assumed to be available in a specific country.
 - Filters loaded listings by keywords, posting age, work mode, and department when those feed details are available. Results appear in batches of 25; **Show more** reveals additional jobs already fetched.
-- Ranks target role title matches first, then skills explicitly mentioned in the job title, then overall profile skill coverage. The UI marks title evidence; the percentage is a text overlap indicator, not a probability of getting the job.
+- Hides listings without a profile relevance signal: a target-role match, a profile skill in the title, or at least one (for profiles with one or two skills) / two (for larger profiles) skills in the title or description. The UI marks title evidence; the percentage is a text overlap indicator, not a probability of getting the job.
 - Imports text-based PDF, DOCX, and TXT CVs in the browser and proposes past role titles and skills for review. The CV file and extracted full text are not uploaded or saved; only fields the user accepts and then saves are written to the local profile.
 - Caches the Remotive feed for six hours in keeping with its published request guidance, the Jobicy feed for at least one hour in keeping with its polling guidance, and Arbeitnow feeds for 30 minutes.
 - Saves live listings, saved jobs, application statuses, per-job notes, and editable cover-letter drafts to local JSON storage.
@@ -22,7 +22,8 @@ A local-first job-search assistant built with Next.js and TypeScript. It searche
 
 ## TODO
 
-- Add semantic skill matching; matching currently counts exact normalized phrases only, though ranking shows and prioritizes title evidence.
+- Add local-model semantic CV-to-job matching. Current filtering is deterministic exact-phrase matching, so related wording and equivalent job titles can be missed; it does not send the CV to Ollama.
+- Improve location normalization for city/country aliases and location formats used by job feeds. Ambiguous remote listings are excluded for country-specific preferences unless a compatible region is stated or known from the feed query.
 - Add a licensed, broad-coverage job search provider to find roles beyond the current public feeds and geographies; public feeds do not contain every employer or vacancy.
 - Add more job-source adapters after checking each provider's API and display/attribution terms.
 - Add further filters only when source feeds provide reliable structured fields; current filters cover posting age, inferred work mode, and available department tags.
@@ -105,7 +106,9 @@ No AI API key or hosted AI account is needed. Jobpilot sends the selected job de
 
 ## Search jobs
 
-Select **Search jobs now** in the overview. Jobpilot retrieves listings from public feeds and filters them against preferred locations in the local profile. Add target role titles to rank title matches first. Skills named in a job title are prioritized next, followed by overall profile skill coverage; the displayed percentage is the share of profile skills found in the posting text.
+Select **Search jobs now** in the overview. Jobpilot retrieves listings from public feeds and filters them against preferred locations and saved profile evidence. Jobs must match a target role, a profile skill in the title, or the minimum skill overlap before they appear. Matching uses exact normalized phrases; semantic similarity is not implemented yet. The displayed percentage is the share of profile skills found in the posting text, not an estimate of hiring chances.
+
+Enter preferred locations explicitly in **Candidate profile**. Separate alternatives with semicolons, for example `Austria; Remote Europe`. Leave the field blank only if you want jobs from any location. CV addresses are not imported or used as preferences. A generic `Remote` label does not identify eligible countries; select `Remote` explicitly if you want all such postings.
 
 Use the keyword box to search role, company, location, and department text. The posting-age filter offers any date, the last 7 days, or the last 30 days; listings without a publication date are omitted when a date range is selected. Work-mode filtering uses the feed's mode and location text, so an employer's listing is the source of truth. Department choices come from the current results and appear only when a feed provides department information. **Show more jobs** displays 25 more entries from the retrieved batch; it does not request another batch from the providers.
 
