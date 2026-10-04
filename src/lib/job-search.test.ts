@@ -1,67 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { searchPublicJobs } from "./job-search";
 
-afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+afterEach(() => vi.unstubAllGlobals());
 
 describe("searchPublicJobs", () => {
-  it("requires credentials when optional Adzuna search is selected", async () => {
-    vi.stubEnv("ADZUNA_APP_ID", "");
-    vi.stubEnv("ADZUNA_APP_KEY", "");
-    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
-      const url = String(input);
-      if (url.includes("arbeitnow")) return Response.json({ data: [] });
-      if (url.includes("remotive")) return Response.json({ jobs: [] });
-      return Response.json({ jobs: [] });
-    }));
-
-    const result = await searchPublicJobs({ adzunaSearch: { roles: "Software Engineer", locations: "Austria" } });
-    expect(result.jobs).toEqual([]);
-    expect(result.errors).toContain("Adzuna is enabled but not configured. Add ADZUNA_APP_ID and ADZUNA_APP_KEY to .env.local, then restart Jobpilot.");
-  });
-
-  it("uses opt-in target role and supported location with server-side credentials", async () => {
-    vi.stubEnv("ADZUNA_APP_ID", "test-id");
-    vi.stubEnv("ADZUNA_APP_KEY", "test-secret");
-    const requests: string[] = [];
-    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
-      const url = String(input);
-      requests.push(url);
-      if (url.includes("api.adzuna.com")) return Response.json({ results: [{ id: 123, title: "Senior Engineer", company: { display_name: "Example" }, location: { display_name: "Vienna, Austria" }, description: "<p>Build systems</p>", created: "2026-10-03T10:00:00Z", redirect_url: "https://www.adzuna.at/jobs/land/ad/123" }] });
-      if (url.includes("arbeitnow")) return Response.json({ data: [], links: { next: null } });
-      if (url.includes("remotive")) return Response.json({ jobs: [] });
-      return Response.json({ jobs: [] });
-    }));
-
-    const result = await searchPublicJobs({ adzunaSearch: { roles: "Senior Engineer", locations: "Vienna, Austria" } });
-    const requestUrl = new URL(requests.find((url) => url.includes("api.adzuna.com"))!);
-
-    expect(result.jobs.map((job) => job.source)).toContain("Adzuna");
-    expect(result.jobs.find((job) => job.source === "Adzuna")?.sourceAttributionUrl).toBe("https://www.adzuna.at/");
-    expect(requestUrl.pathname).toBe("/v1/api/jobs/at/search/1");
-    expect(requestUrl.searchParams.get("what")).toBe("Senior Engineer");
-    expect(requestUrl.searchParams.get("where")).toBe("Vienna, Austria");
-    expect(requestUrl.searchParams.get("app_id")).toBe("test-id");
-    expect(requestUrl.searchParams.get("app_key")).toBe("test-secret");
-    expect(requests.filter((url) => url.includes("api.adzuna.com"))).toHaveLength(1);
-    expect(result.errors).toEqual([]);
-  });
-
-  it("exposes Adzuna continuation when a full results page is returned", async () => {
-    vi.stubEnv("ADZUNA_APP_ID", "test-id");
-    vi.stubEnv("ADZUNA_APP_KEY", "test-secret");
-    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
-      const url = String(input);
-      if (url.includes("api.adzuna.com")) return Response.json({ results: Array.from({ length: 50 }, (_, index) => ({ id: index + 1, title: "Engineer", company: { display_name: "Example" }, redirect_url: `https://www.adzuna.at/jobs/${index + 1}` })) });
-      if (url.includes("arbeitnow")) return Response.json({ data: [], links: { next: null } });
-      if (url.includes("remotive")) return Response.json({ jobs: [] });
-      return Response.json({ jobs: [] });
-    }));
-
-    const result = await searchPublicJobs({ adzunaSearch: { roles: "Engineer", locations: "Austria" } });
-    expect(result.jobs.filter((job) => job.source === "Adzuna")).toHaveLength(50);
-    expect(result.nextAdzunaPage).toBe(2);
-  });
-
   it("combines listings from the public feeds and preserves attribution URLs", async () => {
     const requests: Array<{ url: string; options?: RequestInit }> = [];
     const fetchMock = vi.fn(async (input: string | URL | Request, options?: RequestInit) => {

@@ -70,25 +70,11 @@ To use Jobpilot another day, open Ollama, open a terminal in the `jobpilot-main`
 - The default score weights are skills 40%, experience 30%, domain fit 20%, and penalty for explicit disqualifiers 10%. Detailed analysis runs by default at scores of 65 or higher, confidence below 60, or whenever important information is missing/unclear. Change these settings in Jobpilot; the score is not a probability of being hired.
 - Shows score breakdowns, confidence when the model provides it, missing information, and detailed matched requirements/gaps with source evidence when available. Verify every result against the original listing.
 - Lets you save jobs, track application status, add private notes and follow-up dates, and create editable cover-letter drafts. The application-preparation panel recognizes Greenhouse, Lever, Ashby, Workday, SmartRecruiters, and Workable URLs, gives a platform-aware checklist, and copies a packet from optional profile contact details and your saved cover letter. Add contact details in **Candidate profile**. Jobpilot never fills or submits employer forms.
-- Can optionally search Adzuna in supported countries named in your preferred locations. Turn on **Also search Adzuna** in the search panel. This sends your target job titles and preferred locations to Adzuna as search terms; it does not send your CV or contact details. Adzuna adverts are attributed and link to the local Adzuna site.
 - Stores profile and job-tracker data on this device in `~/.jobpilot/state.json` (or the folder set by `JOBPILOT_DATA_DIR`). The file is not encrypted. Use **Candidate profile → Data backup** to save or restore a local backup.
-
-### Optional: enable Adzuna search
-
-Adzuna requires an API account and credentials. Read [Adzuna's API terms](https://developer.adzuna.com/docs/terms_of_service) before registering. Adzuna decides whether to grant access. Its default quota is 25 requests per minute, 250 per day, 1,000 per week, and 2,500 per month. The search API returns a job-description snippet, not always the complete description.
-
-1. Register at [developer.adzuna.com](https://developer.adzuna.com/) and obtain an app ID and app key. Only use the API for purposes permitted by your account and terms.
-2. In the Jobpilot folder, copy `.env.example` and name the copy `.env.local`.
-3. Open `.env.local` in a text editor. Paste your credentials after `ADZUNA_APP_ID=` and `ADZUNA_APP_KEY=`. Do not share or commit this file.
-4. Stop and restart Jobpilot. Enter supported country names in **Candidate profile → Preferred locations**, then select **Also search Adzuna** before searching.
-
-Supported market names are Australia, Austria, Belgium, Brazil, Canada, France, Germany, India, Italy, Mexico, the Netherlands, New Zealand, Poland, Singapore, South Africa, Spain, Switzerland, the United Kingdom, and the United States. Add a country explicitly; Jobpilot will not guess a country from a city or “Europe”.
-
-The Adzuna API accepts role and location search parameters, so opt-in searches send those two profile fields to Adzuna. The CV, contact details, match scores, and Ollama prompts stay on your computer. Each result links to the relevant Adzuna country site. See the [official search API docs](https://developer.adzuna.com/docs/search) and [terms](https://developer.adzuna.com/docs/terms_of_service) for current requirements.
 
 ## CV privacy and local AI
 
-The CV file is read in your browser and is not saved by Jobpilot. Extracted CV text is held in memory and sent to Ollama on this same computer for CV analysis and job matching. Job descriptions used for matching are also sent only to local Ollama. Jobpilot has no hosted AI fallback. Existing public feeds do not receive profile data. If you explicitly enable Adzuna, only the target-role and preferred-location search terms are sent to its API; do not enable it if you do not accept that disclosure. Extracted role and skill suggestions, AI scores/explanations, review labels, profile fields, and tracker data are stored locally; the stored data is not encrypted. Cover-letter generation sends the job details, profile name and skills, and notes you enter to local Ollama, but not the full CV text. Keep Jobpilot bound to `localhost`; do not expose it to your network.
+The CV file is read in your browser and is not saved by Jobpilot. Extracted CV text is held in memory and sent to Ollama on this same computer for CV analysis and job matching. Job descriptions used for matching are also sent only to local Ollama. Jobpilot has no hosted AI fallback. Public feeds do not receive candidate profile data. Extracted role and skill suggestions, AI scores/explanations, review labels, profile fields, and tracker data are stored locally; the stored data is not encrypted. Cover-letter generation sends the job details, profile name and skills, and notes you enter to local Ollama, but not the full CV text. Keep Jobpilot bound to `localhost`; do not expose it to your network.
 
 Job discovery needs an internet connection. AI matching needs Ollama and installed models. The model's speed and quality depend on the model and your computer. User-reviewed match feedback is a selected sample and does not establish general accuracy or calibration.
 
@@ -105,7 +91,6 @@ Restart Jobpilot and choose English, German, or both in the CV upload section. T
 ## Current limitations (TODO)
 
 - Broaden location/country normalization and cover more languages and inconsistent feed formats.
-- Obtain Adzuna API access for this use, confirm the account-specific license/permission and current terms, then verify live market coverage with real credentials. The opt-in adapter and mocked contract tests are implemented, but live API access has not been granted or tested in this workspace.
 - Encrypt local profile, tracker, and backup data.
 - Tailor and export a CV from verified source material; currently Jobpilot analyzes CVs but does not generate tailored CV files.
 - Add a browser extension or equivalent local integration for ATS form prefill. Current ATS recognition is best-effort from the posting URL; preparation is copy/paste and does not access or submit employer forms.
@@ -136,7 +121,7 @@ GitHub Actions runs these checks on pushes and pull requests. Public feed endpoi
 
 ## Solution architecture showcase
 
-Jobpilot is designed as a single-user, local-first application. The browser handles CV file reading and text extraction; a local Next.js server coordinates job feeds, profile analysis, matching, and persistence. Ollama performs inference on the same computer. Public providers supply job listings. Only an explicit Adzuna opt-in sends target-role and location query terms; no feed provider receives CV text or contact details.
+Jobpilot is designed as a single-user, local-first application. The browser handles CV file reading and text extraction; a local Next.js server coordinates job feeds, profile analysis, matching, and persistence. Ollama performs inference on the same computer. Public providers supply job listings and do not receive candidate profile or CV data.
 
 ### System context and trust boundaries
 
@@ -145,8 +130,6 @@ flowchart TB
     person["Candidate"] --> browser["Browser UI: CV extraction and review"]
     browser --> app["Local Jobpilot server: Next.js UI and API"]
     app -->|"Public listing requests"| feeds["Job feeds: Arbeitnow, Remotive, Jobicy"]
-    app -.->|"When selected: role and location terms"| adzuna["Adzuna API"]
-    adzuna -->|"Attributed listings and links"| app
     feeds -->|"Listings"| app
     app -->|"Loopback only: CV text and job descriptions"| ollama["Ollama: decision and chat models on this computer"]
     ollama -->|"Scores and analysis"| app
@@ -212,7 +195,7 @@ sequenceDiagram
 | Keep orchestration in the local Next.js application | One installable TypeScript project serves the UI and local APIs without a separate hosted backend. | The app is a single-user local tool, not a multi-user service. |
 | Use adapters to map provider listings into a shared job type | Feed-specific fields are normalized before location filtering, display, and matching. | Coverage and pagination depend on each provider's public API and terms. |
 | Split matching into a fast decision stage and a detailed stage | A lightweight estimate can screen many listings; slower evidence-focused analysis is reserved for selected or uncertain cases. | Both stages depend on local model compatibility, hardware, and model quality. |
-| Keep CV and contact data away from job-feed providers and hosted AI | Candidate CV text goes only to Ollama on loopback; Adzuna receives role/location search terms only after explicit opt-in. | Job discovery still requires an internet connection, and local JSON data is not encrypted. |
+| Keep CV and contact data away from job-feed providers and hosted AI | Candidate CV text goes only to Ollama on loopback; public feed requests retrieve listings without candidate profile data. | Job discovery still requires an internet connection, and local JSON data is not encrypted. |
 | Preserve human review and show estimates separately | Scores, confidence, and detailed analysis remain distinguishable; original postings stay available. | The agent does not submit applications, and score calibration awaits reviewed examples. |
 
 This design demonstrates local data-boundary design, integration of heterogeneous APIs, explicit decision routing, failure-aware AI orchestration, and human-in-the-loop workflow design. Remaining boundaries—encryption, broader feed coverage, ATS integration, and measured score accuracy—are documented in [Current limitations](#current-limitations-todo).
