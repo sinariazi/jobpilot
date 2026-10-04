@@ -34,6 +34,8 @@ export function isRelevantToProfile(job: Job, candidateSkills: string[], targetR
   return match.matched.length >= minimumSkillMatches;
 }
 
-export function jobsForReview(jobs: Job[], hasCurrentCvAssessment: boolean, candidateSkills: string[], targetRoles: string) {
-  return jobs.filter((job) => hasCurrentCvAssessment || isRelevantToProfile(job, candidateSkills, targetRoles));
+export function jobsForReview(jobs: Job[]) {
+  // Do not hide results because keyword extraction missed relevant experience.
+  // Sorting and explicit filters let the user decide what to review.
+  return jobs;
 }

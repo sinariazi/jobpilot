@@ -288,9 +288,9 @@ export default function Home() {
   const matchingConfigurationKey = JSON.stringify(matchingSettings);
   const currentModelReviews = useMemo(() => matchReviews.filter((review) => review.model === matchingSettings.decisionModel && review.cohortKey === matchCohortKey && review.configurationKey === matchingConfigurationKey), [matchReviews, matchingSettings.decisionModel, matchingConfigurationKey, matchCohortKey]);
   const currentModelMetrics = useMemo(() => summarizeMatchReviews(currentModelReviews), [currentModelReviews]);
-  // With a current CV assessment, keep every location-eligible listing visible.
-  // The model's relevance flag is guidance for ranking and labels, not a hidden filter.
-  const preferredJobs = useMemo(() => jobsForReview(locationMatchedJobs, hasAnyScreenings, candidateSkills, profile.roles), [locationMatchedJobs, hasAnyScreenings, candidateSkills, profile.roles]);
+  // Keep every location-eligible listing visible. Relevance scores guide sorting;
+  // they must not hide jobs just because extracted CV keywords missed a match.
+  const preferredJobs = useMemo(() => jobsForReview(locationMatchedJobs), [locationMatchedJobs]);
   const ranked = useMemo(() => preferredJobs.map((job) => {
     const keywordMatch = scoreJob(job, candidateSkills);
     const screening = job.screening?.model === matchingSettings.decisionModel ? job.screening : undefined;
@@ -914,7 +914,8 @@ export default function Home() {
             </>}
           </section>}
 
-          <div className="section-heading"><div><h2>Job listings <span className="result-count">{filteredRanked.length}</span></h2><p>{hasAnyScreenings ? "Sorted by local decision-model fit estimate. Confidence is shown separately; neither is a hiring probability." : "Sort by target role, exact skill overlap, posting date, or company."}</p></div><span className="filter-summary">Showing {visibleJobs.length} of {filteredRanked.length}</span></div>
+          <div className="section-heading"><div><h2>Job listings <span className="result-count">{filteredRanked.length}</span></h2><p>{hasAnyScreenings ? "All location-eligible jobs are shown and sorted by local decision-model fit estimate. Confidence is separate; neither is a hiring probability." : "All location-eligible jobs are shown. Without a current local AI assessment, the score is profile keyword overlap only."}</p></div><span className="filter-summary">Showing {visibleJobs.length} of {filteredRanked.length}</span></div>
+          {(nextArbeitnowPage !== null || nextJobicyCursor !== null) && <button className="load-more" onClick={() => void fetchMoreJobs()} disabled={loadingMoreJobs || loadingJobs}>{loadingMoreJobs ? "Loading more jobs…" : "Load more jobs from public feeds"}</button>}
           <div className="jobs-layout">
             <section className="jobs-column">
               <div className="filters">
@@ -930,7 +931,6 @@ export default function Home() {
                 <div className="job-list">{visibleJobs.map(({ job, score, confidence, matched, titleMatched, roleMatch }) => <article key={job.id} className={`job-card ${selected?.job.id === job.id ? "selected" : ""}`}><button type="button" className="job-card-main" aria-pressed={selected?.job.id === job.id} onClick={() => { selectJob(job.id); setStatus((current) => current[job.id] ? current : { ...current, [job.id]: "Needs review" }); }}><div className="job-card-top"><div className={`company-logo logo-${job.source.toLowerCase()}`}>{job.company.slice(0, 1)}</div><span className="match-tag">{job.screening?.model === matchingSettings.decisionModel ? `${score}% estimate · ${confidence === null ? "confidence unavailable" : `${confidence}% confidence`}` : roleMatch ? "Target role" : `${score}% skills overlap`}</span></div><div className="job-title">{job.role}</div><div className="company-name">{job.company} <span>·</span> {job.location}</div><div className="job-meta"><span>◷ {job.posted}</span><span>⌂ {job.mode}</span><span className="source-tag">{job.source} · feed</span></div></button><div className="job-card-bottom"><div className="skill-pills">{matched.slice(0, 3).map((skill) => <span className={titleMatched.includes(skill) ? "skill-in-title" : ""} key={skill}>{skill}{titleMatched.includes(skill) && <small>title</small>}</span>)}{matched.length > 3 && <span className="more-skills">+{matched.length - 3}</span>}</div><button type="button" className={`bookmark ${saved.includes(job.id) ? "bookmarked" : ""}`} onClick={() => setSaved((current) => current.includes(job.id) ? current.filter((id) => id !== job.id) : [...current, job.id])} aria-label={saved.includes(job.id) ? "Remove saved job" : "Save job"} aria-pressed={saved.includes(job.id)}>{saved.includes(job.id) ? "★" : "☆"}</button></div></article>)}</div>
                 {visibleJobs.length < filteredRanked.length && <button className="load-more" onClick={() => setVisibleCount((count) => count + 25)}>Show more jobs <span>({filteredRanked.length - visibleJobs.length} remaining)</span></button>}
               </> : <div className="empty-state">{liveJobs.length === 0 ? "No jobs loaded yet. Select “Search jobs now” to check public job feeds." : ranked.length === 0 ? query ? "No live jobs match that search. Try another role or company." : emptyJobMessage : "No jobs match these filters. Try a different date, work mode, or department."}</div>}
-              {(nextArbeitnowPage !== null || nextJobicyCursor !== null) && <button className="load-more" onClick={() => void fetchMoreJobs()} disabled={loadingMoreJobs || loadingJobs}>{loadingMoreJobs ? "Loading more jobs…" : "Load more jobs"}</button>}
             </section>
 
             {selected ? (

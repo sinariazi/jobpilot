@@ -52,8 +52,11 @@ describe("profile relevance filter", () => {
     expect(isRelevantToProfile(role, [], "")).toBe(false);
   });
 
-  it("keeps all location-filtered jobs reviewable after CV assessment, including low AI matches", () => {
-    const assessed = [{ ...role, aiMatch: { model: "local", relevant: false, score: 18, reason: "Few overlapping requirements", cvEvidence: "TypeScript experience" } }];
-    expect(jobsForReview(assessed, true, [], "")).toEqual(assessed);
+  it("keeps all location-filtered jobs reviewable even when keyword matching finds no overlap", () => {
+    const matches = [
+      { ...role, aiMatch: { model: "local", relevant: false, score: 18, reason: "Few overlapping requirements", cvEvidence: "TypeScript experience" } },
+      { ...role, id: "other", summary: "An unfamiliar role with no extracted profile keywords." },
+    ];
+    expect(jobsForReview(matches)).toEqual(matches);
   });
 });
