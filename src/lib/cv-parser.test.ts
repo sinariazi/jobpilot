@@ -56,6 +56,19 @@ describe("extractCvSuggestionsFromText", () => {
     expect(result.roles).toBe("Senior Product Engineer; Technical Project Manager");
   });
 
+  it("recognizes alternate English headings", () => {
+    const result = extractCvSuggestionsFromText(`
+      Career Path
+      Lead Backend Developer
+      2020–2024
+      Areas of Expertise: Node.js, Kafka, PostgreSQL
+      Additional Information
+      Volunteer mentor
+    `);
+    expect(result.roles).toBe("Lead Backend Developer");
+    expect(result.skills).toBe("Node.js, Kafka, PostgreSQL");
+  });
+
   it("keeps extracted text available in memory for local model matching", async () => {
     const text = "Professional experience\nSenior Engineer at Example Company from 2021 to 2025. Built TypeScript applications for customers.\nTechnical skills\nTypeScript, React, AWS.";
     const parsed = await parseCvFile(new File([text], "candidate-cv.txt", { type: "text/plain" }));
