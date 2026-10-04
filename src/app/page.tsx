@@ -517,7 +517,7 @@ export default function Home() {
       setBackupMessage("This file is not a valid Jobpilot backup or uses an unsupported backup version.");
       return;
     }
-    if (!window.confirm("Restore this backup? It will replace the profile, saved jobs, application statuses, and fetched listings on this device.")) {
+    if (!window.confirm("Restore this backup? It will replace the profile, saved jobs, application statuses, fetched listings, and local AI match reviews on this device.")) {
       setBackupMessage("Restore cancelled. Your current data was not changed.");
       return;
     }
