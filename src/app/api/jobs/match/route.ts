@@ -98,7 +98,14 @@ export async function POST(request: Request) {
         ],
       }),
     });
-    if (!upstream.ok) return Response.json({ error: `The local model could not analyze these jobs (HTTP ${upstream.status}).` }, { status: 502 });
+    if (!upstream.ok) {
+      let detail = "";
+      try {
+        const payload: unknown = await upstream.json();
+        if (isRecord(payload) && typeof payload.error === "string") detail = payload.error.replace(/[\u0000-\u001f]/g, " ").slice(0, 240);
+      } catch { /* The status code is enough when Ollama returns a non-JSON error. */ }
+      return Response.json({ error: `The local model could not analyze these jobs (HTTP ${upstream.status})${detail ? `: ${detail}` : ". Try a smaller model or fewer jobs."}` }, { status: 502 });
+    }
     const result: unknown = await upstream.json();
     if (!isRecord(result) || !isRecord(result.message) || typeof result.message.content !== "string") {
       return Response.json({ error: "The local model returned an unreadable match result." }, { status: 502 });
