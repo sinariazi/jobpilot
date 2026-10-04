@@ -28,7 +28,7 @@ describe("local CV-to-job matching API", () => {
     vi.stubGlobal("fetch", fetchMock);
     const response = await POST(new Request("http://localhost/api/jobs/match", { method: "POST", body: JSON.stringify(requestBody) }));
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ matches: [{ id: "job-1", relevant: true, score: 86, reason: "The role uses frontend engineering skills demonstrated in your CV.", cvEvidence: "TypeScript and React experience" }] });
+    expect(await response.json()).toEqual({ matches: [{ id: "job-1", relevant: true, score: 86, reason: "The role uses frontend engineering skills demonstrated in your CV.", cvEvidence: "TypeScript and React experience", detailedAnalysis: { model: requestBody.model, summary: "The role uses frontend engineering skills demonstrated in your CV.", matchedRequirements: [], gaps: [], evidence: [] } }] });
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["http://127.0.0.1:11434/api/tags", "http://127.0.0.1:11434/api/chat"]);
     const payload = JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body)) as { think: boolean; messages: Array<{ content: string }> };
     expect(payload.think).toBe(false);
@@ -43,6 +43,18 @@ describe("local CV-to-job matching API", () => {
     const response = await POST(new Request("http://localhost/api/jobs/match", { method: "POST", body: JSON.stringify(requestBody) }));
     expect(response.status).toBe(502);
     expect(await response.json()).toEqual({ error: "The local model did not assess every listing. Try another installed model." });
+  });
+
+  it("keeps detailed scores distinct and drops evidence that is not an exact source excerpt", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ models: [{ name: requestBody.model }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify({ matches: [{ id: "job-1", relevant: true, score: 80, reason: "Evidence supports some core requirements.", cvEvidence: "TypeScript experience", matchedRequirements: ["React experience"], gaps: ["No stated Kubernetes experience"], evidence: [{ requirement: "TypeScript", cvQuote: "TypeScript", jobQuote: "Build React applications" }, { requirement: "Invented", cvQuote: "I led an IPO", jobQuote: "Entirely fabricated requirement" }] }] }) } }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await POST(new Request("http://localhost/api/jobs/match", { method: "POST", body: JSON.stringify(requestBody) }));
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload.matches[0].detailedAnalysis).toEqual({ model: requestBody.model, summary: "Evidence supports some core requirements.", matchedRequirements: ["React experience"], gaps: ["No stated Kubernetes experience"], evidence: [{ requirement: "TypeScript", cvQuote: "TypeScript", jobQuote: "Build React applications" }] });
+    expect(payload.matches[0].score).toBe(80);
   });
 
   it("propagates a disconnected browser request to Ollama", async () => {

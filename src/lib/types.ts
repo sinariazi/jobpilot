@@ -20,6 +20,31 @@ export type Job = {
     reason: string;
     cvEvidence: string;
   };
+  screening?: JobScreening;
+  detailedAnalysis?: DetailedJobAnalysis;
+};
+
+export type MatchWeights = { skills: number; experience: number; domain: number; disqualifier: number };
+export type MatchingSettings = {
+  decisionModel: string;
+  weights: MatchWeights;
+  detailedScoreThreshold: number;
+  detailedConfidenceThreshold: number;
+};
+export type JobScreening = {
+  model: string;
+  score: number;
+  confidence: number | null;
+  breakdown: { skills: number | null; experience: number | null; domain: number | null };
+  disqualifierRisk: number | null;
+  informationStatus: "sufficient" | "cv_missing" | "job_missing" | "both_missing";
+};
+export type DetailedJobAnalysis = {
+  model: string;
+  summary: string;
+  matchedRequirements: string[];
+  gaps: string[];
+  evidence: Array<{ requirement: string; cvQuote: string; jobQuote: string }>;
 };
 
 export type CandidateProfile = {
@@ -43,6 +68,7 @@ export type MatchReview = {
   company: string;
   role: string;
   model: string;
+  configurationKey?: string;
   cohortKey: string;
   score: number;
   predictedRelevant: boolean;
@@ -59,6 +85,7 @@ export type PersistedState = {
   coverLetterDrafts?: Record<string, CoverLetterDraftRecord>;
   matchReviews?: MatchReview[];
   matchCohortKey?: string;
+  matchingSettings?: MatchingSettings;
   liveJobs: Job[];
 };
 

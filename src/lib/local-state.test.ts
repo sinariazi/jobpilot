@@ -32,6 +32,8 @@ const exampleJob: Job = {
   summary: "Build a product feature.",
   description: "What you will do:\n\nBuild and ship product features.",
   aiMatch: { model: "local-model:latest", relevant: true, score: 84, reason: "Your experience building product software fits this role.", cvEvidence: "Full-stack product engineering experience" },
+  screening: { model: "decision:latest", score: 82, confidence: 74, breakdown: { skills: 90, experience: 80, domain: 70 }, disqualifierRisk: 10, informationStatus: "sufficient" },
+  detailedAnalysis: { model: "local-model:latest", summary: "Evidence supports the core requirements.", matchedRequirements: ["TypeScript"], gaps: ["Unclear cloud scope"], evidence: [{ requirement: "TypeScript", cvQuote: "TypeScript", jobQuote: "Build with TypeScript" }] },
 };
 
 describe("local state storage", () => {
@@ -51,6 +53,7 @@ describe("local state storage", () => {
       coverLetterDrafts: { [exampleJob.id]: { interest: "The product", evidence: "Shipped a feature", draft: "Dear team", updatedAt: "2026-10-02T12:00:00.000Z" } },
       matchReviews: [{ jobId: exampleJob.id, company: exampleJob.company, role: exampleJob.role, model: "local-model:latest", cohortKey: "a".repeat(64), score: 84, predictedRelevant: true, reviewedRelevant: true, reviewedAt: "2026-10-02T12:00:00.000Z" }],
       matchCohortKey: "a".repeat(64),
+      matchingSettings: { decisionModel: "decision:latest", weights: { skills: 40, experience: 30, domain: 20, disqualifier: 10 }, detailedScoreThreshold: 65, detailedConfidenceThreshold: 60 },
       liveJobs: [exampleJob],
     };
 
@@ -120,6 +123,6 @@ describe("local state storage", () => {
 
   it("accepts older saved states without optional tracker fields", () => {
     const olderState = { profile: defaultState().profile, saved: [], status: {}, liveJobs: [] };
-    expect(parsePersistedState(olderState)).toEqual({ ...olderState, applicationNotes: {}, applicationFollowUps: {}, coverLetterDrafts: {}, matchReviews: [], matchCohortKey: "" });
+    expect(parsePersistedState(olderState)).toEqual({ ...olderState, applicationNotes: {}, applicationFollowUps: {}, coverLetterDrafts: {}, matchReviews: [], matchCohortKey: "", matchingSettings: defaultState().matchingSettings });
   });
 });

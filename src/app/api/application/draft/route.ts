@@ -94,7 +94,10 @@ export async function GET() {
       // Older Ollama releases may not expose the version endpoint; model status remains valid.
     }
     const preferredModel = process.env.OLLAMA_MODEL;
-    return Response.json({ connected: true, available: models.length > 0, models, ...(runtimeVersion ? { runtimeVersion } : {}), ...(preferredModel ? { preferredModel } : {}), ...(!models.length ? { message: "Ollama is connected, but no models are installed." } : {}) }, { headers: { "Cache-Control": "no-store" } });
+    const preferredDecisionModel = process.env.OLLAMA_DECISION_MODEL;
+    const versionParts = runtimeVersion?.match(/^(\d+)\.(\d+)\.(\d+)/);
+    const systemOneAvailable = Boolean(versionParts && (Number(versionParts[1]) > 0 || Number(versionParts[2]) >= 35));
+    return Response.json({ connected: true, available: models.length > 0, models, systemOneAvailable, ...(runtimeVersion ? { runtimeVersion } : {}), ...(preferredModel ? { preferredModel } : {}), ...(preferredDecisionModel ? { preferredDecisionModel } : {}), ...(!models.length ? { message: "Ollama is connected, but no models are installed." } : runtimeVersion && !systemOneAvailable ? { message: "Upgrade Ollama to version 0.35 or newer to enable local decision screening." } : {}) }, { headers: { "Cache-Control": "no-store" } });
   } catch {
     return Response.json({ connected: false, available: false, models: [], message: "Ollama is not reachable on this laptop. Start Ollama and try again." }, { headers: { "Cache-Control": "no-store" } });
   }

@@ -4,6 +4,8 @@ import { join, resolve } from "node:path";
 import type { ApplicationStatus, CandidateProfile, CoverLetterDraftRecord, Job, MatchReview, PersistedState } from "./types";
 import { defaultProfile } from "./types";
 import { MAX_MATCH_REVIEWS } from "./match-calibration";
+import { normalizeMatchingSettings } from "./job-screening";
+import type { DetailedJobAnalysis, JobScreening, MatchingSettings } from "./types";
 
 const STORAGE_VERSION = 1;
 const MAX_TRACKED_JOBS = 2_000;
@@ -17,7 +19,7 @@ const allowedStatuses = new Set<ApplicationStatus>([
 export type LoadedState = PersistedState & { initialized: boolean };
 
 export function defaultState(): LoadedState {
-  return { profile: defaultProfile, saved: [], status: {}, applicationNotes: {}, applicationFollowUps: {}, coverLetterDrafts: {}, matchReviews: [], matchCohortKey: "", liveJobs: [], initialized: false };
+  return { profile: defaultProfile, saved: [], status: {}, applicationNotes: {}, applicationFollowUps: {}, coverLetterDrafts: {}, matchReviews: [], matchCohortKey: "", matchingSettings: normalizeMatchingSettings(undefined), liveJobs: [], initialized: false };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -72,6 +74,30 @@ function parseJob(value: unknown): Job | null {
     || typeof value.aiMatch.relevant !== "boolean"
     || typeof value.aiMatch.score !== "number" || !Number.isInteger(value.aiMatch.score) || value.aiMatch.score < 0 || value.aiMatch.score > 100
     || !boundedString(value.aiMatch.reason, 500) || !boundedString(value.aiMatch.cvEvidence, 300))) return null;
+  let screening: JobScreening | undefined;
+  if (value.screening !== undefined) {
+    const item = value.screening;
+    if (!isRecord(item) || !boundedString(item.model, 200) || !Number.isInteger(item.score) || (item.score as number) < 0 || (item.score as number) > 100
+      || !isRecord(item.breakdown)
+      || !(item.confidence === null || (typeof item.confidence === "number" && Number.isInteger(item.confidence) && item.confidence >= 0 && item.confidence <= 100))
+      || !(item.disqualifierRisk === null || (typeof item.disqualifierRisk === "number" && Number.isInteger(item.disqualifierRisk) && item.disqualifierRisk >= 0 && item.disqualifierRisk <= 100))
+      || !["sufficient", "cv_missing", "job_missing", "both_missing"].includes(String(item.informationStatus))) return null;
+    const breakdown = item.breakdown;
+    if (!["skills", "experience", "domain"].every((key) => {
+      const part = breakdown[key];
+      return part === null || (typeof part === "number" && Number.isInteger(part) && part >= 0 && part <= 100);
+    })) return null;
+    screening = item as unknown as JobScreening;
+  }
+  let detailedAnalysis: DetailedJobAnalysis | undefined;
+  if (value.detailedAnalysis !== undefined) {
+    const item = value.detailedAnalysis;
+    if (!isRecord(item) || !boundedString(item.model, 200) || typeof item.summary !== "string" || item.summary.length > 3000
+      || !Array.isArray(item.matchedRequirements) || item.matchedRequirements.length > 30 || !item.matchedRequirements.every((entry) => boundedString(entry, 500))
+      || !Array.isArray(item.gaps) || item.gaps.length > 30 || !item.gaps.every((entry) => boundedString(entry, 500))
+      || !Array.isArray(item.evidence) || item.evidence.length > 30 || !item.evidence.every((entry) => isRecord(entry) && boundedString(entry.requirement, 500) && boundedString(entry.cvQuote, 500) && boundedString(entry.jobQuote, 500))) return null;
+    detailedAnalysis = item as unknown as DetailedJobAnalysis;
+  }
   return {
     id: (value.id as string).trim(),
     company: (value.company as string).trim(),
@@ -93,6 +119,8 @@ function parseJob(value: unknown): Job | null {
       reason: value.aiMatch.reason as string,
       cvEvidence: value.aiMatch.cvEvidence as string,
     } } : {}),
+    ...(screening ? { screening } : {}),
+    ...(detailedAnalysis ? { detailedAnalysis } : {}),
   };
 }
 
@@ -128,12 +156,14 @@ export function parsePersistedState(value: unknown): PersistedState | null {
   for (const entry of matchReviews) {
     if (!isRecord(entry) || !boundedString(entry.jobId, 300) || !boundedString(entry.company, 160)
       || !boundedString(entry.role, 300) || !boundedString(entry.model, 200)
+      || (entry.configurationKey !== undefined && (typeof entry.configurationKey !== "string" || entry.configurationKey.length > 500))
       || typeof entry.cohortKey !== "string" || !/^[a-f0-9]{64}$/.test(entry.cohortKey)
       || typeof entry.score !== "number" || !Number.isInteger(entry.score) || entry.score < 0 || entry.score > 100
       || typeof entry.predictedRelevant !== "boolean" || typeof entry.reviewedRelevant !== "boolean"
       || typeof entry.reviewedAt !== "string" || !Number.isFinite(Date.parse(entry.reviewedAt))) return null;
     parsedMatchReviews.push({
       jobId: entry.jobId.trim(), company: entry.company.trim(), role: entry.role.trim(), model: entry.model.trim(),
+      ...(typeof entry.configurationKey === "string" ? { configurationKey: entry.configurationKey } : {}),
       cohortKey: entry.cohortKey, score: entry.score, predictedRelevant: entry.predictedRelevant,
       reviewedRelevant: entry.reviewedRelevant, reviewedAt: entry.reviewedAt,
     });
@@ -143,6 +173,7 @@ export function parsePersistedState(value: unknown): PersistedState | null {
   if (value.liveJobs !== undefined && (!Array.isArray(value.liveJobs) || value.liveJobs.length > MAX_TRACKED_JOBS)) return null;
   const liveJobs = value.liveJobs === undefined ? [] : value.liveJobs.map(parseJob);
   if (liveJobs.some((job) => job === null)) return null;
+  const matchingSettings: MatchingSettings = normalizeMatchingSettings(value.matchingSettings);
   return {
     profile,
     saved,
@@ -152,6 +183,7 @@ export function parsePersistedState(value: unknown): PersistedState | null {
     coverLetterDrafts: parsedDrafts,
     matchReviews: parsedMatchReviews,
     matchCohortKey,
+    matchingSettings,
     liveJobs: liveJobs as Job[],
   };
 }

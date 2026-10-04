@@ -1,0 +1,61 @@
+import type { JobScreening, MatchWeights, MatchingSettings } from "./types";
+
+export const DEFAULT_MATCH_WEIGHTS: MatchWeights = { skills: 40, experience: 30, domain: 20, disqualifier: 10 };
+export const DEFAULT_MATCHING_SETTINGS: MatchingSettings = {
+  decisionModel: "",
+  weights: DEFAULT_MATCH_WEIGHTS,
+  detailedScoreThreshold: 65,
+  detailedConfidenceThreshold: 60,
+};
+
+export function normalizeMatchingSettings(value: unknown): MatchingSettings {
+  if (!value || typeof value !== "object") return DEFAULT_MATCHING_SETTINGS;
+  const raw = value as Partial<MatchingSettings>;
+  const weights = raw.weights;
+  const isValidWeights = weights && Object.values(DEFAULT_MATCH_WEIGHTS).every((_, index) => {
+    const key = (Object.keys(DEFAULT_MATCH_WEIGHTS) as Array<keyof MatchWeights>)[index];
+    return Number.isInteger(weights[key]) && weights[key] >= 0 && weights[key] <= 100;
+  }) && Object.values(weights).reduce((sum, item) => sum + item, 0) === 100;
+  return {
+    decisionModel: typeof raw.decisionModel === "string" && raw.decisionModel.length <= 200 ? raw.decisionModel.trim() : "",
+    weights: isValidWeights ? { ...weights } : DEFAULT_MATCH_WEIGHTS,
+    detailedScoreThreshold: Number.isInteger(raw.detailedScoreThreshold) && raw.detailedScoreThreshold! >= 0 && raw.detailedScoreThreshold! <= 100 ? raw.detailedScoreThreshold! : DEFAULT_MATCHING_SETTINGS.detailedScoreThreshold,
+    detailedConfidenceThreshold: Number.isInteger(raw.detailedConfidenceThreshold) && raw.detailedConfidenceThreshold! >= 0 && raw.detailedConfidenceThreshold! <= 100 ? raw.detailedConfidenceThreshold! : DEFAULT_MATCHING_SETTINGS.detailedConfidenceThreshold,
+  };
+}
+
+type Answer = { type?: unknown; score?: unknown; confidence?: unknown; noul?: unknown; choice?: unknown };
+type SystemOneResponse = { answers?: unknown };
+const answerNames = ["skills", "experience", "domain"] as const;
+
+function unit(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1 ? value : null;
+}
+
+export function normalizeSystemOneScreenResult(payload: unknown, model: string, weights: MatchWeights): JobScreening | null {
+  if (!payload || typeof payload !== "object" || !("answers" in payload)) return null;
+  const answers = (payload as SystemOneResponse).answers;
+  if (!answers || typeof answers !== "object") return null;
+  const record = answers as Record<string, Answer>;
+  const scores = Object.fromEntries(answerNames.map((name) => [name, unit(record[name]?.score)])) as Record<(typeof answerNames)[number], number | null>;
+  const disqualifierRisk = unit(record.disqualifier?.noul);
+  const information = record.information?.choice;
+  if (answerNames.some((name) => scores[name] === null) || disqualifierRisk === null
+    || !["sufficient", "cv_missing", "job_missing", "both_missing"].includes(String(information))) return null;
+  const confidenceValues = [...answerNames.map((name) => unit(record[name]?.confidence)), unit(record.information?.confidence)].filter((value): value is number => value !== null);
+  const weighted = ((scores.skills ?? 0) * weights.skills + (scores.experience ?? 0) * weights.experience + (scores.domain ?? 0) * weights.domain + (1 - disqualifierRisk) * weights.disqualifier) / 100;
+  return {
+    model,
+    score: Math.round(weighted * 100),
+    confidence: confidenceValues.length ? Math.round(confidenceValues.reduce((sum, value) => sum + value, 0) / confidenceValues.length * 100) : null,
+    breakdown: { skills: scores.skills === null ? null : Math.round(scores.skills * 100), experience: scores.experience === null ? null : Math.round(scores.experience * 100), domain: scores.domain === null ? null : Math.round(scores.domain * 100) },
+    disqualifierRisk: Math.round(disqualifierRisk * 100),
+    informationStatus: information as JobScreening["informationStatus"],
+  };
+}
+
+export function shouldRunDetailedAnalysis(screening: JobScreening | undefined, settings: MatchingSettings) {
+  if (!screening || screening.confidence === null || screening.confidence < settings.detailedConfidenceThreshold) return true;
+  if (screening.informationStatus !== "sufficient") return true;
+  return screening.score >= settings.detailedScoreThreshold;
+}
