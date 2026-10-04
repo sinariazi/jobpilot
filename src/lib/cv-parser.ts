@@ -27,6 +27,24 @@ function sectionFor(line: string): "skills" | "experience" | "other" | null {
   return null;
 }
 
+type PdfTextItem = { str?: string; transform?: number[]; width?: number };
+
+export function joinPdfTextItems(items: PdfTextItem[]) {
+  const positioned = items.flatMap((item, index) => typeof item.str === "string" && item.str.trim()
+    ? [{ text: item.str.trim(), x: item.transform?.[4] ?? index, y: item.transform?.[5] ?? 0, index }]
+    : []);
+  if (!positioned.some((item) => item.y !== 0)) return positioned.map((item) => item.text).join(" ");
+
+  const ordered = [...positioned].sort((a, b) => b.y - a.y || a.x - b.x || a.index - b.index);
+  const lines: Array<{ y: number; items: typeof ordered }> = [];
+  for (const item of ordered) {
+    const line = lines.find((candidate) => Math.abs(candidate.y - item.y) <= 2.5);
+    if (line) line.items.push(item);
+    else lines.push({ y: item.y, items: [item] });
+  }
+  return lines.map((line) => line.items.sort((a, b) => a.x - b.x || a.index - b.index).map((item) => item.text).join(" ")).join("\n");
+}
+
 export function extractCvSuggestionsFromText(text: string): CvSuggestions {
   const sections: Record<"skills" | "experience", string[]> = { skills: [], experience: [] };
   let active: "skills" | "experience" | null = null;
@@ -73,7 +91,7 @@ async function extractPdfText(file: File): Promise<{ text: string; pageCount: nu
     for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
       const page = await document.getPage(pageNumber);
       const content = await page.getTextContent();
-      pages.push(content.items.map((item) => "str" in item ? item.str : "").filter(Boolean).join(" "));
+      pages.push(joinPdfTextItems(content.items.flatMap((item) => "str" in item ? [{ str: item.str, transform: item.transform, width: item.width }] : [])));
     }
     return { text: pages.join("\n"), pageCount: document.numPages };
   } finally {
