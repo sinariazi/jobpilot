@@ -78,6 +78,9 @@ function parseJob(value: unknown): Job | null {
   if (value.retrievedAt !== undefined && !boundedString(value.retrievedAt, 50)) return null;
   if (value.postedAt !== undefined && (!boundedString(value.postedAt, 50) || !Number.isFinite(Date.parse(value.postedAt)))) return null;
   if (value.department !== undefined && !boundedString(value.department, 500)) return null;
+  if (value.sourceLocationScope !== undefined && !boundedString(value.sourceLocationScope, 100)) return null;
+  const sourceAliases = value.sourceAliases === undefined ? undefined : parseStringArray(value.sourceAliases, 10, 100);
+  if (value.sourceAliases !== undefined && !sourceAliases) return null;
   if (value.description !== undefined && (typeof value.description !== "string" || value.description.length > 8000)) return null;
   if (value.aiMatch !== undefined && (!isRecord(value.aiMatch)
     || !boundedString(value.aiMatch.model, 200)
@@ -121,6 +124,8 @@ function parseJob(value: unknown): Job | null {
     summary: (value.summary as string).trim(),
     ...(typeof value.description === "string" ? { description: value.description.trim() } : {}),
     ...(typeof value.sourceUrl === "string" ? { sourceUrl: value.sourceUrl } : {}),
+    ...(typeof value.sourceLocationScope === "string" ? { sourceLocationScope: value.sourceLocationScope } : {}),
+    ...(sourceAliases ? { sourceAliases } : {}),
     ...(typeof value.retrievedAt === "string" ? { retrievedAt: value.retrievedAt } : {}),
     ...(isRecord(value.aiMatch) ? { aiMatch: {
       model: value.aiMatch.model as string,
