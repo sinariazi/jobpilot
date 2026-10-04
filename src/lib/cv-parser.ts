@@ -29,7 +29,7 @@ function sectionFor(line: string): "skills" | "experience" | "other" | null {
 
 type PdfTextItem = { str?: string; transform?: number[]; width?: number };
 
-export function joinPdfTextItems(items: PdfTextItem[]) {
+export function joinPdfTextItems(items: PdfTextItem[], pageWidth?: number) {
   const positioned = items.flatMap((item, index) => typeof item.str === "string" && item.str.trim()
     ? [{ text: item.str.trim(), x: item.transform?.[4] ?? index, y: item.transform?.[5] ?? 0, index }]
     : []);
@@ -42,6 +42,40 @@ export function joinPdfTextItems(items: PdfTextItem[]) {
     if (line) line.items.push(item);
     else lines.push({ y: item.y, items: [item] });
   }
+  if (pageWidth && pageWidth > 0) {
+    const starts = positioned.map((item) => item.x).sort((a, b) => a - b);
+    let split: number | null = null;
+    let widestGap = pageWidth * 0.2;
+    for (let index = 1; index < starts.length; index += 1) {
+      const gap = starts[index] - starts[index - 1];
+      const candidate = (starts[index] + starts[index - 1]) / 2;
+      if (gap > widestGap && candidate > pageWidth * 0.25 && candidate < pageWidth * 0.75) {
+        const left = positioned.filter((item) => item.x < candidate);
+        const right = positioned.filter((item) => item.x >= candidate);
+        const hasLeftText = left.some((item) => (items[item.index]?.width ?? item.text.length * 4) > pageWidth * 0.12);
+        const hasRightText = right.some((item) => (items[item.index]?.width ?? item.text.length * 4) > pageWidth * 0.12);
+        if (left.length >= 3 && right.length >= 3 && hasLeftText && hasRightText) {
+          split = candidate;
+          widestGap = gap;
+        }
+      }
+    }
+    if (split !== null) {
+      const renderColumn = (columnItems: typeof positioned) => {
+        const columnLines: Array<{ y: number; items: typeof positioned }> = [];
+        for (const item of [...columnItems].sort((a, b) => b.y - a.y || a.x - b.x || a.index - b.index)) {
+          const line = columnLines.find((candidate) => Math.abs(candidate.y - item.y) <= 2.5);
+          if (line) line.items.push(item);
+          else columnLines.push({ y: item.y, items: [item] });
+        }
+        return columnLines.map((line) => line.items.sort((a, b) => a.x - b.x || a.index - b.index).map((item) => item.text).join(" "));
+      };
+      const leftLines = renderColumn(positioned.filter((item) => item.x < split));
+      const rightLines = renderColumn(positioned.filter((item) => item.x >= split));
+      return [...leftLines, ...rightLines].join("\n");
+    }
+  }
+
   return lines.map((line) => line.items.sort((a, b) => a.x - b.x || a.index - b.index).map((item) => item.text).join(" ")).join("\n");
 }
 
@@ -65,10 +99,13 @@ export function extractCvSuggestionsFromText(text: string): CvSuggestions {
     .filter((skill) => skill.length >= 2 && skill.length <= 80))].slice(0, 60);
 
   const datePattern = /\b(?:19|20)\d{2}\s*(?:[-–—/]\s*(?:(?:19|20)\d{2}|present|current|now|today))?\b/i;
-  const roles = [...new Set(sections.experience
-    .filter((line) => datePattern.test(line))
-    .map((line) => line.replace(datePattern, "").replace(/\s*[-–—|,;:]+\s*$/, "").trim())
-    .filter((line) => line.length >= 3 && line.length <= 120))].slice(0, 12);
+  const roles = [...new Set(sections.experience.flatMap((line, index) => {
+    if (!datePattern.test(line)) return [];
+    const inlineRole = line.replace(datePattern, "").replace(/\s*[-–—|,;:]+\s*$/, "").trim();
+    if (inlineRole.length >= 3) return [inlineRole];
+    const precedingLine = sections.experience[index - 1]?.trim() ?? "";
+    return precedingLine.length >= 3 && precedingLine.length <= 120 ? [precedingLine] : [];
+  }).filter((line) => line.length >= 3 && line.length <= 120))].slice(0, 12);
 
   const notes: string[] = [];
   if (skills.length === 0) notes.push("No skills section was detected. You can still enter skills manually.");
@@ -91,7 +128,7 @@ async function extractPdfText(file: File): Promise<{ text: string; pageCount: nu
     for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
       const page = await document.getPage(pageNumber);
       const content = await page.getTextContent();
-      pages.push(joinPdfTextItems(content.items.flatMap((item) => "str" in item ? [{ str: item.str, transform: item.transform, width: item.width }] : [])));
+      pages.push(joinPdfTextItems(content.items.flatMap((item) => "str" in item ? [{ str: item.str, transform: item.transform, width: item.width }] : []), Math.abs(page.view[2] - page.view[0])));
     }
     return { text: pages.join("\n"), pageCount: document.numPages };
   } finally {
