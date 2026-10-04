@@ -136,10 +136,23 @@ async function getJson<T>(url: string, revalidate?: number): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-async function arbeitnowJobs(retrievedAt: string) {
-  const pages = await Promise.all(Array.from({ length: 5 }, (_, index) =>
-    getJson<ArbeitnowPage>(`https://www.arbeitnow.com/api/job-board-api?page=${index + 1}`)));
-  return pages.flatMap((page) => (page.data ?? []).map((posting) => mapArbeitnow(posting, retrievedAt)).filter((job): job is Job => job !== null));
+export const ARBEITNOW_PAGES_PER_BATCH = 5;
+
+async function arbeitnowJobs(retrievedAt: string, startPage: number) {
+  const pages = await Promise.all(Array.from({ length: ARBEITNOW_PAGES_PER_BATCH }, (_, index) =>
+    getJson<ArbeitnowPage>(`https://www.arbeitnow.com/api/job-board-api?page=${startPage + index}`)));
+  const jobs = pages.flatMap((page) => (page.data ?? []).map((posting) => mapArbeitnow(posting, retrievedAt)).filter((job): job is Job => job !== null));
+  const lastPage = pages.at(-1);
+  const nextLink = lastPage?.links?.next;
+  const hasMore = typeof nextLink === "string"
+    ? (() => {
+      try {
+        const url = new URL(nextLink, "https://www.arbeitnow.com");
+        return url.hostname === "www.arbeitnow.com" && url.pathname === "/api/job-board-api" && Number(url.searchParams.get("page")) === startPage + ARBEITNOW_PAGES_PER_BATCH;
+      } catch { return false; }
+    })()
+    : (lastPage?.data?.length ?? 0) > 0;
+  return { jobs, nextArbeitnowPage: hasMore ? startPage + ARBEITNOW_PAGES_PER_BATCH : null };
 }
 
 async function remotiveJobs(retrievedAt: string) {
@@ -152,14 +165,23 @@ async function jobicyJobs(retrievedAt: string) {
   return (page.jobs ?? []).map((posting) => mapJobicy(posting, retrievedAt)).filter((job): job is Job => job !== null);
 }
 
-export async function searchPublicJobs() {
+export async function searchPublicJobs(options: { arbeitnowStartPage?: number } = {}) {
   const retrievedAt = new Date().toISOString();
-  const feeds = await Promise.allSettled([arbeitnowJobs(retrievedAt), remotiveJobs(retrievedAt), jobicyJobs(retrievedAt)]);
-  const jobs = feeds.flatMap((feed) => feed.status === "fulfilled" ? feed.value : []);
-  const errors = feeds.flatMap((feed, index) => feed.status === "rejected"
-    ? [`${["Arbeitnow", "Remotive", "Jobicy"][index]} is temporarily unavailable.`]
-    : []);
+  const startPage = options.arbeitnowStartPage ?? 1;
+  const loadingMore = startPage > 1;
+  const arbeitnowResult = await Promise.allSettled([arbeitnowJobs(retrievedAt, startPage)]);
+  const arbeitnow = arbeitnowResult[0];
+  let jobs = arbeitnow.status === "fulfilled" ? arbeitnow.value.jobs : [];
+  const errors = arbeitnow.status === "rejected" ? ["Arbeitnow is temporarily unavailable."] : [];
+  const nextArbeitnowPage = arbeitnow.status === "fulfilled" ? arbeitnow.value.nextArbeitnowPage : null;
+  if (!loadingMore) {
+    const otherFeeds = await Promise.allSettled([remotiveJobs(retrievedAt), jobicyJobs(retrievedAt)]);
+    jobs = [...jobs, ...otherFeeds.flatMap((feed) => feed.status === "fulfilled" ? feed.value : [])];
+    errors.push(...otherFeeds.flatMap((feed, index) => feed.status === "rejected"
+      ? [`${["Remotive", "Jobicy"][index]} is temporarily unavailable.`]
+      : []));
+  }
   const unique = new Map<string, Job>();
   jobs.forEach((job) => unique.set(job.sourceUrl ?? job.id, job));
-  return { jobs: [...unique.values()], errors, retrievedAt };
+  return { jobs: [...unique.values()], errors, retrievedAt, nextArbeitnowPage };
 }
