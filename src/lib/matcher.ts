@@ -25,3 +25,12 @@ export function matchesTargetRole(job: Job, targetRoles: string) {
   const title = normalizeSkill(job.role);
   return roles.some((role) => ` ${title} `.includes(` ${role} `) || ` ${role} `.includes(` ${title} `));
 }
+
+
+export function isRelevantToProfile(job: Job, candidateSkills: string[], targetRoles: string) {
+  if (matchesTargetRole(job, targetRoles)) return true;
+  const match = scoreJob(job, candidateSkills);
+  if (match.titleMatched.length > 0) return true;
+  const minimumSkillMatches = candidateSkills.length < 3 ? 1 : 2;
+  return match.matched.length >= minimumSkillMatches;
+}
