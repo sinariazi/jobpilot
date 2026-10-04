@@ -13,7 +13,8 @@ import { createCoverLetterDraft } from "@/lib/cover-letter";
 const LEGACY_STORAGE_KEY = "jobpilot-local-v1";
 const MAX_BACKUP_BYTES = 23_000_000;
 const MAX_AI_MATCH_CANDIDATES = 60;
-const AI_MATCH_BATCH_SIZE = 12;
+const AI_MATCH_BATCH_SIZE = 4;
+const MAX_CV_MATCH_CHARS = 30_000;
 
 function isLocalJobpilotPage() {
   return typeof window !== "undefined" && ["localhost", "127.0.0.1", "[::1]"].includes(window.location.hostname);
@@ -44,6 +45,7 @@ export default function Home() {
   const [profileDraft, setProfileDraft] = useState<CandidateProfile>(defaultProfile);
   const [cvSuggestions, setCvSuggestions] = useState<CvSuggestions | null>(null);
   const [cvText, setCvText] = useState("");
+  const [cvAnalyzedModel, setCvAnalyzedModel] = useState("");
   const [cvFileName, setCvFileName] = useState("");
   const [cvParsing, setCvParsing] = useState(false);
   const [cvError, setCvError] = useState("");
@@ -76,6 +78,7 @@ export default function Home() {
 
   function chooseLocalAiModel(model: string) {
     setSelectedAiModel(model);
+    setCvAnalyzedModel("");
     setLiveJobs((current) => current.map((job) => ({ ...job, aiMatch: undefined })));
     setSourceMessage("Local model changed. Search again to reassess your CV against the jobs.");
   }
@@ -194,17 +197,18 @@ export default function Home() {
 
   const locationMatchedJobs = useMemo(() => jobs.filter((job) => matchesPreferredLocation(job.location, profile.locations, job.mode, job.source)), [jobs, profile.locations]);
   const localCvAnalysisReady = Boolean(cvText.trim() && localAiModels.includes(selectedAiModel) && isLocalJobpilotPage());
-  const preferredJobs = useMemo(() => locationMatchedJobs.filter((job) => localCvAnalysisReady
+  const hasCurrentCvAssessment = localCvAnalysisReady && cvAnalyzedModel === selectedAiModel;
+  const preferredJobs = useMemo(() => locationMatchedJobs.filter((job) => localCvAnalysisReady && cvAnalyzedModel === selectedAiModel
     ? job.aiMatch?.relevant === true && job.aiMatch.model === selectedAiModel
-    : job.aiMatch ? job.aiMatch.relevant : isRelevantToProfile(job, candidateSkills, profile.roles)), [locationMatchedJobs, localCvAnalysisReady, selectedAiModel, candidateSkills, profile.roles]);
+    : isRelevantToProfile(job, candidateSkills, profile.roles)), [locationMatchedJobs, localCvAnalysisReady, cvAnalyzedModel, selectedAiModel, candidateSkills, profile.roles]);
   const ranked = useMemo(() => preferredJobs.map((job) => {
     const keywordMatch = scoreJob(job, candidateSkills);
-    return { job, ...keywordMatch, score: job.aiMatch?.score ?? keywordMatch.score, roleMatch: matchesTargetRole(job, profile.roles) };
+    return { job, ...keywordMatch, score: hasCurrentCvAssessment && job.aiMatch?.model === selectedAiModel ? job.aiMatch.score : keywordMatch.score, roleMatch: matchesTargetRole(job, profile.roles) };
   })
     .filter(({ job }) => `${job.role} ${job.company} ${job.location} ${job.department ?? ""}`.toLowerCase().includes(query.toLowerCase()))
-    .sort((a, b) => a.job.aiMatch && b.job.aiMatch
+    .sort((a, b) => hasCurrentCvAssessment && a.job.aiMatch && b.job.aiMatch
       ? b.score - a.score
-      : Number(b.roleMatch) - Number(a.roleMatch) || b.titleMatched.length - a.titleMatched.length || b.score - a.score), [query, candidateSkills, preferredJobs, profile.roles]);
+      : Number(b.roleMatch) - Number(a.roleMatch) || b.titleMatched.length - a.titleMatched.length || b.score - a.score), [query, candidateSkills, preferredJobs, profile.roles, hasCurrentCvAssessment, selectedAiModel]);
   const filteredRanked = useMemo(() => ranked.filter(({ job }) => matchesPostedWithin(job, postedWithin) && matchesWorkMode(job, workMode) && matchesDepartment(job, department)), [ranked, postedWithin, workMode, department]);
   const visibleJobs = filteredRanked.slice(0, visibleCount);
   const departments = useMemo(() => [...new Set(preferredJobs.map((job) => job.department?.trim()).filter((value): value is string => Boolean(value)))].sort((a, b) => a.localeCompare(b)), [preferredJobs]);
@@ -221,7 +225,7 @@ export default function Home() {
   ];
   const emptyJobMessage = locationMatchedJobs.length === 0
     ? profile.locations.trim() ? `No fetched jobs match ${profile.locations}. Check your preferred locations or refresh the feeds.` : "No jobs are available in the current feeds. Try searching again later."
-    : localCvAnalysisReady
+    : hasCurrentCvAssessment
       ? "The local model did not identify a strong CV match in the analyzed listings. Review your preferred locations or try again after more jobs are available."
       : "No jobs match your saved target roles or CV skills. Review those fields in your profile, then search again.";
 
@@ -246,12 +250,14 @@ export default function Home() {
       const suggestions = await parseCvFile(file);
       setCvSuggestions(suggestions);
       setCvText(suggestions.sourceText ?? "");
+      setCvAnalyzedModel("");
       setLiveJobs((current) => current.map((job) => ({ ...job, aiMatch: undefined })));
       setCvFileName(file.name);
-      setCvMessage(`CV text extracted in your browser and held in memory. Matching sends it to Ollama only when Jobpilot is open at localhost on this laptop.${(suggestions.sourceText?.length ?? 0) > 80_000 ? " For speed, matching uses the first 80,000 characters." : " Re-upload the CV after restarting Jobpilot."}`);
+      setCvMessage(`CV text extracted in your browser and held in memory. Matching sends it to Ollama only when Jobpilot is open at localhost on this laptop.${(suggestions.sourceText?.length ?? 0) > MAX_CV_MATCH_CHARS ? ` For speed, matching uses the first ${MAX_CV_MATCH_CHARS.toLocaleString()} characters.` : ""} Re-upload the CV after restarting Jobpilot.`);
     } catch (error) {
       setCvSuggestions(null);
       setCvText("");
+      setCvAnalyzedModel("");
       setCvFileName("");
       setCvError(error instanceof Error ? error.message : "Could not read this CV.");
     } finally {
@@ -421,6 +427,7 @@ export default function Home() {
 
   async function fetchLiveJobs() {
     setLoadingJobs(true);
+    setCvAnalyzedModel("");
     setSourceMessage("");
     setSourceErrors([]);
     let fetchedForFallback: Job[] = [];
@@ -448,7 +455,7 @@ export default function Home() {
           ...locationJobs.filter((job) => !priorityIds.has(job.id)).slice(0, Math.floor(MAX_AI_MATCH_CANDIDATES / 2)),
         ];
         const matchesById = new Map<string, NonNullable<Job["aiMatch"]>>();
-        const cvForModel = cvText.slice(0, 80_000);
+        const cvForModel = cvText.slice(0, MAX_CV_MATCH_CHARS);
         for (let offset = 0; offset < candidates.length; offset += AI_MATCH_BATCH_SIZE) {
           const batch = candidates.slice(offset, offset + AI_MATCH_BATCH_SIZE);
           setSourceMessage(`Local AI is comparing your CV with ${Math.min(offset + batch.length, candidates.length)} of ${candidates.length} selected listings…`);
@@ -480,6 +487,7 @@ export default function Home() {
           aiAnalyzedCount += validatedMatches;
         }
         analyzedJobs = fetchedJobs.map((job) => ({ ...job, ...(matchesById.has(job.id) ? { aiMatch: matchesById.get(job.id) } : { aiMatch: undefined }) }));
+        setCvAnalyzedModel(selectedAiModel);
       }
       setLiveJobs(analyzedJobs);
       const matchingJobs = analyzedJobs.filter((job) => matchesPreferredLocation(job.location, profile.locations, job.mode, job.source)
@@ -501,7 +509,7 @@ export default function Home() {
           && isRelevantToProfile(job, candidateSkills, profile.roles));
         setLiveJobs(fetchedForFallback.map((job) => ({ ...job, aiMatch: undefined })));
         selectJob(fallback[0]?.id ?? "");
-        setSourceMessage(`Local AI analysis failed (${error instanceof Error ? error.message : "unknown error"}). Showing ${fallback.length} exact profile matches instead. Check that Ollama is running, then retry.`);
+        setSourceMessage(`Local CV analysis failed (${error instanceof Error ? error.message : "unknown error"}). Showing ${fallback.length} exact profile matches instead. If this repeats, try a smaller installed model.`);
       } else {
         setSourceMessage(error instanceof Error ? error.message : "Could not fetch job listings.");
       }
@@ -583,7 +591,7 @@ export default function Home() {
                 <span className="location-filter">Locations: {profile.locations || "Any"}</span>
               </div>
               {filteredRanked.length > 0 ? <>
-                <div className="job-list">{visibleJobs.map(({ job, score, matched, titleMatched }) => <article key={job.id} className={`job-card ${selected?.job.id === job.id ? "selected" : ""}`}><button type="button" className="job-card-main" aria-pressed={selected?.job.id === job.id} onClick={() => { selectJob(job.id); setStatus((current) => current[job.id] ? current : { ...current, [job.id]: "Needs review" }); }}><div className="job-card-top"><div className={`company-logo logo-${job.source.toLowerCase()}`}>{job.company.slice(0, 1)}</div><span className="match-tag">{job.aiMatch ? `${score}% AI fit` : `${score}% profile match`}</span></div><div className="job-title">{job.role}</div><div className="company-name">{job.company} <span>·</span> {job.location}</div><div className="job-meta"><span>◷ {job.posted}</span><span>⌂ {job.mode}</span><span className="source-tag">{job.source} · feed</span></div></button><div className="job-card-bottom"><div className="skill-pills">{matched.slice(0, 3).map((skill) => <span className={titleMatched.includes(skill) ? "skill-in-title" : ""} key={skill}>{skill}{titleMatched.includes(skill) && <small>title</small>}</span>)}{matched.length > 3 && <span className="more-skills">+{matched.length - 3}</span>}</div><button type="button" className={`bookmark ${saved.includes(job.id) ? "bookmarked" : ""}`} onClick={() => setSaved((current) => current.includes(job.id) ? current.filter((id) => id !== job.id) : [...current, job.id])} aria-label={saved.includes(job.id) ? "Remove saved job" : "Save job"} aria-pressed={saved.includes(job.id)}>{saved.includes(job.id) ? "★" : "☆"}</button></div></article>)}</div>
+                <div className="job-list">{visibleJobs.map(({ job, score, matched, titleMatched }) => <article key={job.id} className={`job-card ${selected?.job.id === job.id ? "selected" : ""}`}><button type="button" className="job-card-main" aria-pressed={selected?.job.id === job.id} onClick={() => { selectJob(job.id); setStatus((current) => current[job.id] ? current : { ...current, [job.id]: "Needs review" }); }}><div className="job-card-top"><div className={`company-logo logo-${job.source.toLowerCase()}`}>{job.company.slice(0, 1)}</div><span className="match-tag">{hasCurrentCvAssessment && job.aiMatch?.model === selectedAiModel ? `${score}% AI fit` : `${score}% profile match`}</span></div><div className="job-title">{job.role}</div><div className="company-name">{job.company} <span>·</span> {job.location}</div><div className="job-meta"><span>◷ {job.posted}</span><span>⌂ {job.mode}</span><span className="source-tag">{job.source} · feed</span></div></button><div className="job-card-bottom"><div className="skill-pills">{matched.slice(0, 3).map((skill) => <span className={titleMatched.includes(skill) ? "skill-in-title" : ""} key={skill}>{skill}{titleMatched.includes(skill) && <small>title</small>}</span>)}{matched.length > 3 && <span className="more-skills">+{matched.length - 3}</span>}</div><button type="button" className={`bookmark ${saved.includes(job.id) ? "bookmarked" : ""}`} onClick={() => setSaved((current) => current.includes(job.id) ? current.filter((id) => id !== job.id) : [...current, job.id])} aria-label={saved.includes(job.id) ? "Remove saved job" : "Save job"} aria-pressed={saved.includes(job.id)}>{saved.includes(job.id) ? "★" : "☆"}</button></div></article>)}</div>
                 {visibleJobs.length < filteredRanked.length && <button className="load-more" onClick={() => setVisibleCount((count) => count + 25)}>Show more jobs <span>({filteredRanked.length - visibleJobs.length} remaining)</span></button>}
               </> : <div className="empty-state">{liveJobs.length === 0 ? "No jobs loaded yet. Select “Search jobs now” to check public job feeds." : ranked.length === 0 ? query ? "No live jobs match that search. Try another role or company." : emptyJobMessage : "No jobs match these filters. Try a different date, work mode, or department."}</div>}
             </section>
@@ -601,7 +609,7 @@ export default function Home() {
                 <div className="divider"/>
                 <div className="fit-heading"><div><h4>Your match <span className="info-dot">i</span></h4><p>Profile skills mentioned in the posting</p></div><div className="score-ring" style={{ "--score": `${selected.score}%` } as React.CSSProperties}><span>{selected.score}%</span></div></div>
                 <div className="fit-meter"><i style={{ width: `${selected.score}%` }}/></div>
-                {selected.job.aiMatch && <section className="ai-match-explanation" aria-label="Local AI CV match explanation"><div className="ai-match-title"><h4>Local AI assessment</h4><strong>{selected.job.aiMatch.score}% estimated fit · {selected.job.aiMatch.model}</strong></div><p>{selected.job.aiMatch.reason}</p><small>CV evidence: {selected.job.aiMatch.cvEvidence}</small><small>AI estimates can be wrong. Verify the original posting and every requirement.</small></section>}
+                {hasCurrentCvAssessment && selected.job.aiMatch?.model === selectedAiModel && <section className="ai-match-explanation" aria-label="Local AI CV match explanation"><div className="ai-match-title"><h4>Local AI assessment</h4><strong>{selected.job.aiMatch.score}% estimated fit · {selected.job.aiMatch.model}</strong></div><p>{selected.job.aiMatch.reason}</p><small>CV evidence: {selected.job.aiMatch.cvEvidence}</small><small>AI estimates can be wrong. Verify the original posting and every requirement.</small></section>}
                 <div className="evidence-label">PROFILE SKILLS MENTIONED IN POSTING <span>{selected.matched.length} found</span></div>
                 <div className="evidence-pills">{selected.matched.map((skill) => <span key={skill}>✓ {skill}{selected.titleMatched.includes(skill) && <small> · title</small>}</span>)}</div>
                 {selected.missing.length > 0 && <><div className="evidence-label gap-label">PROFILE SKILLS NOT MENTIONED <span>{selected.missing.length}</span></div><div className="evidence-pills missing-pills">{selected.missing.map((skill) => <span key={skill}>! {skill}</span>)}</div><p className="match-caveat">A skill missing from the posting text is not proof that the job requires it.</p></>}
