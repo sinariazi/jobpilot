@@ -9,6 +9,8 @@ const state: PersistedState = {
   applicationNotes: { "job-1": "Interview scheduled" },
   applicationFollowUps: { "job-1": "2026-10-14" },
   coverLetterDrafts: { "job-1": { interest: "The mission", evidence: "Shipped a feature", draft: "Dear Hiring Team", updatedAt: "2026-10-02T12:00:00.000Z" } },
+  matchReviews: [{ jobId: "job-1", company: "Example", role: "Engineer", model: "local:latest", cohortKey: "b".repeat(64), score: 80, predictedRelevant: true, reviewedRelevant: false, reviewedAt: "2026-10-02T12:00:00.000Z" }],
+  matchCohortKey: "b".repeat(64),
   liveJobs: [],
 };
 
