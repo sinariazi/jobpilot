@@ -2,7 +2,7 @@
 
 A local-first job-search assistant built with Next.js and TypeScript. It searches multiple public job feeds automatically, filters listings against the candidate's preferred locations and profile evidence, and explains which target roles and skills matched.
 
-> **Current scope:** Jobpilot is an early-stage, local-first job-search and application-preparation agent. It searches public feeds from Arbeitnow (Europe-wide), Remotive (remote), and Jobicy (Europe remote), but does not cover every employer or vacancy. With a CV loaded and Ollama running locally, the selected model assesses job fit and gives evidence-based explanations. CV text is processed only by Ollama on this laptop. Jobpilot does not yet tailor CVs or submit applications.
+> **Current scope:** Jobpilot is an early-stage, local-first job-search and application-preparation agent. It searches public feeds from Arbeitnow (Europe-wide), Remotive (remote), and Jobicy (Europe remote), but does not cover every employer or vacancy. With a CV loaded and Ollama running locally, the selected model assesses job fit and gives evidence-based explanations. CV parsing runs in the browser; extracted text is sent only to Ollama on this laptop for matching. Jobpilot does not yet tailor CVs or submit applications.
 
 ## Working now
 
@@ -25,10 +25,9 @@ A local-first job-search assistant built with Next.js and TypeScript. It searche
 
 - Expand AI assessment beyond the first 60 location-eligible jobs and add progress/cancellation controls for larger searches.
 - Calibrate local-model fit estimates and evaluate false-positive/false-negative rates against reviewed matches; model explanations are estimates and can be wrong.
-- Improve location normalization for city/country aliases and location formats used by job feeds. Ambiguous remote listings are excluded for country-specific preferences unless a compatible region is stated or known from the feed query.
+- Expand the initial location alias map. It currently covers common English/German names for several cities and maps some city-only listings to their country; other languages, city/country relationships, and inconsistent feed formats still need coverage. Ambiguous remote listings are excluded for country-specific preferences unless a compatible region is stated or known from the feed query.
 - Add a licensed, broad-coverage job search provider to find roles beyond the current public feeds and geographies; public feeds do not contain every employer or vacancy.
 - Add more job-source adapters after checking each provider's API and display/attribution terms.
-- Add further filters only when source feeds provide reliable structured fields; current filters cover posting age, inferred work mode, and available department tags.
 - Add provider-side pagination so searches can retrieve more than each feed's current fetched batch; “Show more” currently reveals jobs already retrieved.
 - Add OCR for scanned/image-only CVs; current parsing requires selectable text.
 - Improve layout-aware parsing for multi-column CVs and more heading formats; extraction is heuristic and suggestions require user review.
@@ -39,7 +38,6 @@ A local-first job-search assistant built with Next.js and TypeScript. It searche
 - Add accessibility and responsive-layout review across supported browsers and screen sizes.
 - Add automated end-to-end tests for the main job search, details, profile, and tracking workflows.
 - Add optional follow-up dates and reminders to the application tracker.
-- Decide whether application submission will remain manual; the current tracker never submits applications.
 
 The app fetches public listings from its configured feeds and applies location and role preferences locally. Candidate profile fields are not sent to feed providers. Feed coverage, update frequency, and availability depend on each provider.
 
@@ -108,7 +106,7 @@ No AI API key or hosted AI account is needed. Jobpilot sends the selected job de
 
 ## Search jobs
 
-Select **Search jobs now** in the overview. Jobpilot retrieves listings from public feeds and filters them against preferred locations. If you imported a CV and selected an installed Ollama model, Jobpilot compares the CV text with up to 60 location-eligible postings locally, in batches, and shows the model's relevance decision, estimated fit, and supporting CV evidence. If the model is unavailable, Jobpilot falls back to exact target-role and skill phrase matching. AI scores are estimates, not hiring probabilities; review each posting yourself.
+Select **Search jobs now** in the overview. Jobpilot retrieves listings from public feeds and filters them against preferred locations. Common English/German aliases for Vienna, Graz, Linz, Salzburg, Innsbruck, Klagenfurt, Bregenz, St. Pölten, Munich, Cologne, Zurich, Geneva, and Prague are normalized; city-only listings for these places can match their country. This alias coverage is intentionally limited and does not replace review of the employer posting. If you imported a CV and selected an installed Ollama model, Jobpilot compares the CV text with up to 60 location-eligible postings locally, in batches, and shows the model's relevance decision, estimated fit, and supporting CV evidence. If the model is unavailable, Jobpilot falls back to exact target-role and skill phrase matching. AI scores are estimates, not hiring probabilities; review each posting yourself.
 
 Enter preferred locations explicitly in **Candidate profile**. Separate alternatives with semicolons, for example `Austria; Remote Europe`. Leave the field blank only if you want jobs from any location. CV addresses are not imported or used as preferences. A generic `Remote` label does not identify eligible countries; select `Remote` explicitly if you want all such postings.
 
