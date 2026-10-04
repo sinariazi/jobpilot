@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractCvSuggestionsFromText, parseCvFile } from "./cv-parser";
+import { extractCvSuggestionsFromText, joinPdfTextItems, parseCvFile } from "./cv-parser";
 
 describe("extractCvSuggestionsFromText", () => {
   it("extracts skill-section items and dated experience lines for review", () => {
@@ -34,5 +34,18 @@ describe("extractCvSuggestionsFromText", () => {
     const parsed = await parseCvFile(new File([text], "candidate-cv.txt", { type: "text/plain" }));
     expect(parsed.sourceText).toBe(text);
     expect(parsed.skills).toContain("TypeScript");
+  });
+});
+
+describe("joinPdfTextItems", () => {
+  it("preserves PDF visual lines and orders text from left to right", () => {
+    const text = joinPdfTextItems([
+      { str: "TypeScript, React", transform: [1, 0, 0, 1, 30, 700] },
+      { str: "Skills", transform: [1, 0, 0, 1, 30, 720] },
+      { str: "Experience", transform: [1, 0, 0, 1, 30, 680] },
+    ]);
+    expect(text).toBe("Skills\nTypeScript, React\nExperience");
+    const suggestions = extractCvSuggestionsFromText(text);
+    expect(suggestions.skills).toBe("TypeScript, React");
   });
 });
