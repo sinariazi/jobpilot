@@ -108,4 +108,20 @@ describe("joinPdfTextItems", () => {
     expect(suggestions.skills).toBe("TypeScript, React, AWS, PostgreSQL");
     expect(suggestions.roles).toBe("Senior Software Engineer");
   });
+
+  it("detects columns whose text runs use independent vertical baselines", () => {
+    const text = joinPdfTextItems([
+      { str: "Skills", transform: [1, 0, 0, 1, 20, 730], width: 70 },
+      { str: "TypeScript", transform: [1, 0, 0, 1, 20, 705], width: 80 },
+      { str: "AWS", transform: [1, 0, 0, 1, 20, 680], width: 30 },
+      { str: "Experience", transform: [1, 0, 0, 1, 350, 720], width: 100 },
+      { str: "Senior Engineer", transform: [1, 0, 0, 1, 350, 695], width: 110 },
+      { str: "2021–2024", transform: [1, 0, 0, 1, 350, 670], width: 70 },
+    ], 600);
+
+    expect(text).toBe("Skills\nTypeScript\nAWS\nExperience\nSenior Engineer\n2021–2024");
+    const suggestions = extractCvSuggestionsFromText(text);
+    expect(suggestions.skills).toBe("TypeScript, AWS");
+    expect(suggestions.roles).toBe("Senior Engineer");
+  });
 });
