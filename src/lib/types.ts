@@ -43,6 +43,7 @@ export type PersistedState = {
   saved: string[];
   status: Record<string, ApplicationStatus>;
   applicationNotes?: Record<string, string>;
+  applicationFollowUps?: Record<string, string>;
   coverLetterDrafts?: Record<string, CoverLetterDraftRecord>;
   liveJobs: Job[];
 };
