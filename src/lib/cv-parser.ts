@@ -106,6 +106,21 @@ export function joinPdfTextItems(items: PdfTextItem[], pageWidth?: number) {
         candidates.set(center, evidence);
       }
     }
+    // Columns often have independent vertical baselines, so their text runs
+    // may never share a row. Repeated left and right start positions provide
+    // a second signal for those layouts.
+    const starts = [...new Set(positioned.map((item) => Math.round(item.x)))].sort((a, b) => a - b);
+    for (let index = 1; index < starts.length; index += 1) {
+      const gap = starts[index] - starts[index - 1];
+      const center = Math.round((starts[index] + starts[index - 1]) / 2);
+      if (gap < Math.max(30, pageWidth * 0.1) || center < pageWidth * 0.2 || center > pageWidth * 0.8) continue;
+      const evidence = candidates.get(center) ?? { gap: 0, lines: new Set<number>() };
+      evidence.gap = Math.max(evidence.gap, gap);
+      for (const [lineIndex, line] of lines.entries()) {
+        if (line.items.some((item) => item.x < center) && line.items.some((item) => item.x >= center)) evidence.lines.add(lineIndex);
+      }
+      candidates.set(center, evidence);
+    }
     const split = [...candidates.entries()]
       .filter(([center, evidence]) => {
         const leftLines = lines.filter((line) => line.items.some((item) => item.x < center)).length;
@@ -184,7 +199,10 @@ export function extractCvSuggestionsFromText(text: string): CvSuggestions {
     if (candidates.length) return [candidates[0]];
     const preceding = sections.experience.slice(Math.max(0, index - 3), index).reverse();
     return [preceding.find((candidate) => titlePattern.test(candidate) && candidate.length <= 120)
-      ?? preceding.find((candidate) => candidate.length >= 3 && candidate.length <= 100 && !/\b(?:gmbh|inc\.?|ltd\.?|llc|vienna|wien|berlin|zurich|zürich)\b/i.test(candidate))
+      ?? preceding.find((candidate) => candidate.length >= 3 && candidate.length <= 100
+        && !/\b(?:gmbh|inc\.?|ltd\.?|llc|ag|kg|plc|bv|company|corporation)\b/i.test(candidate)
+        && !/,\s*[A-Z]{2,}$/.test(candidate)
+        && !/\b(?:street|road|straße|strasse|postcode|postal code|zip code)\b/i.test(candidate))
       ?? ""].filter(Boolean);
   }).filter((line) => line.length >= 3 && line.length <= 120))].slice(0, 12);
 
