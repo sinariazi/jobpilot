@@ -20,8 +20,16 @@ Download and install **Node.js 22.13 or newer** from [nodejs.org](https://nodejs
 
 1. Download Ollama from [ollama.com/download](https://ollama.com/download) and install it.
 2. Open the Ollama app and leave it running while you use Jobpilot.
-3. Install a local chat model from the [Ollama model library](https://ollama.com/library). For example, open the model's page, follow its **CLI** instructions, and run the shown `ollama pull ...` command in a terminal. Models take disk space and may take several minutes to download.
-4. For automatic CV-to-job scoring, update Ollama to 0.35 or newer and install a decision model that supports `/v1/systemone`, such as `nimble`, `tev1`, or `tev1:0.8b` (run `ollama pull nimble` in Terminal). A normal chat model does not work for this step. If you skip this, you can still browse jobs, but automatic decision-model scores will not be available.
+3. Open a second terminal window (or PowerShell on Windows) and run the following two commands, one at a time. The first downloads the chat model for CV analysis, detailed job comparison, and writing drafts. The second downloads a small decision model for quickly screening many jobs:
+
+   ```bash
+   ollama pull qwen3.5:4b
+   ollama pull tev1:0.8b
+   ```
+
+   Ollama downloads the models onto your computer. This can take several minutes and needs about 4 GB for the chat model and 0.8 GB for the small decision model, plus extra space for Ollama. Keep the Ollama app running while Jobpilot is open.
+4. Update Ollama to version **0.35 or newer** for `/v1/systemone` decision screening. `tev1:0.8b` is the smaller decision-model option; `tev1:4b` is the larger 4B option if your computer has more memory (install it with `ollama pull tev1:4b`). The larger model is reported to be more accurate but uses more storage and memory. A chat model cannot replace the decision model, and a decision model is not a chat model. The decision stage is optional: without it, jobs can still be browsed, but first-stage automated scores are unavailable.
+5. To use different models, open the [Ollama model library](https://ollama.com/library), choose a chat model that suits your computer, then run `ollama pull MODEL_NAME` using the exact command on its page. For another compatible decision model, use its exact Ollama library tag too. Do not paste the words `MODEL_NAME` literally.
 
 ### 4. Open a terminal in the Jobpilot folder
 
@@ -47,8 +55,9 @@ Keep this terminal window open. When it says the server is ready, open [http://l
 1. In Jobpilot, click **Candidate profile**.
 2. Under **Analyze CV**, choose your CV file (PDF, DOCX, or TXT). For a scanned PDF, see [Scanned CVs](#scanned-cvs-optional).
 3. Review the CV summary, suggested job titles, and skills. Edit anything that is incorrect. Enter your preferred locations (for example, `Austria`) and click **Save profile**.
-4. In **Local AI status**, choose the Ollama chat model you installed. If available, choose a compatible decision model too. Jobpilot discovers models installed on your computer.
-5. On the main page, review or edit the CV-suggested **Job titles** and set **Preferred locations**. Click **Search jobs** to fetch listings for those locations and screen them with the configured local models. Target titles guide ranking and screening; all location-eligible listings remain visible so a different job-title wording does not hide a relevant role. Select a result to read its details, evidence, and original job posting.
+4. In **Local AI status**, choose `qwen3.5:4b` for detailed analysis and `tev1:0.8b` for the first-stage decision screening. The names appear after Ollama finishes downloading. Jobpilot detects installed models; if either is missing, refresh the page or check the troubleshooting notes below.
+5. On the main page, review or edit the CV-suggested **Job titles** and set **Preferred locations**. Click **Search jobs**. Jobpilot shows source status and keeps successful feed results if another source fails. Location choices are applied to results; titles are sent to feeds where supported and guide ranking, while all location-eligible results remain visible. Select a result to read its available description, evidence, attribution, and original posting link.
+6. If a public feed misses a posting, open **Add a job manually** and paste its description. An optional URL is saved as the source link but is not fetched; some employer sites block automated access or require an account.
 
 ### Optional: fill basic employer form fields locally
 
@@ -69,16 +78,23 @@ To use Jobpilot another day, open Ollama, open a terminal in the `jobpilot-main`
 - **`npm` is not recognized / command not found:** Install Node.js from [nodejs.org](https://nodejs.org/), close and reopen the terminal, then try again.
 - **The page does not open:** Make sure the terminal is still running `npm run dev`, then refresh `http://localhost:3000`.
 - **No Ollama models appear:** Open the Ollama app, install a model, and refresh Jobpilot. To check installed models, run `ollama ls` in a terminal.
-- **Decision screening returns an error:** Update Ollama to 0.35 or newer and install/select a decision model compatible with `/v1/systemone`, such as `nimble` or `tev1`. Ordinary chat models may appear in Ollama but cannot answer this API. If it still fails, check the local AI status and restart Ollama. Jobpilot does not send your CV or job text to a hosted AI service instead.
+- **Decision screening returns an error:** Update Ollama to 0.35 or newer, confirm `tev1:0.8b` appears in the output of `ollama ls`, and select it under **Decision model for first-stage screening**. The decision model is separate from the chat model. If it still fails, restart Ollama and refresh **Local AI status**. Jobpilot does not send your CV or job text to a hosted AI service instead.
+- **Detailed analysis or cover-letter drafting fails:** Confirm `qwen3.5:4b` appears in `ollama ls`, then select it under **Detailed analysis and drafting model**. If your computer has limited memory, choose a smaller chat model from the Ollama library and install it with the exact `ollama pull ...` command shown there.
+- **No jobs appear:** Check the source status and error beside the results. Broaden selected locations or titles, or try again later; these feeds do not cover every Austrian employer. You can paste a listing's description under **Add a job manually**. Jobpilot does not fetch optional posting URLs because access may be blocked or restricted.
+- **Only one feed failed:** Successful listings remain available. Read the source-specific status and try the search again later. Provider outages and changing public API behavior can temporarily reduce results.
 - **Model takes a long time or fails:** Try a smaller model that fits your computer's memory. Jobpilot can still show fetched jobs without AI scores.
 - **Need help with the command window?** Leave the message visible and share the exact error text when asking for help. Do not share your CV or personal profile data.
 
 ## What Jobpilot does
 
-- Searches public job feeds automatically; you do not need to enter company names or board slugs. Public feeds do not include every vacancy.
+- Searches three public feeds automatically; no company names, ATS slugs, API keys, paid plans, or accounts are needed. Coverage is limited and is not comprehensive for Austria. Listings are real provider results; no sample jobs are inserted.
+- **Arbeitnow:** Public paginated JSON API, no key. Primarily Germany with some Europe-wide listings; fields include title, employer, location, remote flag, types, description, date, and source URL. The provider publishes no freshness guarantee. A backlink is required and access may be revoked. Jobpilot fetches at most five pages per search and continues when the API provides a valid next link. [API](https://www.arbeitnow.com/api) · [terms](https://www.arbeitnow.com/terms).
+- **Remotive:** Public JSON API, no key. Remote roles with candidate eligibility text, not local office coverage. Provides title, employer, required-location text, type, category, HTML description, date, and listing URL. Listings are delayed 24 hours; Jobpilot caches the response for six hours and limits fetching to the initial search. Remotive requests attribution and the feed must not be reposted as a third-party job board. [API and terms](https://github.com/remotive-io/remote-jobs-api).
+- **Jobicy:** Public JSON API and location taxonomy, no key or registration. Remote roles with geo eligibility; the public feed covers a rolling seven-day window with a three-hour publication delay and cursor continuation. Provides title, employer, geography, type, industry, description, date, and Jobicy URL. Jobpilot caches location taxonomy for 24 hours and job results for one hour, and queries at most five selected provider regions per request. Preserve source attribution and avoid excessive requests. [API](https://jobicy.com/jobs-rss-feed) · [terms](https://jobicy.com/terms).
+- Search requests enabled feeds concurrently, applies selected location and title filters, reports per-source status and last-checked time, and keeps partial results. Austria-wide discovery cannot be comprehensive under the free, public-feed constraint: the enabled sources are mainly remote or Germany/Europe focused, and many Austrian employer ATS endpoints are not searchable as a universal public feed. Search the public feeds and use the optional pasted-description fallback for known listings that are missing.
 - Loads further pages from Arbeitnow and Jobicy when their APIs return a next-page link or cursor. Remotive's [public API](https://github.com/remotive-io/remote-jobs-api) returns its active result set in one response and currently documents no page or cursor parameter, so Jobpilot fetches that feed once per cache period rather than inventing pagination.
-- Filters by locations in your profile. Leave preferred locations blank only if you want jobs from any location. A generic “Remote” listing is not assumed to be available in Austria unless the listing/feed indicates it.
-- Uses local Ollama `/v1/systemone` decision screening for a fast first estimate, then a local chat model for shortlisted, uncertain, or incomplete cases. You can adjust score weights and detailed-analysis thresholds in the app. Scores are estimates, not hiring probabilities. All location-eligible jobs remain visible, including low-scoring jobs; load additional provider pages when available.
+- Filters by the editable locations in your profile (Austria is the suggested default where applicable). Leave locations blank only if you want any location. Generic “Remote” does not imply Austria eligibility unless the feed provides evidence or you explicitly choose Remote. Jobicy's Europe feed is checked against the selected Europe scope.
+- Uses local Ollama `/v1/systemone` decision screening (default setup suggestion: `tev1:0.8b`) for a fast first estimate, then a local chat model (default setup suggestion: `qwen3.5:4b`) for shortlisted, uncertain, or incomplete cases. Both model names can be changed in the UI. You can adjust score weights and detailed-analysis thresholds in the app. Scores are estimates, not hiring probabilities. All location-eligible jobs remain visible, including low-scoring jobs; load additional provider pages when available.
 - The default score weights are skills 40%, experience 30%, domain fit 20%, and penalty for explicit disqualifiers 10%. Detailed analysis runs by default at scores of 65 or higher, confidence below 60, or whenever important information is missing/unclear. Change these settings in Jobpilot; the score is not a probability of being hired.
 - Shows score breakdowns, confidence when the model provides it, missing information, and detailed matched requirements/gaps with source evidence when available. Verify every result against the original listing.
 - Lets you save jobs, track application status, add private notes and follow-up dates, and create editable cover-letter drafts. A local Chrome/Edge extension can fill recognized empty contact fields and a matching saved cover-letter draft on Greenhouse, Lever, Ashby, Workday, SmartRecruiters, and Workable forms. Add contact details in **Candidate profile**. You review all fields and submit applications yourself; the extension does not upload CVs or answer employer screening questions.
@@ -102,7 +118,8 @@ Restart Jobpilot and choose English, German, or both in the CV upload section. T
 
 ## Current limitations (TODO)
 
-- Broaden location/country normalization and cover more languages and inconsistent feed formats.
+- Broaden location/country normalization beyond the current common city aliases and English/German feed formats.
+- Improve free Austria-wide discovery if a public, no-key, no-registration job source with permitted access becomes available; the current sources cannot provide comprehensive local coverage.
 - Encrypt local profile, tracker, and backup data.
 - Tailor and export a CV from verified source material; currently Jobpilot analyzes CVs but does not generate tailored CV files.
 - Improve cover-letter drafting preferences, structured output, and source-to-claim checks.
