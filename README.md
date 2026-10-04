@@ -13,8 +13,8 @@ A local-first job-search assistant built with Next.js and TypeScript. It searche
 - When a CV and local Ollama model are available, semantically assesses up to 60 location-eligible jobs per search in batches of four, using at most the first 30,000 CV text characters for responsiveness. Results include a relevance decision, fit estimate, and the CV evidence behind the match; no CV text is stored.
 - Without local AI matching, hides listings without an exact profile signal: a target-role match, a profile skill in the title, or at least one (for profiles with one or two skills) / two (for larger profiles) skills in the title or description. Keyword percentages are text overlap indicators, not probabilities of getting a job.
 - Caches the Remotive feed for six hours in keeping with its published request guidance, the Jobicy feed for at least one hour in keeping with its polling guidance, and Arbeitnow feeds for 30 minutes.
-- Saves live listings, saved jobs, application statuses, per-job notes, and editable cover-letter drafts to local JSON storage.
-- Exports and restores a versioned JSON backup of the local profile, listings, saved jobs, application statuses, notes, and cover-letter drafts; restores are validated and require confirmation.
+- Saves live listings, saved jobs, application statuses, per-job notes and follow-up dates, and editable cover-letter drafts to local JSON storage. Follow-up dates show upcoming, due-today, or overdue reminders in the tracker; no operating-system notification is sent.
+- Exports and restores a versioned JSON backup of the local profile, listings, saved jobs, application statuses, notes, follow-up dates, and cover-letter drafts; restores are validated and require confirmation.
 - Includes a manual application tracker with status and private per-job notes. It never submits an application.
 - Creates an editable cover-letter first draft for a selected job using its role and company, exact profile skill overlaps, and user-entered interest and experience details. Missing personal claims are shown as placeholders; drafts are saved locally and included in backups.
 - Can create an AI-written cover-letter draft with an Ollama model running locally. Jobpilot discovers installed models and lets the user choose one. Inference is sent only to the loopback Ollama service on this laptop; there is no hosted AI provider or API key. An offline template remains available when Ollama is unavailable.
@@ -38,7 +38,6 @@ A local-first job-search assistant built with Next.js and TypeScript. It searche
 - Improve AI drafting with editable user preferences, structured outputs, and stronger source-to-claim verification; AI drafting currently creates cover-letter text only.
 - Formally review accessibility and the existing responsive layout across supported browsers and screen sizes; responsive breakpoints exist, but this review has not been completed.
 - Add automated end-to-end tests for the main job search, details, profile, and tracking workflows.
-- Add optional follow-up dates and reminders to the application tracker.
 
 The app fetches public listings from its configured feeds and applies location and role preferences locally. Candidate profile fields are not sent to feed providers. Feed coverage, update frequency, and availability depend on each provider.
 
