@@ -11,7 +11,7 @@ import { createBackup, parseBackup } from "@/lib/backup";
 import { createCoverLetterDraft } from "@/lib/cover-letter";
 import { jobsToAssess } from "@/lib/job-assessment";
 import { createMatchCohortKey, MAX_MATCH_REVIEWS, summarizeMatchReviews } from "@/lib/match-calibration";
-import { DEFAULT_MATCHING_SETTINGS, shouldRunDetailedAnalysis } from "@/lib/job-screening";
+import { DEFAULT_MATCHING_SETTINGS, localScreeningReadinessMessage, shouldRunDetailedAnalysis } from "@/lib/job-screening";
 import { createApplicationPacket, detectAtsPlatform } from "@/lib/application-preparation";
 
 const LEGACY_STORAGE_KEY = "jobpilot-local-v1";
@@ -295,6 +295,14 @@ export default function Home() {
     (job.source === "Manual" || matchesPreferredLocation(job.location, profile.locations, job.mode, job.source, job.sourceLocationScope))
     && (job.source === "Manual" || !profile.roles.trim() || matchesTargetRole(job, profile.roles))), [jobs, profile.locations, profile.roles]);
   const localCvAnalysisReady = Boolean(cvText.trim() && localAiModels.includes(selectedAiModel) && localAiModels.includes(matchingSettings.decisionModel) && systemOneAvailable && isLocalJobpilotPage());
+  const screeningReadinessMessage = localScreeningReadinessMessage({
+    hasCv: Boolean(cvText.trim()),
+    isLocalPage: isLocalJobpilotPage(),
+    ollamaConnected: localAiConnected,
+    systemOneAvailable,
+    decisionModelInstalled: localAiModels.includes(matchingSettings.decisionModel),
+    analysisModelInstalled: localAiModels.includes(selectedAiModel),
+  });
   const hasCurrentCvAssessment = localCvAnalysisReady && cvAnalyzedModel === selectedAiModel;
   const hasStoredScreenings = jobs.some((job) => job.screening?.model === matchingSettings.decisionModel);
   const hasAnyScreenings = hasCurrentCvAssessment || hasStoredScreenings;
@@ -447,6 +455,37 @@ export default function Home() {
     }
     return { screeningById, detailedById, analysisById, error, cancelled, completed, total: candidates.length + detailedCandidates.length, detailedCount: detailedCandidates.length };
   }
+
+  async function screenCurrentJobs() {
+    if (screeningReadinessMessage) {
+      setSourceMessage(screeningReadinessMessage);
+      return;
+    }
+    const pending = jobsToAssess(locationMatchedJobs.filter((job) => job.screening?.model !== matchingSettings.decisionModel));
+    if (!pending.length) {
+      setSourceMessage("All location-eligible jobs already have a score from the selected decision model.");
+      return;
+    }
+    invalidateAiAssessment();
+    const generation = aiMatchGeneration.current;
+    const controller = new AbortController();
+    aiMatchAbortController.current = controller;
+    try {
+      const outcome = await assessJobsLocally(pending, controller.signal);
+      if (generation !== aiMatchGeneration.current) return;
+      setCvAnalyzedModel(selectedAiModel);
+      setSourceMessage(`Local decision screening assessed ${outcome.completed} of ${pending.length} jobs${outcome.detailedCount ? `; ${outcome.detailedCount} also received detailed analysis` : ""}.${outcome.error ? ` Some scores are still missing: ${outcome.error}` : outcome.cancelled ? " Assessment cancelled." : " Scores are estimates, not hiring probabilities."}`);
+    } catch (error) {
+      if (generation === aiMatchGeneration.current) setSourceMessage(`Local screening failed: ${error instanceof Error ? error.message : "unknown error"}. The listings remain available.`);
+    } finally {
+      if (generation === aiMatchGeneration.current) {
+        aiMatchAbortController.current = null;
+        setAiMatchProgress(null);
+      }
+    }
+  }
+
+  const pendingMatchCount = locationMatchedJobs.filter((job) => job.screening?.model !== matchingSettings.decisionModel).length;
   const emptyJobMessage = locationMatchedJobs.length === 0
     ? profile.locations.trim() ? `No fetched jobs match ${profile.locations}. Check your preferred locations or refresh the feeds.` : "No jobs are available in the current feeds. Try searching again later."
     : hasCurrentCvAssessment
@@ -972,6 +1011,7 @@ export default function Home() {
               <label>Preferred locations<textarea rows={2} value={searchLocationsDraft} onChange={(event) => setSearchLocationsDraft(event.target.value)} placeholder="For example: Vienna, Austria; Remote Europe. Leave blank for broad feed results." /></label>
             </div>
             <div className="source-controls"><button className="primary-button" disabled={!stateLoaded || loadingJobs || loadingMoreJobs} onClick={searchWithPreferences}>{loadingJobs ? "Searching job feeds…" : loadingMoreJobs ? "Loading more jobs…" : liveJobs.length ? "↻ Search jobs" : "Search jobs"}</button><span className="feed-summary">You can edit these preferences again at any time.</span></div>
+            {liveJobs.length > 0 && <div className="match-jobs-action"><button type="button" className="secondary-button" onClick={() => void screenCurrentJobs()} disabled={!localCvAnalysisReady || pendingMatchCount === 0 || Boolean(aiMatchProgress) || loadingJobs || loadingMoreJobs}>{aiMatchProgress ? "Matching locally…" : pendingMatchCount ? `Match CV to ${pendingMatchCount} jobs` : "All jobs scored"}</button><span>{screeningReadinessMessage ?? (pendingMatchCount ? "Run or retry local Ollama scoring without fetching the job feeds again." : "Every location-eligible listing has a score from the selected decision model.")}</span></div>}
             <p className="directory-credit">Public sources are free and need no account. Coverage is limited; no no-key provider gives complete Austria-wide vacancy coverage. <a href="https://www.arbeitnow.com/blog/job-board-api" target="_blank" rel="noreferrer">Arbeitnow</a> focuses on Germany and Europe, <a href="https://remotive.com/remote-jobs/api" target="_blank" rel="noreferrer">Remotive</a> is remote-only with a 24-hour publication delay, and <a href="https://jobicy.com/jobs-rss-feed" target="_blank" rel="noreferrer">Jobicy</a> is remote-only and covers a rolling seven-day window.</p>
             {sourceStatuses.length > 0 && <ul className="feed-source-status" aria-label="Job source results">{sourceStatuses.map((source) => <li key={source.source} className={`feed-${source.state}`}><strong>{source.source}</strong><span>{source.state === "failed" ? "Unavailable" : `${source.count} matching`}</span><small>Checked {new Date(source.checkedAt).toLocaleTimeString()}</small></li>)}</ul>}
             <details className="manual-job-panel"><summary>Can’t find a posting? Add it manually</summary><p>Paste the description below. Jobpilot does not fetch job URLs because external sites may block automated imports. A URL can be saved as the original posting link.</p><form onSubmit={(event) => void addManualJob(event)}>

@@ -8,6 +8,27 @@ export const DEFAULT_MATCHING_SETTINGS: MatchingSettings = {
   detailedConfidenceThreshold: 60,
 };
 
+export type LocalScreeningReadiness = {
+  hasCv: boolean;
+  isLocalPage: boolean;
+  ollamaConnected: boolean | null;
+  systemOneAvailable: boolean;
+  decisionModelInstalled: boolean;
+  analysisModelInstalled: boolean;
+};
+
+/** Returns a user-actionable explanation when local screening cannot start. */
+export function localScreeningReadinessMessage(readiness: LocalScreeningReadiness): string | null {
+  if (!readiness.hasCv) return "Upload and analyze your CV before requesting match scores.";
+  if (!readiness.isLocalPage) return "Open Jobpilot at http://localhost:3000 so CV and job text stay on this laptop.";
+  if (readiness.ollamaConnected === null) return "Checking Ollama on this laptop. Refresh Local AI status, then try again.";
+  if (!readiness.ollamaConnected) return "Start Ollama on this laptop, then refresh Local AI status.";
+  if (!readiness.systemOneAvailable) return "Update Ollama to version 0.35 or newer to use the local decision API.";
+  if (!readiness.decisionModelInstalled) return "Choose an installed decision model in Local AI status.";
+  if (!readiness.analysisModelInstalled) return "Choose an installed Ollama chat model for detailed analysis in Local AI status.";
+  return null;
+}
+
 export function normalizeMatchingSettings(value: unknown): MatchingSettings {
   if (!value || typeof value !== "object") return DEFAULT_MATCHING_SETTINGS;
   const raw = value as Partial<MatchingSettings>;
