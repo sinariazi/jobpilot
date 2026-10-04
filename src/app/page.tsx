@@ -46,6 +46,7 @@ export default function Home() {
   const [profileDraft, setProfileDraft] = useState<CandidateProfile>(defaultProfile);
   const [cvSuggestions, setCvSuggestions] = useState<CvSuggestions | null>(null);
   const [cvText, setCvText] = useState("");
+  const [cvPreviewUrl, setCvPreviewUrl] = useState("");
   const [cvAnalysisStatus, setCvAnalysisStatus] = useState("");
   const [cvAnalyzing, setCvAnalyzing] = useState(false);
   const [cvAnalyzedModel, setCvAnalyzedModel] = useState("");
@@ -168,6 +169,10 @@ export default function Home() {
     void Promise.resolve().then(() => refreshLocalAiStatus(false));
   }, []);
 
+  useEffect(() => () => {
+    if (cvPreviewUrl) URL.revokeObjectURL(cvPreviewUrl);
+  }, [cvPreviewUrl]);
+
   useEffect(() => {
     if (!stateLoaded) return;
     let cancelled = false;
@@ -243,6 +248,8 @@ export default function Home() {
     const file = event.currentTarget.files?.[0];
     event.currentTarget.value = "";
     if (!file) return;
+    if (cvPreviewUrl) URL.revokeObjectURL(cvPreviewUrl);
+    setCvPreviewUrl(file.name.toLocaleLowerCase().endsWith(".pdf") ? URL.createObjectURL(file) : "");
     setCvParsing(true);
     setCvAnalyzing(false);
     setCvError("");
@@ -688,6 +695,7 @@ export default function Home() {
           <div className="cv-analysis-facts"><p><strong>Suggested job titles</strong><span>{cvSuggestions.roles || "No role titles detected"}</span></p><p><strong>Skills and keywords</strong><span>{cvSuggestions.skills || "No skills detected"}</span></p></div>
           {Boolean(cvSuggestions.analysis?.highlights.length) && <div className="cv-highlights"><strong>Experience evidence</strong><ul>{cvSuggestions.analysis?.highlights.map((highlight) => <li key={highlight}>{highlight}</li>)}</ul></div>}
           {cvSuggestions.notes.map((note) => <p className="cv-file-hint" key={note}>{note}</p>)}
+          {cvPreviewUrl && <details className="cv-document-details"><summary>View original CV PDF</summary><iframe title="Uploaded CV PDF preview" src={cvPreviewUrl}/></details>}
           <details className="cv-text-details"><summary>View extracted CV text</summary><pre>{(cvSuggestions.sourceText ?? "").slice(0, 12_000)}</pre>{(cvSuggestions.sourceText?.length ?? 0) > 12_000 && <small>Preview limited to 12,000 characters. The full extracted text remains in memory for local matching.</small>}</details>
           <p className="cv-file-hint">Your preferred location was not inferred from the CV. Profile role and skill fields below were filled automatically and can be edited.</p>
         </div>}
