@@ -30,8 +30,19 @@ describe("local CV-to-job matching API", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ matches: [{ id: "job-1", relevant: true, score: 86, reason: "The role uses frontend engineering skills demonstrated in your CV.", cvEvidence: "TypeScript and React experience" }] });
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["http://127.0.0.1:11434/api/tags", "http://127.0.0.1:11434/api/chat"]);
-    const payload = JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body)) as { messages: Array<{ content: string }> };
+    const payload = JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body)) as { think: boolean; messages: Array<{ content: string }> };
+    expect(payload.think).toBe(false);
     expect(payload.messages[1]?.content).toContain(requestBody.cvText);
+  });
+
+  it("returns a clear error when the model omits requested matches", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ models: [{ name: requestBody.model }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify({ matches: [] }) } }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await POST(new Request("http://localhost/api/jobs/match", { method: "POST", body: JSON.stringify(requestBody) }));
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({ error: "The local model did not assess every listing. Try another installed model." });
   });
 
   it("refuses a non-loopback Ollama destination", async () => {
