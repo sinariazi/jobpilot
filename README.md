@@ -119,3 +119,85 @@ npm run build
 ```
 
 GitHub Actions runs these checks on pushes and pull requests. Public feed endpoints and test fixtures are integration/test data; the repository contains no real CV or personal candidate profile. Do not commit CVs, personal job-search data, credentials, or `.env` files.
+
+## Solution architecture showcase
+
+Jobpilot is designed as a single-user, local-first application. The browser handles CV file reading and text extraction; a local Next.js server coordinates job feeds, profile analysis, matching, and persistence. Ollama performs inference on the same computer. Public providers supply job listings, but do not receive candidate profile or CV data.
+
+### System context and trust boundaries
+
+```mermaid
+flowchart TB
+    person["Candidate"] --> browser["Browser UI<br/>CV extraction and review"]
+    browser --> app["Local Jobpilot server<br/>Next.js pages and API routes"]
+    app -->|"Public listing requests"| feeds["Job feed APIs<br/>Arbeitnow · Remotive · Jobicy"]
+    feeds -->|"Listings"| app
+    app -->|"Loopback only: CV text and job descriptions"| ollama["Ollama on this computer<br/>decision model and chat model"]
+    ollama -->|"Scores and analysis"| app
+    app -->|"Profile, jobs, scores, drafts"| state["Local JSON state file"]
+    app --> browser
+```
+
+The CV file is not stored. Extracted text stays in memory for analysis and matching; only accepted profile fields and job results are persisted. Scanned-page OCR uses local Tesseract through the localhost app. The local state file and backups are currently unencrypted, as listed in TODO.
+
+### Job-search and two-stage matching flow
+
+```mermaid
+flowchart TB
+    start["Candidate uploads CV and sets location preferences"] --> extract["Extract CV text in browser<br/>Optional scanned-page OCR on this computer"]
+    extract --> cv["Analyze CV with local Ollama<br/>Review suggested roles and skills"]
+    cv --> search["Search public feeds and normalize listings"]
+    search --> filter["Apply configured location filters<br/>Keep eligible listings visible"]
+    filter --> screen["Local decision model scores skills,<br/>experience, domain, risk, and information quality"]
+    screen --> route{"Detailed review threshold met,<br/>low confidence, or information unclear?"}
+    route -->|"Yes"| detailed["Local chat model checks requirements,<br/>gaps, and source evidence"]
+    route -->|"No"| estimate["Keep first-stage estimate"]
+    detailed --> results["Show score, confidence, breakdown,<br/>analysis, and original posting"]
+    estimate --> results
+    results --> human["Candidate reviews and decides<br/>whether to apply"]
+```
+
+Default screening weights are 40% skills, 30% experience, 20% domain fit, and 10% inverse explicit-disqualifier risk. The default detailed-analysis route is a score of 65 or higher, confidence below 60, or missing/unclear information. Users can change these values in the app. Scores are estimates, not hiring probabilities; the local model's accuracy has not been established on a human-reviewed benchmark.
+
+### Runtime interaction
+
+```mermaid
+sequenceDiagram
+    actor User as Candidate
+    participant UI as Browser UI
+    participant App as Local Jobpilot API
+    participant Feed as Public job feeds
+    participant AI as Ollama on localhost
+    participant Disk as Local JSON state
+
+    User->>UI: Upload CV and review profile
+    UI->>App: Send extracted text for analysis
+    App->>AI: Analyze CV on this computer
+    AI-->>App: Summary, roles, skills, evidence
+    App->>Disk: Save accepted profile fields
+    User->>UI: Search jobs
+    UI->>App: Search with location preferences
+    App->>Feed: Request public listings
+    Feed-->>App: Return job listings
+    App->>AI: Score each eligible job via /v1/systemone
+    AI-->>App: Normalized category scores and confidence
+    opt Shortlisted, uncertain, or incomplete result
+        App->>AI: Detailed comparison using local chat model
+        AI-->>App: Matches, gaps, and evidence
+    end
+    App->>Disk: Save listings and assessments, not raw CV text
+    App-->>UI: Return all eligible jobs and their analysis
+    UI-->>User: Display results for human review
+```
+
+### Key architecture decisions
+
+| Decision | Why it fits this application | Trade-off or current boundary |
+|---|---|---|
+| Keep orchestration in the local Next.js application | One installable TypeScript project serves the UI and local APIs without a separate hosted backend. | The app is a single-user local tool, not a multi-user service. |
+| Use adapters to map provider listings into a shared job type | Feed-specific fields are normalized before location filtering, display, and matching. | Coverage and pagination depend on each provider's public API and terms. |
+| Split matching into a fast decision stage and a detailed stage | A lightweight estimate can screen many listings; slower evidence-focused analysis is reserved for selected or uncertain cases. | Both stages depend on local model compatibility, hardware, and model quality. |
+| Keep candidate data away from job-feed providers and hosted AI | Candidate text goes only to Ollama on loopback; feed requests retrieve public listings. | Job discovery still requires an internet connection, and local JSON data is not encrypted. |
+| Preserve human review and show estimates separately | Scores, confidence, and detailed analysis remain distinguishable; original postings stay available. | The agent does not submit applications, and score calibration awaits reviewed examples. |
+
+This design demonstrates local data-boundary design, integration of heterogeneous APIs, explicit decision routing, failure-aware AI orchestration, and human-in-the-loop workflow design. Remaining boundaries—encryption, broader feed coverage, ATS integration, and measured score accuracy—are documented in [Current limitations](#current-limitations-todo).
