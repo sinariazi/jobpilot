@@ -9,14 +9,14 @@ const valid = { answers: {
 
 describe("local job screening", () => {
   it("explains each missing local screening requirement and reports readiness", () => {
-    const ready = { hasCv: true, isLocalPage: true, ollamaConnected: true, systemOneAvailable: true, decisionModelInstalled: true, analysisModelInstalled: true };
+    const ready = { hasCv: true, isLocalPage: true, ollamaConnected: true, systemOneAvailable: true, decisionModelInstalled: true };
     expect(localScreeningReadinessMessage(ready)).toBeNull();
     expect(localScreeningReadinessMessage({ ...ready, hasCv: false })).toMatch(/Upload and analyze your CV/);
     expect(localScreeningReadinessMessage({ ...ready, isLocalPage: false })).toMatch(/localhost/);
     expect(localScreeningReadinessMessage({ ...ready, ollamaConnected: false })).toMatch(/Start Ollama/);
     expect(localScreeningReadinessMessage({ ...ready, systemOneAvailable: false })).toMatch(/0\.35/);
     expect(localScreeningReadinessMessage({ ...ready, decisionModelInstalled: false })).toMatch(/decision model/);
-    expect(localScreeningReadinessMessage({ ...ready, analysisModelInstalled: false })).toMatch(/chat model/);
+    expect(localScreeningReadinessMessage(ready)).toBeNull();
   });
   it("normalizes scores and applies configured weights with the disqualifier penalty", () => {
     expect(normalizeSystemOneScreenResult(valid, "decision:tag", weights)).toEqual({ model: "decision:tag", score: 68, confidence: 75, breakdown: { skills: 80, experience: 60, domain: 50 }, disqualifierRisk: 25, informationStatus: "sufficient" });

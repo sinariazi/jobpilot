@@ -75,6 +75,9 @@ export default function Home() {
   const aiMatchGeneration = useRef(0);
   const fetchLiveJobsRef = useRef<() => Promise<void>>(async () => undefined);
   const handledSearchRequestId = useRef(0);
+  const automaticScreeningLock = useRef(false);
+  const automaticScreeningAttempt = useRef("");
+  const screenCurrentJobsRef = useRef<() => Promise<void>>(async () => undefined);
   const backupInput = useRef<HTMLInputElement>(null);
   const [sourceMessage, setSourceMessage] = useState("");
   const [sourceErrors, setSourceErrors] = useState<string[]>([]);
@@ -132,9 +135,8 @@ export default function Home() {
   function chooseLocalAiModel(model: string) {
     invalidateAiAssessment();
     setSelectedAiModel(model);
-    setCvAnalyzedModel("");
-    setLiveJobs((current) => current.map((job) => ({ ...job, aiMatch: undefined, screening: undefined, detailedAnalysis: undefined })));
-    setSourceMessage("Local model changed. Search again to reassess your CV against the jobs.");
+    setLiveJobs((current) => current.map((job) => ({ ...job, aiMatch: undefined, detailedAnalysis: undefined })));
+    setSourceMessage("Detailed-analysis model changed. Existing decision scores are kept; shortlisted jobs will be analyzed with the selected model.");
   }
 
   function chooseDecisionModel(model: string) {
@@ -239,7 +241,7 @@ export default function Home() {
       setLocalAiRuntimeVersion(result.runtimeVersion ?? "");
       setSystemOneAvailable(result.systemOneAvailable ?? false);
       setMatchingSettings((current) => ({ ...current, decisionModel: current.decisionModel && names.includes(current.decisionModel) ? current.decisionModel : result.preferredDecisionModel && names.includes(result.preferredDecisionModel) ? result.preferredDecisionModel : "" }));
-      setSelectedAiModel((current) => current && names.includes(current) ? current : result.preferredModel && names.includes(result.preferredModel) ? result.preferredModel : names[0] ?? "");
+      setSelectedAiModel((current) => current && names.includes(current) ? current : result.preferredModel && names.includes(result.preferredModel) ? result.preferredModel : "");
       setLocalAiStatus(result.message ?? (names.length ? "Ollama is connected and a local model is ready." : "Ollama is connected, but no models are installed."));
     } catch (error) {
       setLocalAiModels([]);
@@ -254,7 +256,7 @@ export default function Home() {
   }
 
   useEffect(() => {
-    void Promise.resolve().then(() => refreshLocalAiStatus(false));
+    void Promise.resolve().then(() => refreshLocalAiStatus());
   }, []);
 
   useEffect(() => () => {
@@ -294,16 +296,16 @@ export default function Home() {
   const locationMatchedJobs = useMemo(() => jobs.filter((job) =>
     (job.source === "Manual" || matchesPreferredLocation(job.location, profile.locations, job.mode, job.source, job.sourceLocationScope))
     && (job.source === "Manual" || !profile.roles.trim() || matchesTargetRole(job, profile.roles))), [jobs, profile.locations, profile.roles]);
-  const localCvAnalysisReady = Boolean(cvText.trim() && localAiModels.includes(selectedAiModel) && localAiModels.includes(matchingSettings.decisionModel) && systemOneAvailable && isLocalJobpilotPage());
+  const localDecisionScreeningReady = Boolean(cvText.trim() && localAiModels.includes(matchingSettings.decisionModel) && systemOneAvailable && isLocalJobpilotPage());
+  const localDetailedAnalysisReady = Boolean(localAiModels.includes(selectedAiModel) && isLocalJobpilotPage());
   const screeningReadinessMessage = localScreeningReadinessMessage({
     hasCv: Boolean(cvText.trim()),
     isLocalPage: isLocalJobpilotPage(),
     ollamaConnected: localAiConnected,
     systemOneAvailable,
     decisionModelInstalled: localAiModels.includes(matchingSettings.decisionModel),
-    analysisModelInstalled: localAiModels.includes(selectedAiModel),
   });
-  const hasCurrentCvAssessment = localCvAnalysisReady && cvAnalyzedModel === selectedAiModel;
+  const hasCurrentCvAssessment = localDecisionScreeningReady && cvAnalyzedModel === matchingSettings.decisionModel;
   const hasStoredScreenings = jobs.some((job) => job.screening?.model === matchingSettings.decisionModel);
   const hasAnyScreenings = hasCurrentCvAssessment || hasStoredScreenings;
   const matchingConfigurationKey = JSON.stringify({ matchingSettings, roles: profile.roles, locations: profile.locations });
@@ -394,6 +396,7 @@ export default function Home() {
     const analysisById = new Map<string, NonNullable<Job["detailedAnalysis"]>>();
     const cvForModel = createCvMatchContext(cvText, cvSuggestions, profile);
     let error = "";
+    let detailWarning = "";
     let cancelled = false;
     let completed = 0;
     const detailedCandidates: Job[] = [];
@@ -426,6 +429,11 @@ export default function Home() {
       }
     }
     if (!cancelled && !error && detailedCandidates.length) {
+      if (!localAiModels.includes(selectedAiModel)) {
+        detailWarning = `First-stage scores are ready. Install or select a local chat model to analyze ${detailedCandidates.length} high-scoring or uncertain jobs in detail.`;
+      }
+    }
+    if (!cancelled && !error && !detailWarning && detailedCandidates.length) {
       const total = candidates.length + detailedCandidates.length;
       for (let offset = 0; offset < detailedCandidates.length; offset += AI_MATCH_BATCH_SIZE) {
         if (signal.aborted) { cancelled = true; break; }
@@ -453,7 +461,7 @@ export default function Home() {
         }
       }
     }
-    return { screeningById, detailedById, analysisById, error, cancelled, completed, total: candidates.length + detailedCandidates.length, detailedCount: detailedCandidates.length };
+    return { screeningById, detailedById, analysisById, error, detailWarning, cancelled, completed, total: candidates.length + detailedCandidates.length, detailedCount: detailedCandidates.length };
   }
 
   async function screenCurrentJobs() {
@@ -461,11 +469,14 @@ export default function Home() {
       setSourceMessage(screeningReadinessMessage);
       return;
     }
-    const pending = jobsToAssess(locationMatchedJobs.filter((job) => job.screening?.model !== matchingSettings.decisionModel));
+    if (automaticScreeningLock.current) return;
+    const pending = jobsToAssess(locationMatchedJobs.filter((job) => job.screening?.model !== matchingSettings.decisionModel
+      || (localDetailedAnalysisReady && shouldRunDetailedAnalysis(job.screening, matchingSettings) && job.aiMatch?.model !== selectedAiModel)));
     if (!pending.length) {
       setSourceMessage("All location-eligible jobs already have a score from the selected decision model.");
       return;
     }
+    automaticScreeningLock.current = true;
     invalidateAiAssessment();
     const generation = aiMatchGeneration.current;
     const controller = new AbortController();
@@ -473,11 +484,12 @@ export default function Home() {
     try {
       const outcome = await assessJobsLocally(pending, controller.signal);
       if (generation !== aiMatchGeneration.current) return;
-      setCvAnalyzedModel(selectedAiModel);
-      setSourceMessage(`Local decision screening assessed ${outcome.completed} of ${pending.length} jobs${outcome.detailedCount ? `; ${outcome.detailedCount} also received detailed analysis` : ""}.${outcome.error ? ` Some scores are still missing: ${outcome.error}` : outcome.cancelled ? " Assessment cancelled." : " Scores are estimates, not hiring probabilities."}`);
+      setCvAnalyzedModel(matchingSettings.decisionModel);
+      setSourceMessage(`Local decision screening assessed ${outcome.completed} of ${pending.length} jobs${outcome.detailedCount && !outcome.detailWarning ? `; ${outcome.detailedCount} also received detailed analysis` : ""}.${outcome.error ? ` Some scores are still missing: ${outcome.error}` : outcome.detailWarning ? ` ${outcome.detailWarning}` : outcome.cancelled ? " Assessment cancelled." : " Scores are estimates, not hiring probabilities."}`);
     } catch (error) {
       if (generation === aiMatchGeneration.current) setSourceMessage(`Local screening failed: ${error instanceof Error ? error.message : "unknown error"}. The listings remain available.`);
     } finally {
+      automaticScreeningLock.current = false;
       if (generation === aiMatchGeneration.current) {
         aiMatchAbortController.current = null;
         setAiMatchProgress(null);
@@ -486,6 +498,19 @@ export default function Home() {
   }
 
   const pendingMatchCount = locationMatchedJobs.filter((job) => job.screening?.model !== matchingSettings.decisionModel).length;
+  useEffect(() => {
+    screenCurrentJobsRef.current = screenCurrentJobs;
+  });
+  useEffect(() => {
+    if (!stateLoaded || loadingJobs || loadingMoreJobs || cvParsing || cvAnalyzing || checkingLocalAi || !localDecisionScreeningReady || screeningReadinessMessage || aiMatchProgress || automaticScreeningLock.current) return;
+    const work = locationMatchedJobs.filter((job) => job.screening?.model !== matchingSettings.decisionModel
+      || (localDetailedAnalysisReady && shouldRunDetailedAnalysis(job.screening, matchingSettings) && job.aiMatch?.model !== selectedAiModel));
+    if (!work.length) return;
+    const attemptKey = JSON.stringify({ decision: matchingSettings.decisionModel, chat: localDetailedAnalysisReady ? selectedAiModel : "unavailable", cohort: matchCohortKey, configuration: matchingConfigurationKey, jobs: work.map((job) => job.id).sort() });
+    if (automaticScreeningAttempt.current === attemptKey) return;
+    automaticScreeningAttempt.current = attemptKey;
+    void screenCurrentJobsRef.current();
+  }, [stateLoaded, loadingJobs, loadingMoreJobs, cvParsing, cvAnalyzing, checkingLocalAi, localDecisionScreeningReady, screeningReadinessMessage, aiMatchProgress, locationMatchedJobs, matchingSettings, selectedAiModel, localDetailedAnalysisReady, matchCohortKey, matchingConfigurationKey]);
   const emptyJobMessage = locationMatchedJobs.length === 0
     ? profile.locations.trim() ? `No fetched jobs match ${profile.locations}. Check your preferred locations or refresh the feeds.` : "No jobs are available in the current feeds. Try searching again later."
     : hasCurrentCvAssessment
@@ -559,7 +584,7 @@ export default function Home() {
     selectJob(job.id);
     setManualJob({ role: "", company: "", location: "", description: "", url: "" });
     setManualJobMessage("Posting added to this device. Its original link is saved when provided.");
-    if (!localCvAnalysisReady) return;
+    if (!localDecisionScreeningReady) return;
     const generation = aiMatchGeneration.current;
     const controller = new AbortController();
     aiMatchAbortController.current = controller;
@@ -571,7 +596,7 @@ export default function Home() {
       const detailedAnalysis = outcome.analysisById.get(job.id);
       const aiMatch = outcome.detailedById.get(job.id);
       if (screening || detailedAnalysis) setLiveJobs((current) => current.map((item) => item.id === job.id ? { ...item, ...(screening ? { screening } : {}), ...(detailedAnalysis ? { detailedAnalysis, aiMatch } : {}) } : item));
-      setCvAnalyzedModel(selectedAiModel);
+      setCvAnalyzedModel(matchingSettings.decisionModel);
       setManualJobMessage(outcome.error ? `Posting added; local screening could not finish: ${outcome.error}` : "Posting added and assessed on this device.");
     } catch (error) {
       setManualJobMessage(`Posting added; local screening failed: ${error instanceof Error ? error.message : "unknown error"}.`);
@@ -849,7 +874,7 @@ export default function Home() {
       fetchedJobs = result.jobs ?? [];
       const locationJobs = fetchedJobs.filter((job) => matchesPreferredLocation(job.location, profile.locations, job.mode, job.source, job.sourceLocationScope)
         && (!profile.roles.trim() || matchesTargetRole(job, profile.roles)));
-      const assessWithCurrentContext = localCvAnalysisReady && searchGeneration === aiMatchGeneration.current;
+      const assessWithCurrentContext = localDecisionScreeningReady && searchGeneration === aiMatchGeneration.current;
       let analyzedJobs = fetchedJobs;
       let completed = 0;
       let cancelled = false;
@@ -865,6 +890,7 @@ export default function Home() {
         completed = outcome.completed;
         cancelled = outcome.cancelled;
         matchingWarning = outcome.error;
+        if (outcome.detailWarning) matchingWarning = outcome.detailWarning;
         detailedCount = outcome.detailedCount;
         aiMatchAbortController.current = null;
         analyzedJobs = fetchedJobs.map((job) => ({
@@ -872,7 +898,7 @@ export default function Home() {
           ...(outcome.screeningById.has(job.id) ? { screening: outcome.screeningById.get(job.id) } : { screening: undefined }),
           ...(outcome.detailedById.has(job.id) ? { aiMatch: outcome.detailedById.get(job.id), detailedAnalysis: outcome.analysisById.get(job.id) } : { aiMatch: undefined, detailedAnalysis: undefined }),
         }));
-        setCvAnalyzedModel(selectedAiModel);
+        setCvAnalyzedModel(matchingSettings.decisionModel);
       }
       setLiveJobs(analyzedJobs);
       const locationCount = locationJobs.length;
@@ -936,7 +962,7 @@ export default function Home() {
         const seen = new Set(current.map((job) => job.sourceUrl ?? job.id));
         return [...current, ...fetchedMore.filter((job) => !seen.has(job.sourceUrl ?? job.id))];
       });
-      const assessWithCurrentContext = localCvAnalysisReady && searchGeneration === aiMatchGeneration.current;
+      const assessWithCurrentContext = localDecisionScreeningReady && searchGeneration === aiMatchGeneration.current;
       if (!assessWithCurrentContext || !fetchedMore.length) {
         const moreSources = [result.nextArbeitnowPage !== null && result.nextArbeitnowPage !== undefined ? "Arbeitnow" : "", result.nextJobicyCursor ? "Jobicy" : ""].filter(Boolean);
         setSourceMessage(`Loaded ${fetchedMore.length} more listings. ${moreSources.length ? `More pages are available from ${moreSources.join(" and ")}.` : "No further pages are available."} ${assessWithCurrentContext ? "" : "Local two-stage CV matching is unavailable; listings remain visible."}`);
@@ -955,7 +981,7 @@ export default function Home() {
         ...(outcome.detailedById.has(job.id) ? { aiMatch: outcome.detailedById.get(job.id), detailedAnalysis: outcome.analysisById.get(job.id) } : {}),
       }));
       setLiveJobs((current) => current.map((job) => analyzed.find((item) => item.id === job.id) ?? job));
-      setCvAnalyzedModel(selectedAiModel);
+      setCvAnalyzedModel(matchingSettings.decisionModel);
       const moreSources = [result.nextArbeitnowPage !== null && result.nextArbeitnowPage !== undefined ? "Arbeitnow" : "", result.nextJobicyCursor ? "Jobicy" : ""].filter(Boolean);
       setSourceMessage(`Loaded ${fetchedMore.length} more listings. Screened ${outcome.completed} of ${candidates.length}; detailed analysis ran for ${outcome.detailedCount}. ${outcome.error || (outcome.cancelled ? "Assessment cancelled." : "Scores are estimates, not hiring probabilities.")} ${moreSources.length ? `More pages are available from ${moreSources.join(" and ")}.` : "No further pages are available."}`);
     } catch (error) {
@@ -1010,8 +1036,8 @@ export default function Home() {
               <label>Job titles<textarea rows={3} value={searchRolesDraft} onChange={(event) => setSearchRolesDraft(event.target.value)} placeholder="Suggested titles from your CV appear here. Add or remove titles; separate alternatives with commas or new lines." /></label>
               <label>Preferred locations<textarea rows={2} value={searchLocationsDraft} onChange={(event) => setSearchLocationsDraft(event.target.value)} placeholder="For example: Vienna, Austria; Remote Europe. Leave blank for broad feed results." /></label>
             </div>
-            <div className="source-controls"><button className="primary-button" disabled={!stateLoaded || loadingJobs || loadingMoreJobs} onClick={searchWithPreferences}>{loadingJobs ? "Searching job feeds…" : loadingMoreJobs ? "Loading more jobs…" : liveJobs.length ? "↻ Search jobs" : "Search jobs"}</button><span className="feed-summary">You can edit these preferences again at any time.</span></div>
-            {liveJobs.length > 0 && <div className="match-jobs-action"><button type="button" className="secondary-button" onClick={() => void screenCurrentJobs()} disabled={!localCvAnalysisReady || pendingMatchCount === 0 || Boolean(aiMatchProgress) || loadingJobs || loadingMoreJobs}>{aiMatchProgress ? "Matching locally…" : pendingMatchCount ? `Match CV to ${pendingMatchCount} jobs` : "All jobs scored"}</button><span>{screeningReadinessMessage ?? (pendingMatchCount ? "Run or retry local Ollama scoring without fetching the job feeds again." : "Every location-eligible listing has a score from the selected decision model.")}</span></div>}
+            <div className="source-controls"><button className="primary-button" disabled={!stateLoaded || loadingJobs || loadingMoreJobs} onClick={searchWithPreferences}>{loadingJobs ? "Searching job feeds…" : loadingMoreJobs ? "Loading more jobs…" : liveJobs.length ? "↻ Search jobs" : "Search jobs"}</button><span className="feed-summary">Search checks all enabled public feeds. Matching runs automatically when your CV and local decision model are ready.</span></div>
+            {liveJobs.length > 0 && <div className="match-jobs-action"><button type="button" className="secondary-button" onClick={() => void screenCurrentJobs()} disabled={!localDecisionScreeningReady || pendingMatchCount === 0 || Boolean(aiMatchProgress) || loadingJobs || loadingMoreJobs}>{aiMatchProgress ? "Matching locally…" : pendingMatchCount ? `Match CV to ${pendingMatchCount} jobs` : "All jobs scored"}</button><span>{screeningReadinessMessage ?? (pendingMatchCount ? "Jobpilot scores new listings automatically on this laptop." : "Every location-eligible listing has a score from the selected decision model.")}</span></div>}
             <p className="directory-credit">Public sources are free and need no account. Coverage is limited; no no-key provider gives complete Austria-wide vacancy coverage. <a href="https://www.arbeitnow.com/blog/job-board-api" target="_blank" rel="noreferrer">Arbeitnow</a> focuses on Germany and Europe, <a href="https://remotive.com/remote-jobs/api" target="_blank" rel="noreferrer">Remotive</a> is remote-only with a 24-hour publication delay, and <a href="https://jobicy.com/jobs-rss-feed" target="_blank" rel="noreferrer">Jobicy</a> is remote-only and covers a rolling seven-day window.</p>
             {sourceStatuses.length > 0 && <ul className="feed-source-status" aria-label="Job source results">{sourceStatuses.map((source) => <li key={source.source} className={`feed-${source.state}`}><strong>{source.source}</strong><span>{source.state === "failed" ? "Unavailable" : `${source.count} matching`}</span><small>Checked {new Date(source.checkedAt).toLocaleTimeString()}</small></li>)}</ul>}
             <details className="manual-job-panel"><summary>Can’t find a posting? Add it manually</summary><p>Paste the description below. Jobpilot does not fetch job URLs because external sites may block automated imports. A URL can be saved as the original posting link.</p><form onSubmit={(event) => void addManualJob(event)}>
@@ -1034,7 +1060,7 @@ export default function Home() {
               <div><span>Connection</span><strong className="ai-connection"><i />{localAiConnected === null ? "Checking" : localAiConnected ? systemOneAvailable ? "Connected · decision API ready" : "Connected · decision API unavailable" : "Not connected"}</strong></div>
               <div><span>Ollama version</span><strong>{localAiRuntimeVersion ? `v${localAiRuntimeVersion}` : localAiConnected ? "Version unavailable" : "—"}</strong></div>
               <div><span>Detailed analysis and drafting model</span><select className="ai-model-picker" aria-label="Select local Ollama chat model" value={selectedAiModel} onChange={(event) => chooseLocalAiModel(event.target.value)} disabled={!localAiModels.length || aiDrafting || checkingLocalAi}><option value="">Choose an installed model</option>{localAiModels.map((model) => <option key={model} value={model}>{model}</option>)}</select><small>{selectedAiModel && localAiModelDetails[selectedAiModel]?.details ? [localAiModelDetails[selectedAiModel].details?.family, localAiModelDetails[selectedAiModel].details?.parameterSize, localAiModelDetails[selectedAiModel].details?.quantizationLevel].filter(Boolean).join(" · ") : selectedAiModel ? "Installed locally · model tag shown above" : "Install a model with Ollama, then refresh"}</small></div>
-              <div><span>Decision model for first-stage screening</span><select className="ai-model-picker" aria-label="Select local decision model" value={matchingSettings.decisionModel} onChange={(event) => chooseDecisionModel(event.target.value)} disabled={!localAiModels.length || checkingLocalAi}><option value="">Choose an installed decision model</option>{localAiModels.map((model) => <option key={model} value={model}>{model}</option>)}</select><small>{systemOneAvailable ? "Uses Ollama /v1/systemone. Select an installed decision model." : "Requires Ollama 0.35 or newer."}</small></div>
+              <div><span>Decision model for first-stage screening</span><select className="ai-model-picker" aria-label="Select local decision model" value={matchingSettings.decisionModel} onChange={(event) => chooseDecisionModel(event.target.value)} disabled={!localAiModels.length || checkingLocalAi}><option value="">Choose an installed decision model</option>{localAiModels.map((model) => <option key={model} value={model}>{model}</option>)}</select><small>{systemOneAvailable ? "Uses Ollama /v1/systemone. Jobpilot suggests installed tags named for decision or System One use; scores start automatically after CV upload and search." : "Requires Ollama 0.35 or newer."}</small></div>
             </div>
             <details className="matching-settings"><summary>Screening weights and detailed-analysis thresholds</summary>
               <p>Weighted estimate = skills × {matchingSettings.weights.skills}% + experience × {matchingSettings.weights.experience}% + domain × {matchingSettings.weights.domain}% + (1 − explicit disqualifier risk) × {matchingSettings.weights.disqualifier}%. Weights total 100%.</p>

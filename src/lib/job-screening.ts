@@ -14,7 +14,6 @@ export type LocalScreeningReadiness = {
   ollamaConnected: boolean | null;
   systemOneAvailable: boolean;
   decisionModelInstalled: boolean;
-  analysisModelInstalled: boolean;
 };
 
 /** Returns a user-actionable explanation when local screening cannot start. */
@@ -25,7 +24,6 @@ export function localScreeningReadinessMessage(readiness: LocalScreeningReadines
   if (!readiness.ollamaConnected) return "Start Ollama on this laptop, then refresh Local AI status.";
   if (!readiness.systemOneAvailable) return "Update Ollama to version 0.35 or newer to use the local decision API.";
   if (!readiness.decisionModelInstalled) return "Choose an installed decision model in Local AI status.";
-  if (!readiness.analysisModelInstalled) return "Choose an installed Ollama chat model for detailed analysis in Local AI status.";
   return null;
 }
 
