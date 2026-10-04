@@ -38,6 +38,8 @@ export default function Home() {
   const [activeView, setActiveView] = useState<"overview" | "applications">("overview");
   const [liveJobs, setLiveJobs] = useState<Job[]>([]);
   const [loadingJobs, setLoadingJobs] = useState(false);
+  const [loadingMoreJobs, setLoadingMoreJobs] = useState(false);
+  const [nextArbeitnowPage, setNextArbeitnowPage] = useState<number | null>(null);
   const [stateLoaded, setStateLoaded] = useState(false);
   const [storageMessage, setStorageMessage] = useState("Loading saved data from this device…");
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
@@ -502,9 +504,10 @@ export default function Home() {
     let fetchedForFallback: Job[] = [];
     try {
       const response = await fetch("/api/jobs/search", { cache: "no-store" });
-      const result = await response.json() as { jobs?: Job[]; errors?: string[]; error?: string };
+      const result = await response.json() as { jobs?: Job[]; errors?: string[]; error?: string; nextArbeitnowPage?: number | null };
       if (!response.ok) throw new Error(result.error ?? "Could not fetch jobs.");
       setSourceErrors(result.errors ?? []);
+      setNextArbeitnowPage(result.nextArbeitnowPage ?? null);
       const fetchedJobs = result.jobs ?? [];
       fetchedForFallback = fetchedJobs;
       const locationJobs = fetchedJobs.filter((job) => matchesPreferredLocation(job.location, profile.locations, job.mode, job.source));
@@ -587,6 +590,52 @@ export default function Home() {
     }
   }
 
+  async function fetchMoreJobs() {
+    if (!nextArbeitnowPage || loadingMoreJobs) return;
+    setLoadingMoreJobs(true);
+    setSourceMessage("");
+    try {
+      const response = await fetch(`/api/jobs/search?arbeitnowStartPage=${nextArbeitnowPage}`, { cache: "no-store" });
+      const result = await response.json() as { jobs?: Job[]; errors?: string[]; error?: string; nextArbeitnowPage?: number | null };
+      if (!response.ok) throw new Error(result.error ?? "Could not load more jobs.");
+      const fetchedJobs = result.jobs ?? [];
+      setNextArbeitnowPage(result.nextArbeitnowPage ?? null);
+      setSourceErrors((current) => [...current.filter((error) => !result.errors?.includes(error)), ...(result.errors ?? [])]);
+      let analyzedJobs = fetchedJobs;
+      if (localCvAnalysisReady && selectedAiModel && fetchedJobs.length) {
+        const candidates = fetchedJobs.filter((job) => matchesPreferredLocation(job.location, profile.locations, job.mode, job.source));
+        const matchesById = new Map<string, NonNullable<Job["aiMatch"]>>();
+        for (let offset = 0; offset < Math.min(candidates.length, MAX_AI_MATCH_CANDIDATES); offset += AI_MATCH_BATCH_SIZE) {
+          const batch = candidates.slice(offset, Math.min(offset + AI_MATCH_BATCH_SIZE, MAX_AI_MATCH_CANDIDATES));
+          setSourceMessage(`Local AI is comparing your CV with ${Math.min(offset + batch.length, candidates.length, MAX_AI_MATCH_CANDIDATES)} of ${candidates.length} new location-eligible listings…`);
+          const matchResponse = await fetch("/api/jobs/match", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ model: selectedAiModel, cvText: cvText.slice(0, MAX_CV_MATCH_CHARS), jobs: batch.map((job) => ({ id: job.id, company: job.company, role: job.role, location: job.location, mode: job.mode, description: (job.description ?? job.summary).slice(0, 2_500) })) }),
+          });
+          const matchResult = await matchResponse.json() as { matches?: Array<{ id: string; relevant: boolean; score: number; reason: string; cvEvidence: string }>; error?: string };
+          if (!matchResponse.ok) throw new Error(matchResult.error ?? "Local CV matching failed.");
+          for (const match of matchResult.matches ?? []) {
+            if (batch.some((job) => job.id === match.id) && typeof match.relevant === "boolean" && Number.isFinite(match.score)) {
+              matchesById.set(match.id, { model: selectedAiModel, relevant: match.relevant, score: Math.max(0, Math.min(100, Math.round(match.score))), reason: match.reason, cvEvidence: match.cvEvidence });
+            }
+          }
+        }
+        analyzedJobs = fetchedJobs.map((job) => ({ ...job, ...(matchesById.has(job.id) ? { aiMatch: matchesById.get(job.id) } : {}) }));
+        setCvAnalyzedModel(selectedAiModel);
+      }
+      setLiveJobs((current) => {
+        const seen = new Set(current.map((job) => job.sourceUrl ?? job.id));
+        return [...current, ...analyzedJobs.filter((job) => !seen.has(job.sourceUrl ?? job.id))];
+      });
+      setSourceMessage(`Loaded ${fetchedJobs.length} more listings from Arbeitnow. ${result.nextArbeitnowPage ? "More feed pages are available." : "No further Arbeitnow pages were reported."}`);
+    } catch (error) {
+      setSourceMessage(error instanceof Error ? error.message : "Could not load more jobs.");
+    } finally {
+      setLoadingMoreJobs(false);
+    }
+  }
+
   return (
     <main className="app-shell">
       <aside className="sidebar">
@@ -664,6 +713,7 @@ export default function Home() {
                 <div className="job-list">{visibleJobs.map(({ job, score, matched, titleMatched, roleMatch }) => <article key={job.id} className={`job-card ${selected?.job.id === job.id ? "selected" : ""}`}><button type="button" className="job-card-main" aria-pressed={selected?.job.id === job.id} onClick={() => { selectJob(job.id); setStatus((current) => current[job.id] ? current : { ...current, [job.id]: "Needs review" }); }}><div className="job-card-top"><div className={`company-logo logo-${job.source.toLowerCase()}`}>{job.company.slice(0, 1)}</div><span className="match-tag">{hasCurrentCvAssessment && job.aiMatch?.model === selectedAiModel ? `${score}% AI fit` : roleMatch ? "Target role" : `${score}% skills overlap`}</span></div><div className="job-title">{job.role}</div><div className="company-name">{job.company} <span>·</span> {job.location}</div><div className="job-meta"><span>◷ {job.posted}</span><span>⌂ {job.mode}</span><span className="source-tag">{job.source} · feed</span></div></button><div className="job-card-bottom"><div className="skill-pills">{matched.slice(0, 3).map((skill) => <span className={titleMatched.includes(skill) ? "skill-in-title" : ""} key={skill}>{skill}{titleMatched.includes(skill) && <small>title</small>}</span>)}{matched.length > 3 && <span className="more-skills">+{matched.length - 3}</span>}</div><button type="button" className={`bookmark ${saved.includes(job.id) ? "bookmarked" : ""}`} onClick={() => setSaved((current) => current.includes(job.id) ? current.filter((id) => id !== job.id) : [...current, job.id])} aria-label={saved.includes(job.id) ? "Remove saved job" : "Save job"} aria-pressed={saved.includes(job.id)}>{saved.includes(job.id) ? "★" : "☆"}</button></div></article>)}</div>
                 {visibleJobs.length < filteredRanked.length && <button className="load-more" onClick={() => setVisibleCount((count) => count + 25)}>Show more jobs <span>({filteredRanked.length - visibleJobs.length} remaining)</span></button>}
               </> : <div className="empty-state">{liveJobs.length === 0 ? "No jobs loaded yet. Select “Search jobs now” to check public job feeds." : ranked.length === 0 ? query ? "No live jobs match that search. Try another role or company." : emptyJobMessage : "No jobs match these filters. Try a different date, work mode, or department."}</div>}
+              {nextArbeitnowPage !== null && <button className="load-more" onClick={() => void fetchMoreJobs()} disabled={loadingMoreJobs || loadingJobs}>{loadingMoreJobs ? "Loading more from Arbeitnow…" : "Load more jobs from Arbeitnow"}</button>}
             </section>
 
             {selected ? (
