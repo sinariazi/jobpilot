@@ -10,6 +10,8 @@ export type Job = {
   department?: string;
   sourceUrl?: string;
   sourceAttributionUrl?: string;
+  sourceLocationScope?: string;
+  sourceAliases?: string[];
   retrievedAt?: string;
   summary: string;
   description?: string;
