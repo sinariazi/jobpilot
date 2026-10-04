@@ -13,6 +13,13 @@ export type Job = {
   retrievedAt?: string;
   summary: string;
   description?: string;
+  aiMatch?: {
+    model: string;
+    relevant: boolean;
+    score: number;
+    reason: string;
+    cvEvidence: string;
+  };
 };
 
 export type CandidateProfile = {
