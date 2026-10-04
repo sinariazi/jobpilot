@@ -6,9 +6,47 @@ function locationWords(value: string): string[] {
     .match(/[a-z0-9]+/g) ?? [];
 }
 
+const LOCATION_ALIASES: Record<string, string> = {
+  austria: "austria",
+  osterreich: "austria",
+  vienna: "wien",
+  wien: "wien",
+  zurich: "zurich",
+  zürich: "zurich",
+  geneva: "geneve",
+  geneve: "geneve",
+  munich: "munchen",
+  munchen: "munchen",
+  cologne: "koln",
+  koln: "koln",
+  prague: "praha",
+  praha: "praha",
+};
+
+const CITY_COUNTRIES: Record<string, string> = {
+  wien: "austria",
+  graz: "austria",
+  linz: "austria",
+  salzburg: "austria",
+  innsbruck: "austria",
+  klagenfurt: "austria",
+  bregenz: "austria",
+  stpolten: "austria",
+  munchen: "germany",
+  koln: "germany",
+  zurich: "switzerland",
+  geneve: "switzerland",
+  praha: "czechia",
+};
+
+function canonicalLocationWords(value: string): string[] {
+  const words = locationWords(value).map((word) => LOCATION_ALIASES[word] ?? word);
+  return [...new Set(words.flatMap((word) => [word, ...(CITY_COUNTRIES[word] ? [CITY_COUNTRIES[word]] : [])]))];
+}
+
 export function matchesPreferredLocation(jobLocation: string, preferences: string, jobMode = "", source = "") {
-  const actual = new Set(locationWords(jobLocation));
-  const alternatives: string[][] = preferences.split(/[;\n|]+/).map((part) => locationWords(part)).filter((words) => words.length > 0);
+  const actual = new Set(canonicalLocationWords(jobLocation));
+  const alternatives: string[][] = preferences.split(/[;\n|]+/).map((part) => canonicalLocationWords(part)).filter((words) => words.length > 0);
   if (alternatives.length === 0) return true;
   if (alternatives.some((words) => words.every((word) => actual.has(word)))) return true;
 
