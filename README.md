@@ -50,6 +50,18 @@ Keep this terminal window open. When it says the server is ready, open [http://l
 4. In **Local AI status**, choose the Ollama chat model you installed. If available, choose a compatible decision model too. Jobpilot discovers models installed on your computer.
 5. Go back to the main page and click **Search jobs**. Wait for the feeds and local AI to finish. Select a result to read its details, evidence, and original job posting.
 
+### Optional: fill basic employer form fields locally
+
+The Chromium extension works with **Chrome and Edge** on Greenhouse, Lever, Ashby, Workday, SmartRecruiters, and Workable application pages. It reads your saved contact details from Jobpilot on `localhost`. When you click **Fill empty fields**, those values are inserted into the employer's page, where that employer can read them as usual. No data goes to a Jobpilot-hosted service.
+
+1. Keep Jobpilot running at [http://localhost:3000](http://localhost:3000), then open `chrome://extensions` in Chrome or `edge://extensions` in Edge.
+2. Turn on **Developer mode** and select **Load unpacked**.
+3. Select the `extension/chromium` folder inside the Jobpilot folder you downloaded.
+4. Open an application form on a supported ATS, click the Jobpilot extension icon, then click **Fill empty fields**.
+5. Review every filled value and complete the employer's questions yourself. Jobpilot never uploads a CV, fills screening questions, or submits the form.
+
+The extension fills only recognized, empty name and contact fields and a saved cover-letter field when the current posting matches a saved Jobpilot job. It does not overwrite existing values or interact with file uploads, checkboxes, passwords, or submit buttons. Reload an application page if you installed the extension while that page was already open. Remove it from the browser extensions page when you no longer need it.
+
 To use Jobpilot another day, open Ollama, open a terminal in the `jobpilot-main` folder, run `npm run dev`, and visit [http://localhost:3000](http://localhost:3000). To stop Jobpilot, focus the terminal window and press **Ctrl+C**. Your profile and saved job tracker remain on this computer.
 
 ## If something goes wrong
@@ -69,7 +81,7 @@ To use Jobpilot another day, open Ollama, open a terminal in the `jobpilot-main`
 - Uses local Ollama `/v1/systemone` decision screening for a fast first estimate, then a local chat model for shortlisted, uncertain, or incomplete cases. You can adjust score weights and detailed-analysis thresholds in the app. Scores are estimates, not hiring probabilities. All location-eligible jobs remain visible, including low-scoring jobs; load additional provider pages when available.
 - The default score weights are skills 40%, experience 30%, domain fit 20%, and penalty for explicit disqualifiers 10%. Detailed analysis runs by default at scores of 65 or higher, confidence below 60, or whenever important information is missing/unclear. Change these settings in Jobpilot; the score is not a probability of being hired.
 - Shows score breakdowns, confidence when the model provides it, missing information, and detailed matched requirements/gaps with source evidence when available. Verify every result against the original listing.
-- Lets you save jobs, track application status, add private notes and follow-up dates, and create editable cover-letter drafts. The application-preparation panel recognizes Greenhouse, Lever, Ashby, Workday, SmartRecruiters, and Workable URLs, gives a platform-aware checklist, and copies a packet from optional profile contact details and your saved cover letter. Add contact details in **Candidate profile**. Jobpilot never fills or submits employer forms.
+- Lets you save jobs, track application status, add private notes and follow-up dates, and create editable cover-letter drafts. A local Chrome/Edge extension can fill recognized empty contact fields and a matching saved cover-letter draft on Greenhouse, Lever, Ashby, Workday, SmartRecruiters, and Workable forms. Add contact details in **Candidate profile**. You review all fields and submit applications yourself; the extension does not upload CVs or answer employer screening questions.
 - Stores profile and job-tracker data on this device in `~/.jobpilot/state.json` (or the folder set by `JOBPILOT_DATA_DIR`). The file is not encrypted. Use **Candidate profile → Data backup** to save or restore a local backup.
 
 ## CV privacy and local AI
@@ -93,10 +105,9 @@ Restart Jobpilot and choose English, German, or both in the CV upload section. T
 - Broaden location/country normalization and cover more languages and inconsistent feed formats.
 - Encrypt local profile, tracker, and backup data.
 - Tailor and export a CV from verified source material; currently Jobpilot analyzes CVs but does not generate tailored CV files.
-- Add a browser extension or equivalent local integration for ATS form prefill. Current ATS recognition is best-effort from the posting URL; preparation is copy/paste and does not access or submit employer forms.
 - Improve cover-letter drafting preferences, structured output, and source-to-claim checks.
 - Review accessibility and responsive layouts across supported browsers and screen sizes.
-- Add end-to-end tests for job search, job details, profile, and tracking.
+- Add end-to-end tests for job search, job details, profile, tracking, and extension prefill on live ATS pages. Automated extension tests currently cover supported hosts, field mapping, and local access controls only.
 - Evaluate local decision scores against a real human-reviewed set of strong, borderline, and poor matches. No such reviewed dataset is currently available, so false-positive/false-negative rates and model calibration have not been established.
 
 ## For developers
@@ -121,7 +132,7 @@ GitHub Actions runs these checks on pushes and pull requests. Public feed endpoi
 
 ## Solution architecture showcase
 
-Jobpilot is designed as a single-user, local-first application. The browser handles CV file reading and text extraction; a local Next.js server coordinates job feeds, profile analysis, matching, and persistence. Ollama performs inference on the same computer. Public providers supply job listings and do not receive candidate profile or CV data.
+Jobpilot is designed as a single-user, local-first application. The browser handles CV file reading and text extraction; a local Next.js server coordinates job feeds, profile analysis, matching, and persistence. Ollama performs inference on the same computer. The optional Chromium extension reads only application fields from Jobpilot's local endpoint after the user clicks its fill button. Public providers supply job listings and do not receive candidate profile or CV data.
 
 ### System context and trust boundaries
 
@@ -129,6 +140,9 @@ Jobpilot is designed as a single-user, local-first application. The browser hand
 flowchart TB
     person["Candidate"] --> browser["Browser UI: CV extraction and review"]
     browser --> app["Local Jobpilot server: Next.js UI and API"]
+    browser --> extension["Optional local Chromium extension"]
+    extension -->|"User-clicked contact fields over loopback"| app
+    extension -->|"Fill recognized empty fields only"| ats["Supported employer ATS page"]
     app -->|"Public listing requests"| feeds["Job feeds: Arbeitnow, Remotive, Jobicy"]
     feeds -->|"Listings"| app
     app -->|"Loopback only: CV text and job descriptions"| ollama["Ollama: decision and chat models on this computer"]
@@ -195,7 +209,7 @@ sequenceDiagram
 | Keep orchestration in the local Next.js application | One installable TypeScript project serves the UI and local APIs without a separate hosted backend. | The app is a single-user local tool, not a multi-user service. |
 | Use adapters to map provider listings into a shared job type | Feed-specific fields are normalized before location filtering, display, and matching. | Coverage and pagination depend on each provider's public API and terms. |
 | Split matching into a fast decision stage and a detailed stage | A lightweight estimate can screen many listings; slower evidence-focused analysis is reserved for selected or uncertain cases. | Both stages depend on local model compatibility, hardware, and model quality. |
-| Keep CV and contact data away from job-feed providers and hosted AI | Candidate CV text goes only to Ollama on loopback; public feed requests retrieve listings without candidate profile data. | Job discovery still requires an internet connection, and local JSON data is not encrypted. |
+| Keep CV and contact data away from job-feed providers and hosted AI | CV text goes only to Ollama on loopback; the extension fetches selected contact fields locally after a user click. | The ATS receives values filled into its page; job discovery needs internet, and local JSON data is not encrypted. |
 | Preserve human review and show estimates separately | Scores, confidence, and detailed analysis remain distinguishable; original postings stay available. | The agent does not submit applications, and score calibration awaits reviewed examples. |
 
-This design demonstrates local data-boundary design, integration of heterogeneous APIs, explicit decision routing, failure-aware AI orchestration, and human-in-the-loop workflow design. Remaining boundaries—encryption, broader feed coverage, ATS integration, and measured score accuracy—are documented in [Current limitations](#current-limitations-todo).
+This design demonstrates local data-boundary design, integration of heterogeneous APIs, explicit decision routing, failure-aware AI orchestration, and human-in-the-loop workflow design. Remaining boundaries—encryption, broader feed coverage, ATS-specific questions and uploads, and measured score accuracy—are documented in [Current limitations](#current-limitations-todo).

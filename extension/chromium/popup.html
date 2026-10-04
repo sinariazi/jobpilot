@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Jobpilot Form Helper</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Jobpilot form helper</h1>
+      <p id="platform">Checking this page…</p>
+      <button id="fill" type="button" disabled>Fill empty fields</button>
+      <p class="privacy">Reads your local Jobpilot profile. Clicking fill places selected values in the employer page, where the employer can read them. It won’t upload your CV, answer custom questions, or submit the application. Review every field.</p>
+      <p id="status" role="status" aria-live="polite"></p>
+    </main>
+    <script src="prefill.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>

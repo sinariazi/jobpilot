@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "Jobpilot Local Form Helper",
+  "version": "1.0.0",
+  "description": "Fill recognized empty ATS fields from your local Jobpilot profile after you click the extension button.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyPzS0y/7vuKbPbli6YBjaaRMyJ6HyzAK3696Fi5gRuH3hYQ8073V+cLNsgpiFdU7S+uBn6u9iLJeL+Npxa2+qH9LbUtcrk7EeDIisgL7MC2GrkNsUfzZgU/zew8MiZuHyybxyVSyWUFi873aZTEcMsS14lPnrZiuumTc3e+hQejnS9aCtCH/b04wiRyPNBBSuufWCl4YBTNzl8fsRyICZBFS1ddkiWv0DGmgIXFLSwck9Ai3SY2sJL4yN1deSZ7U9x7o1/on+WzP+7k+CkYDgwoLYMtHAX0hhn3qH+xnGl2N2mZbtMdzJnqGhjgydR4QQ6anciChJGZyLFVKcP6CnwIDAQAB",
+  "permissions": ["activeTab"],
+  "host_permissions": [
+    "http://127.0.0.1:3000/*",
+    "http://localhost:3000/*"
+  ],
+  "action": {
+    "default_title": "Jobpilot Local Form Helper",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://boards.greenhouse.io/*",
+        "https://job-boards.greenhouse.io/*",
+        "https://grnh.se/*",
+        "https://jobs.lever.co/*",
+        "https://jobs.ashbyhq.com/*",
+        "https://*.myworkdayjobs.com/*",
+        "https://jobs.smartrecruiters.com/*",
+        "https://apply.workable.com/*",
+        "https://jobs.workable.com/*"
+      ],
+      "js": ["prefill.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

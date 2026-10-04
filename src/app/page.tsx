@@ -969,6 +969,7 @@ export default function Home() {
                 </section>
                 <section className="application-kit" aria-labelledby="application-kit-title">
                   <div className="cover-letter-heading"><div><h4 id="application-kit-title">Application preparation</h4><p>Prepare details for the employer form; review and submit there yourself.</p></div><button type="button" className="secondary-button" onClick={() => void copyApplicationPacket()}>Copy application packet</button></div>
+                  <p className="ats-detection">For supported ATS pages, install the optional local Chrome/Edge extension using the steps in the README. Open the employer page and click the extension to fill recognized empty fields.</p>
                   {(() => { const guide = detectAtsPlatform(selected.job.sourceUrl); return <>
                     <p className="ats-detection">Detected application platform: <strong>{guide.label}</strong>{guide.platform !== "unknown" ? " · detected from the posting URL" : " · could not identify it from the posting URL"}</p>
                     <ul className="ats-checklist">{guide.preparation.map((item) => <li key={item}>{item}</li>)}</ul>
