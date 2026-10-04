@@ -78,10 +78,14 @@ export default function Home() {
   const backupInput = useRef<HTMLInputElement>(null);
   const [sourceMessage, setSourceMessage] = useState("");
   const [sourceErrors, setSourceErrors] = useState<string[]>([]);
+  const [sourceStatuses, setSourceStatuses] = useState<Array<{ source: string; state: "success" | "partial" | "failed"; count: number; checkedAt: string; message?: string }>>([]);
   const [profileDraft, setProfileDraft] = useState<CandidateProfile>(defaultProfile);
   const [searchRolesDraft, setSearchRolesDraft] = useState(defaultProfile.roles);
   const [searchLocationsDraft, setSearchLocationsDraft] = useState(defaultProfile.locations);
   const [searchRequestId, setSearchRequestId] = useState(0);
+  const [manualJob, setManualJob] = useState({ role: "", company: "", location: "", description: "", url: "" });
+  const [manualJobMessage, setManualJobMessage] = useState("");
+  const [manualJobError, setManualJobError] = useState("");
   const [cvSuggestions, setCvSuggestions] = useState<CvSuggestions | null>(null);
   const [ocrLanguage, setOcrLanguage] = useState<"eng" | "deu" | "eng+deu">("eng");
   const [cvText, setCvText] = useState("");
@@ -287,7 +291,9 @@ export default function Home() {
     };
   }, [profile, saved, status, applicationNotes, applicationFollowUps, coverLetterDrafts, matchReviews, matchCohortKey, matchingSettings, liveJobs, stateLoaded]);
 
-  const locationMatchedJobs = useMemo(() => jobs.filter((job) => matchesPreferredLocation(job.location, profile.locations, job.mode, job.source)), [jobs, profile.locations]);
+  const locationMatchedJobs = useMemo(() => jobs.filter((job) =>
+    (job.source === "Manual" || matchesPreferredLocation(job.location, profile.locations, job.mode, job.source, job.sourceLocationScope))
+    && (job.source === "Manual" || !profile.roles.trim() || matchesTargetRole(job, profile.roles))), [jobs, profile.locations, profile.roles]);
   const localCvAnalysisReady = Boolean(cvText.trim() && localAiModels.includes(selectedAiModel) && localAiModels.includes(matchingSettings.decisionModel) && systemOneAvailable && isLocalJobpilotPage());
   const hasCurrentCvAssessment = localCvAnalysisReady && cvAnalyzedModel === selectedAiModel;
   const hasStoredScreenings = jobs.some((job) => job.screening?.model === matchingSettings.decisionModel);
@@ -472,6 +478,11 @@ export default function Home() {
       roles: searchRolesDraft.trim(),
       locations: searchLocationsDraft.trim(),
     };
+    setSourceStatuses([]);
+    setSourceErrors([]);
+    setSourceMessage("");
+    setNextArbeitnowPage(null);
+    setNextJobicyCursor(null);
     if (nextProfile.locations !== profile.locations || nextProfile.roles !== profile.roles) {
       invalidateAiAssessment();
       setCvAnalyzedModel("");
@@ -480,6 +491,55 @@ export default function Home() {
     setProfile(nextProfile);
     setProfileDraft((current) => ({ ...current, roles: nextProfile.roles, locations: nextProfile.locations }));
     setSearchRequestId((current) => current + 1);
+  }
+
+  async function addManualJob(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setManualJobError("");
+    setManualJobMessage("");
+    const role = manualJob.role.trim();
+    const company = manualJob.company.trim();
+    const location = manualJob.location.trim();
+    const description = manualJob.description.trim();
+    const originalUrl = manualJob.url.trim();
+    if (!role || !company || !location || !description) {
+      setManualJobError("Add the role, company, location, and pasted job description to continue.");
+      return;
+    }
+    if (originalUrl) {
+      try { if (new URL(originalUrl).protocol !== "https:") throw new Error(); }
+      catch { setManualJobError("The original posting link must be a valid HTTPS URL."); return; }
+    }
+    const now = new Date().toISOString();
+    const job: Job = {
+      id: `manual-${crypto.randomUUID()}`, role, company, location,
+      mode: /remote/i.test(location) ? "Remote" : "Not specified", posted: "Added manually", source: "Manual", retrievedAt: now,
+      summary: description.slice(0, 1200), description, ...(originalUrl ? { sourceUrl: originalUrl } : {}),
+    };
+    setLiveJobs((current) => [job, ...current]);
+    selectJob(job.id);
+    setManualJob({ role: "", company: "", location: "", description: "", url: "" });
+    setManualJobMessage("Posting added to this device. Its original link is saved when provided.");
+    if (!localCvAnalysisReady) return;
+    const generation = aiMatchGeneration.current;
+    const controller = new AbortController();
+    aiMatchAbortController.current = controller;
+    setAiMatchProgress({ completed: 0, total: 1 });
+    try {
+      const outcome = await assessJobsLocally([job], controller.signal);
+      if (generation !== aiMatchGeneration.current) return;
+      const screening = outcome.screeningById.get(job.id);
+      const detailedAnalysis = outcome.analysisById.get(job.id);
+      const aiMatch = outcome.detailedById.get(job.id);
+      if (screening || detailedAnalysis) setLiveJobs((current) => current.map((item) => item.id === job.id ? { ...item, ...(screening ? { screening } : {}), ...(detailedAnalysis ? { detailedAnalysis, aiMatch } : {}) } : item));
+      setCvAnalyzedModel(selectedAiModel);
+      setManualJobMessage(outcome.error ? `Posting added; local screening could not finish: ${outcome.error}` : "Posting added and assessed on this device.");
+    } catch (error) {
+      setManualJobMessage(`Posting added; local screening failed: ${error instanceof Error ? error.message : "unknown error"}.`);
+    } finally {
+      aiMatchAbortController.current = null;
+      setAiMatchProgress(null);
+    }
   }
 
   async function parseSelectedCv(event: React.ChangeEvent<HTMLInputElement>) {
@@ -739,14 +799,17 @@ export default function Home() {
     setSourceErrors([]);
     let fetchedJobs: Job[] = [];
     try {
-      const response = await fetch("/api/jobs/search", { cache: "no-store" });
-      const result = await response.json() as { jobs?: Job[]; errors?: string[]; error?: string; nextArbeitnowPage?: number | null; nextJobicyCursor?: string | null };
-      if (!response.ok) throw new Error(result.error ?? "Could not fetch jobs.");
+      const searchParams = new URLSearchParams({ locations: profile.locations, roles: profile.roles });
+      const response = await fetch(`/api/jobs/search?${searchParams}`, { cache: "no-store" });
+      const result = await response.json() as { jobs?: Job[]; errors?: string[]; error?: string; nextArbeitnowPage?: number | null; nextJobicyCursor?: string | null; sourceStatuses?: typeof sourceStatuses };
+      setSourceStatuses(result.sourceStatuses ?? []);
       setSourceErrors(result.errors ?? []);
+      if (!response.ok && !(result.jobs?.length)) throw new Error(result.error ?? "Could not fetch jobs.");
       setNextArbeitnowPage(result.nextArbeitnowPage ?? null);
       setNextJobicyCursor(result.nextJobicyCursor ?? null);
       fetchedJobs = result.jobs ?? [];
-      const locationJobs = fetchedJobs.filter((job) => matchesPreferredLocation(job.location, profile.locations, job.mode, job.source));
+      const locationJobs = fetchedJobs.filter((job) => matchesPreferredLocation(job.location, profile.locations, job.mode, job.source, job.sourceLocationScope)
+        && (!profile.roles.trim() || matchesTargetRole(job, profile.roles)));
       const assessWithCurrentContext = localCvAnalysisReady && searchGeneration === aiMatchGeneration.current;
       let analyzedJobs = fetchedJobs;
       let completed = 0;
@@ -774,6 +837,7 @@ export default function Home() {
       }
       setLiveJobs(analyzedJobs);
       const locationCount = locationJobs.length;
+      const sourcesChecked = (result.sourceStatuses ?? []).map((source) => `${source.source}: ${source.count}`).join(" · ");
       setSourceMessage(result.jobs?.length
         ? assessWithCurrentContext
           ? `Local decision screening assessed ${completed} of ${locationCount} location-eligible jobs; ${detailedCount} received detailed analysis. ${cancelled ? "Assessment cancelled; fetched listings remain available." : matchingWarning ? `Some jobs remain unassessed: ${matchingWarning}` : ""} Scores are estimates, not hiring probabilities. Review the evidence and original postings.`
@@ -781,12 +845,12 @@ export default function Home() {
             ? "CV analysis is blocked here for privacy. Open Jobpilot from localhost on this laptop; no CV text was sent. Showing profile matches."
             : cvText.trim()
               ? `Found ${result.jobs.length} listings, but local decision screening is unavailable. Start/update Ollama to 0.35 or newer, choose an installed decision model, and try again. ${localAiStatus}`
-              : `Searched public job feeds and found ${result.jobs.length} listings; ${locationCount} match your location. Import your CV and select local models for the two-stage match.`
-        : "No listings came back from the public job feeds. Try again later.");
+              : `Found ${result.jobs.length} listings matching your selected titles and locations. Import your CV and select local models for the two-stage match. ${sourcesChecked}`
+        : `No listing matched the selected titles and locations. Try broader preferences or load more pages. ${sourcesChecked || "No source returned a listing."}`);
       selectJob(locationJobs[0]?.id ?? "");
     } catch (error) {
       if (fetchedJobs.length) {
-        const fallback = fetchedJobs.filter((job) => matchesPreferredLocation(job.location, profile.locations, job.mode, job.source));
+        const fallback = fetchedJobs.filter((job) => matchesPreferredLocation(job.location, profile.locations, job.mode, job.source, job.sourceLocationScope));
         setLiveJobs(fetchedJobs.map((job) => ({ ...job, screening: undefined, aiMatch: undefined, detailedAnalysis: undefined })));
         selectJob(fallback[0]?.id ?? "");
         setSourceMessage(`Local job screening failed: ${error instanceof Error ? error.message : "unknown error"}. Jobs are still available to review; no hosted model fallback was used.`);
@@ -815,12 +879,16 @@ export default function Home() {
     setSourceMessage("");
     let fetchedMore: Job[] = [];
     try {
-      const params = new URLSearchParams();
+      const params = new URLSearchParams({ locations: profile.locations, roles: profile.roles });
       if (nextArbeitnowPage !== null) params.set("arbeitnowStartPage", String(nextArbeitnowPage));
       if (nextJobicyCursor !== null) params.set("jobicyCursor", nextJobicyCursor);
       const response = await fetch(`/api/jobs/search?${params}`, { cache: "no-store" });
-      const result = await response.json() as { jobs?: Job[]; errors?: string[]; error?: string; nextArbeitnowPage?: number | null; nextJobicyCursor?: string | null };
+      const result = await response.json() as { jobs?: Job[]; errors?: string[]; error?: string; nextArbeitnowPage?: number | null; nextJobicyCursor?: string | null; sourceStatuses?: typeof sourceStatuses };
       if (!response.ok) throw new Error(result.error ?? "Could not load more jobs.");
+      setSourceStatuses((current) => (result.sourceStatuses ?? []).map((source) => {
+        const previous = current.find((item) => item.source === source.source);
+        return previous ? { ...source, count: previous.count + source.count } : source;
+      }));
       fetchedMore = result.jobs ?? [];
       setNextArbeitnowPage(result.nextArbeitnowPage ?? null);
       setNextJobicyCursor(result.nextJobicyCursor ?? null);
@@ -836,7 +904,8 @@ export default function Home() {
         return;
       }
       const previouslyScreened = liveJobs.filter((job) => job.screening?.model === matchingSettings.decisionModel).map((job) => job.sourceUrl ?? job.id);
-      const candidates = jobsToAssess(fetchedMore.filter((job) => matchesPreferredLocation(job.location, profile.locations, job.mode, job.source)), previouslyScreened);
+      const candidates = jobsToAssess(fetchedMore.filter((job) => matchesPreferredLocation(job.location, profile.locations, job.mode, job.source, job.sourceLocationScope)
+        && (!profile.roles.trim() || matchesTargetRole(job, profile.roles))), previouslyScreened);
       const generation = ++aiMatchGeneration.current;
       const controller = new AbortController();
       aiMatchAbortController.current = controller;
@@ -900,10 +969,15 @@ export default function Home() {
             </div>
             <div className="job-search-preferences">
               <label>Job titles<textarea rows={3} value={searchRolesDraft} onChange={(event) => setSearchRolesDraft(event.target.value)} placeholder="Suggested titles from your CV appear here. Add or remove titles; separate alternatives with commas or new lines." /></label>
-              <label>Preferred locations<textarea rows={2} value={searchLocationsDraft} onChange={(event) => setSearchLocationsDraft(event.target.value)} placeholder="For example: Vienna, Austria; Remote Europe. Leave blank for any location." /></label>
+              <label>Preferred locations<textarea rows={2} value={searchLocationsDraft} onChange={(event) => setSearchLocationsDraft(event.target.value)} placeholder="For example: Vienna, Austria; Remote Europe. Leave blank for broad feed results." /></label>
             </div>
             <div className="source-controls"><button className="primary-button" disabled={!stateLoaded || loadingJobs || loadingMoreJobs} onClick={searchWithPreferences}>{loadingJobs ? "Searching job feeds…" : loadingMoreJobs ? "Loading more jobs…" : liveJobs.length ? "↻ Search jobs" : "Search jobs"}</button><span className="feed-summary">You can edit these preferences again at any time.</span></div>
-            <p className="directory-credit">Sources: <a href="https://www.arbeitnow.com/" target="_blank" rel="noreferrer">Arbeitnow</a>, <a href="https://remotive.com/remote-jobs/api" target="_blank" rel="noreferrer">Remotive</a>, and <a href="https://jobicy.com/jobs-rss-feed" target="_blank" rel="noreferrer">Jobicy</a>. Feed coverage varies; it does not include every employer.</p>
+            <p className="directory-credit">Public sources are free and need no account. Coverage is limited; no no-key provider gives complete Austria-wide vacancy coverage. <a href="https://www.arbeitnow.com/blog/job-board-api" target="_blank" rel="noreferrer">Arbeitnow</a> focuses on Germany and Europe, <a href="https://remotive.com/remote-jobs/api" target="_blank" rel="noreferrer">Remotive</a> is remote-only with a 24-hour publication delay, and <a href="https://jobicy.com/jobs-rss-feed" target="_blank" rel="noreferrer">Jobicy</a> is remote-only and covers a rolling seven-day window.</p>
+            {sourceStatuses.length > 0 && <ul className="feed-source-status" aria-label="Job source results">{sourceStatuses.map((source) => <li key={source.source} className={`feed-${source.state}`}><strong>{source.source}</strong><span>{source.state === "failed" ? "Unavailable" : `${source.count} matching`}</span><small>Checked {new Date(source.checkedAt).toLocaleTimeString()}</small></li>)}</ul>}
+            <details className="manual-job-panel"><summary>Can’t find a posting? Add it manually</summary><p>Paste the description below. Jobpilot does not fetch job URLs because external sites may block automated imports. A URL can be saved as the original posting link.</p><form onSubmit={(event) => void addManualJob(event)}>
+              <div className="manual-job-fields"><label>Job title<input required value={manualJob.role} onChange={(event) => setManualJob((current) => ({ ...current, role: event.target.value }))} /></label><label>Company<input required value={manualJob.company} onChange={(event) => setManualJob((current) => ({ ...current, company: event.target.value }))} /></label><label>Location or remote eligibility<input required value={manualJob.location} onChange={(event) => setManualJob((current) => ({ ...current, location: event.target.value }))} /></label><label>Original posting URL (optional)<input type="url" placeholder="https://…" value={manualJob.url} onChange={(event) => setManualJob((current) => ({ ...current, url: event.target.value }))} /></label></div>
+              <label className="manual-description">Paste job description<textarea required rows={6} maxLength={8000} value={manualJob.description} onChange={(event) => setManualJob((current) => ({ ...current, description: event.target.value }))} placeholder="Paste the available job description here." /></label><button className="secondary-button" type="submit">Add posting for review</button>
+            </form>{manualJobError && <p role="alert" className="source-error-message">{manualJobError}</p>}{manualJobMessage && <p role="status" className="source-message">{manualJobMessage}</p>}</details>
             {sourceMessage && <p className="source-message" role="status">{sourceMessage}</p>}
             {aiMatchProgress && aiMatchProgress.total > 0 && <div className="ai-assessment-progress" role="status" aria-live="polite">
               <div><span>Screening and analyzing locally: {aiMatchProgress.completed} of {aiMatchProgress.total}</span><button type="button" className="secondary-button" onClick={cancelAiAssessment}>Cancel assessment</button></div>
