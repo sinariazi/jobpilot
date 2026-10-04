@@ -135,6 +135,11 @@ export function joinPdfTextItems(items: PdfTextItem[], pageWidth?: number) {
 
     if (split !== undefined) {
       const orderedLines = [...lines].sort((a, b) => b.y - a.y);
+      const columnY = (isLeft: boolean) => orderedLines
+        .filter((line) => line.items.some((item) => (item.x + (items[item.index]?.width ?? item.text.length * 4) / 2 < split) === isLeft))
+        .map((line) => line.y);
+      const leftY = columnY(true);
+      const rightY = columnY(false);
       const output: string[] = [];
       let columnBlock: typeof lines = [];
       const renderRows = (rows: typeof lines) => rows.map((line) => line.items
@@ -158,9 +163,16 @@ export function joinPdfTextItems(items: PdfTextItem[], pageWidth?: number) {
         const spansGutter = line.items.some((item) =>
           item.x < split && item.x + (items[item.index]?.width ?? item.text.length * 4) > split,
         );
-        if (spansGutter) {
+        const text = line.items.sort((a, b) => a.x - b.x || a.index - b.index).map((item) => item.text).join(" ");
+        const heading = sectionHeading(text);
+        const onLeft = line.items.some((item) => item.x + (items[item.index]?.width ?? item.text.length * 4) / 2 < split);
+        const onRight = line.items.some((item) => item.x + (items[item.index]?.width ?? item.text.length * 4) / 2 >= split);
+        const otherColumnY = onLeft && !onRight ? rightY : onRight && !onLeft ? leftY : [];
+        const outsideOppositeColumn = otherColumnY.length > 0
+          && (line.y < Math.min(...otherColumnY) - 2.5 || line.y > Math.max(...otherColumnY) + 2.5);
+        if (spansGutter || (heading?.section === "other" && outsideOppositeColumn)) {
           flushColumns();
-          output.push(...renderRows([line]));
+          output.push(text);
         } else columnBlock.push(line);
       }
       flushColumns();
