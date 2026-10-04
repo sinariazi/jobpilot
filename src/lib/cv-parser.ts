@@ -21,11 +21,53 @@ export type CvSuggestions = {
   pageCount?: number;
 };
 
-function sectionFor(line: string): "skills" | "experience" | "other" | null {
-  const heading = line.toLocaleLowerCase().replace(/[:|]+$/g, "").replace(/[–—]/g, "-").trim();
-  if (/^(technical\s+|professional\s+|core\s+)?skills(\s+(and|&)\s+competencies)?$|^(technologies|technical expertise|tools|toolbox|competencies)$/.test(heading)) return "skills";
-  if (/^(professional\s+|work\s+|employment\s+)?experience$|^(career|employment) history$|^work history$/.test(heading)) return "experience";
-  if (/^(education|certifications?|languages|projects?|summary|profile|contact|references|interests|awards|publications|volunteer experience)$/.test(heading)) return "other";
+type CvSection = "skills" | "experience" | "other";
+type SectionHeading = { section: CvSection; content: string };
+
+const SECTION_ALIASES: Record<CvSection, string[]> = {
+  skills: [
+    "skills", "technical skills", "professional skills", "core skills", "key skills", "soft skills",
+    "skills and competencies", "skills and tools", "technical skills and expertise", "technologies",
+    "technology stack", "technical expertise", "expertise", "tools", "toolbox", "competencies",
+    "core competencies", "key competencies", "technical competencies", "qualifications", "key qualifications",
+    "kenntnisse", "fachkenntnisse", "technische kenntnisse", "it kenntnisse", "kenntnisse und fähigkeiten",
+    "fähigkeiten", "stärken", "kompetenzen", "fachliche kompetenzen", "technische kompetenzen", "schlüsselqualifikationen",
+    "technical proficiencies", "technical abilities", "compétences",
+  ],
+  experience: [
+    "experience", "professional experience", "work experience", "employment experience", "relevant experience",
+    "career history", "employment history", "work history", "career experience", "professional background",
+    "career summary", "work and leadership experience", "berufserfahrung", "berufliche erfahrung",
+    "beruflicher werdegang", "beruflicher werdegang und erfahrung", "berufliche laufbahn", "beruflicher hintergrund",
+    "praxiserfahrung", "tätigkeitserfahrung", "berufliche stationen", "werdegang", "berufliche praxis",
+    "expérience professionnelle", "parcours professionnel", "werkervaring",
+  ],
+  other: [
+    "education", "academic background", "education and training", "certification", "certifications", "licenses",
+    "languages", "language skills", "projects", "selected projects", "summary", "profile", "about me",
+    "professional profile", "personal profile", "contact", "references", "interests", "awards", "publications",
+    "volunteer experience", "ausbildung", "studium", "schulbildung", "zertifikate", "zertifizierungen",
+    "sprachen", "projekte", "profil", "kurzprofil", "persönliches", "kontakt", "referenzen", "interessen",
+    "auszeichnungen", "ehrenamt", "fortbildungen", "formation", "langues", "education et formation",
+  ],
+};
+
+function normalizeHeading(value: string) {
+  return value.toLocaleLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/&/g, " and ").replace(/ß/g, "ss").replace(/[^\p{L}\p{N}]+/gu, " ").trim().replace(/\s+/g, " ");
+}
+
+const NORMALIZED_ALIASES = Object.entries(SECTION_ALIASES).flatMap(([section, aliases]) =>
+  aliases.map((alias) => ({ section: section as CvSection, alias: normalizeHeading(alias) })),
+).sort((a, b) => b.alias.length - a.alias.length);
+
+function sectionHeading(line: string): SectionHeading | null {
+  const cleaned = line.replace(/^[\s\d.)|:–—-]+/, "").replace(/[:|]+$/g, "").trim();
+  const divider = cleaned.match(/^(.{2,70}?)\s*(?::|\||[–—])\s+(.+)$/);
+  for (const variant of divider ? [divider[1].trim(), cleaned] : [cleaned]) {
+    const found = NORMALIZED_ALIASES.find(({ alias }) => alias === normalizeHeading(variant));
+    if (found) return { section: found.section, content: variant === cleaned ? "" : divider?.[2]?.trim() ?? "" };
+  }
   return null;
 }
 
@@ -46,36 +88,64 @@ export function joinPdfTextItems(items: PdfTextItem[], pageWidth?: number) {
     else lines.push({ y: item.y, items: [item] });
   }
   if (pageWidth && pageWidth > 0) {
-    const starts = positioned.map((item) => item.x).sort((a, b) => a - b);
-    let split: number | null = null;
-    let widestGap = pageWidth * 0.2;
-    for (let index = 1; index < starts.length; index += 1) {
-      const gap = starts[index] - starts[index - 1];
-      const candidate = (starts[index] + starts[index - 1]) / 2;
-      if (gap > widestGap && candidate > pageWidth * 0.25 && candidate < pageWidth * 0.75) {
-        const left = positioned.filter((item) => item.x < candidate);
-        const right = positioned.filter((item) => item.x >= candidate);
-        const hasLeftText = left.some((item) => (items[item.index]?.width ?? item.text.length * 4) > pageWidth * 0.12);
-        const hasRightText = right.some((item) => (items[item.index]?.width ?? item.text.length * 4) > pageWidth * 0.12);
-        if (left.length >= 3 && right.length >= 3 && hasLeftText && hasRightText) {
-          split = candidate;
-          widestGap = gap;
-        }
+    // Require repeated whitespace aligned across text rows; one large gap may
+    // simply be paragraph spacing in a single-column CV.
+    const candidates = new Map<number, { gap: number; lines: Set<number> }>();
+    for (const [lineIndex, line] of lines.entries()) {
+      const row = line.items.map((item) => ({
+        start: item.x,
+        end: item.x + (items[item.index]?.width ?? item.text.length * 4),
+      })).sort((a, b) => a.start - b.start);
+      for (let index = 1; index < row.length; index += 1) {
+        const gap = row[index].start - row[index - 1].end;
+        const center = Math.round((row[index].start + row[index - 1].end) / 2);
+        if (gap < Math.max(24, pageWidth * 0.045) || center < pageWidth * 0.2 || center > pageWidth * 0.8) continue;
+        const evidence = candidates.get(center) ?? { gap: 0, lines: new Set<number>() };
+        evidence.gap = Math.max(evidence.gap, gap);
+        evidence.lines.add(lineIndex);
+        candidates.set(center, evidence);
       }
     }
-    if (split !== null) {
-      const renderColumn = (columnItems: typeof positioned) => {
-        const columnLines: Array<{ y: number; items: typeof positioned }> = [];
-        for (const item of [...columnItems].sort((a, b) => b.y - a.y || a.x - b.x || a.index - b.index)) {
-          const line = columnLines.find((candidate) => Math.abs(candidate.y - item.y) <= 2.5);
-          if (line) line.items.push(item);
-          else columnLines.push({ y: item.y, items: [item] });
-        }
-        return columnLines.map((line) => line.items.sort((a, b) => a.x - b.x || a.index - b.index).map((item) => item.text).join(" "));
+    const split = [...candidates.entries()]
+      .filter(([center, evidence]) => {
+        const leftLines = lines.filter((line) => line.items.some((item) => item.x < center)).length;
+        const rightLines = lines.filter((line) => line.items.some((item) => item.x >= center)).length;
+        return leftLines >= 3 && rightLines >= 3 && (evidence.lines.size >= 2 || evidence.gap >= pageWidth * 0.14);
+      })
+      .sort((a, b) => b[1].lines.size - a[1].lines.size || b[1].gap - a[1].gap)[0]?.[0];
+
+    if (split !== undefined) {
+      const orderedLines = [...lines].sort((a, b) => b.y - a.y);
+      const output: string[] = [];
+      let columnBlock: typeof lines = [];
+      const renderRows = (rows: typeof lines) => rows.map((line) => line.items
+        .sort((a, b) => a.x - b.x || a.index - b.index).map((item) => item.text).join(" "));
+      const flushColumns = () => {
+        if (columnBlock.length === 0) return;
+        const itemsOnSide = (isLeft: boolean) => columnBlock.flatMap((line) => {
+          const sideItems = line.items.filter((item) =>
+            (item.x + (items[item.index]?.width ?? item.text.length * 4) / 2 < split) === isLeft,
+          );
+          return sideItems.length ? [{ ...line, items: sideItems }] : [];
+        });
+        const left = itemsOnSide(true);
+        const right = itemsOnSide(false);
+        output.push(...(left.length >= 3 && right.length >= 3
+          ? [...renderRows(left), ...renderRows(right)]
+          : renderRows(columnBlock)));
+        columnBlock = [];
       };
-      const leftLines = renderColumn(positioned.filter((item) => item.x < split));
-      const rightLines = renderColumn(positioned.filter((item) => item.x >= split));
-      return [...leftLines, ...rightLines].join("\n");
+      for (const line of orderedLines) {
+        const spansGutter = line.items.some((item) =>
+          item.x < split && item.x + (items[item.index]?.width ?? item.text.length * 4) > split,
+        );
+        if (spansGutter) {
+          flushColumns();
+          output.push(...renderRows([line]));
+        } else columnBlock.push(line);
+      }
+      flushColumns();
+      return output.join("\n");
     }
   }
 
@@ -88,9 +158,10 @@ export function extractCvSuggestionsFromText(text: string): CvSuggestions {
   for (const rawLine of text.replace(/\r/g, "").split("\n")) {
     const line = rawLine.replace(/\u0000/g, "").trim().replace(/^[•●▪◦*\-–—\s]+/, "").trim();
     if (!line) continue;
-    const heading = sectionFor(line);
+    const heading = sectionHeading(line);
     if (heading) {
-      active = heading === "other" ? null : heading;
+      active = heading.section === "other" ? null : heading.section;
+      if (active && heading.content) sections[active].push(heading.content);
       continue;
     }
     if (active) sections[active].push(line);
@@ -102,18 +173,26 @@ export function extractCvSuggestionsFromText(text: string): CvSuggestions {
     .filter((skill) => skill.length >= 2 && skill.length <= 80))].slice(0, 60);
 
   const datePattern = /\b(?:19|20)\d{2}\s*(?:[-–—/]\s*(?:(?:19|20)\d{2}|present|current|now|today))?\b/i;
+  const titlePattern = /\b(engineer|developer|architect|manager|consultant|analyst|designer|lead|director|officer|specialist|administrator|berater(?:in)?|entwickler(?:in)?|architekt(?:in)?|leiter(?:in)?|spezialist(?:in)?|projektmanager(?:in)?|produktmanager(?:in)?|geschäftsführer(?:in)?|ceo|cto|cio|vp|head of|product owner|scrum master)\b/i;
   const roles = [...new Set(sections.experience.flatMap((line, index) => {
     if (!datePattern.test(line)) return [];
-    const inlineRole = line.replace(datePattern, "").replace(/\s*[-–—|,;:]+\s*$/, "").trim();
-    if (inlineRole.length >= 3) return [inlineRole];
-    const precedingLine = sections.experience[index - 1]?.trim() ?? "";
-    return precedingLine.length >= 3 && precedingLine.length <= 120 ? [precedingLine] : [];
+    const inline = line.replace(datePattern, "").replace(/\b(?:from|since|bis|ab)\b/gi, " ").trim();
+    const candidates = inline.split(/\s*(?:\||•|·|;|,|\bat\b|\s@\s)\s*/i)
+      .map((part) => part.trim()).filter((part) => part.length >= 3 && part.length <= 120);
+    const inlineRole = candidates.find((candidate) => titlePattern.test(candidate));
+    if (inlineRole) return [inlineRole];
+    if (candidates.length) return [candidates[0]];
+    const preceding = sections.experience.slice(Math.max(0, index - 3), index).reverse();
+    return [preceding.find((candidate) => titlePattern.test(candidate) && candidate.length <= 120)
+      ?? preceding.find((candidate) => candidate.length >= 3 && candidate.length <= 100 && !/\b(?:gmbh|inc\.?|ltd\.?|llc|vienna|wien|berlin|zurich|zürich)\b/i.test(candidate))
+      ?? ""].filter(Boolean);
   }).filter((line) => line.length >= 3 && line.length <= 120))].slice(0, 12);
 
   const notes: string[] = [];
   if (skills.length === 0) notes.push("No skills section was detected. You can still enter skills manually.");
   if (roles.length === 0) notes.push("No dated role titles were detected. Review the CV structure or enter target roles manually.");
   notes.push("Role suggestions are taken from past experience, not inferred job-search goals.");
+  notes.push("Compare the extracted role and skill fields with your original CV before using them for job matching.");
   notes.push("Your CV address is not used as a preferred job location.");
   return { roles: roles.join("; "), skills: skills.join(", "), notes };
 }
