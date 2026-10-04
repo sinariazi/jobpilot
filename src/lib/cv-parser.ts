@@ -9,6 +9,12 @@ export type CvSuggestions = {
   roles: string;
   skills: string;
   notes: string[];
+  analysis?: {
+    summary: string;
+    seniority: string;
+    domains: string[];
+    highlights: string[];
+  };
   sourceText?: string;
   pageCount?: number;
 };
