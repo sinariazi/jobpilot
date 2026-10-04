@@ -5,6 +5,7 @@ afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 
 const body = {
   model: "decision:latest", cvText: "Product engineer, five years, TypeScript and AWS.", weights: { skills: 40, experience: 30, domain: 20, disqualifier: 10 },
+  preferences: { locations: "Austria", targetRoles: "Solution Architect; Technical Product Manager" },
   job: { company: "Example", role: "Product Engineer", location: "Vienna", mode: "Hybrid", description: "Build TypeScript products with AWS." },
 };
 const answer = { answers: {
@@ -26,8 +27,10 @@ describe("local Ollama decision screening endpoint", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ screening: { model: body.model, score: 78, confidence: 80, breakdown: { skills: 90, experience: 70, domain: 60 }, disqualifierRisk: 10, informationStatus: "sufficient" } });
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["http://127.0.0.1:11434/api/version", "http://127.0.0.1:11434/api/tags", "http://127.0.0.1:11434/v1/systemone"]);
-    const payload = JSON.parse(String((fetchMock.mock.calls[2]?.[1] as RequestInit).body)) as { state: { cv: string; job: { description: string } }; questions: Record<string, unknown> };
+    const payload = JSON.parse(String((fetchMock.mock.calls[2]?.[1] as RequestInit).body)) as { state: { cv: string; candidateLocationPreferences: string; targetRolePreferences: string; job: { description: string } }; questions: Record<string, unknown> };
     expect(payload.state.cv).toContain(body.cvText);
+    expect(payload.state.candidateLocationPreferences).toBe("Austria");
+    expect(payload.state.targetRolePreferences).toBe(body.preferences.targetRoles);
     expect(payload.state.job.description).toContain(body.job.description);
     expect(Object.keys(payload.questions)).toEqual(["skills", "experience", "domain", "disqualifier", "information"]);
   });

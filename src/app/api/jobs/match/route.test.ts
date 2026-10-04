@@ -9,6 +9,7 @@ afterEach(() => {
 const requestBody = {
   model: "local-model:latest",
   cvText: "Senior engineer with TypeScript, React, and AWS experience.",
+  candidatePreferences: { targetRoles: "Frontend Engineer; Solution Architect", preferredLocations: "Vienna, Austria", profileSkills: "TypeScript, React, AWS" },
   jobs: [{ id: "job-1", company: "Example GmbH", role: "Frontend Engineer", location: "Vienna", mode: "Hybrid", description: "Build React applications with TypeScript." }],
 };
 
@@ -33,6 +34,7 @@ describe("local CV-to-job matching API", () => {
     const payload = JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body)) as { think: boolean; messages: Array<{ content: string }> };
     expect(payload.think).toBe(false);
     expect(payload.messages[1]?.content).toContain(requestBody.cvText);
+    expect(payload.messages[1]?.content).toContain(requestBody.candidatePreferences.targetRoles);
   });
 
   it("returns a clear error when the model omits requested matches", async () => {

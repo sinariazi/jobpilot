@@ -19,14 +19,14 @@ const MAX_BACKUP_BYTES = 23_000_000;
 const AI_MATCH_BATCH_SIZE = 2;
 const MAX_CV_MATCH_CHARS = 10_000;
 
-function createCvMatchContext(cvText: string, suggestions: CvSuggestions | null) {
+function createCvMatchContext(cvText: string, suggestions: CvSuggestions | null, profile: CandidateProfile) {
   const analysis = suggestions?.analysis;
   const profileEvidence = [
     analysis?.summary,
     analysis?.seniority ? `Seniority: ${analysis.seniority}` : "",
     analysis?.domains.length ? `Domains: ${analysis.domains.join(", ")}` : "",
-    suggestions?.roles ? `Roles: ${suggestions.roles}` : "",
-    suggestions?.skills ? `Skills: ${suggestions.skills}` : "",
+    profile.roles ? `Target roles: ${profile.roles}` : suggestions?.roles ? `Suggested roles: ${suggestions.roles}` : "",
+    profile.skills ? `Profile skills: ${profile.skills}` : suggestions?.skills ? `Skills: ${suggestions.skills}` : "",
     analysis?.highlights.length ? `Experience evidence: ${analysis.highlights.join("; ")}` : "",
   ].filter(Boolean).join("\n");
   const rawText = cvText.slice(0, MAX_CV_MATCH_CHARS);
@@ -73,12 +73,15 @@ export default function Home() {
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
   const aiMatchAbortController = useRef<AbortController | null>(null);
   const aiMatchGeneration = useRef(0);
-  const cvAutoSearchPending = useRef(false);
   const fetchLiveJobsRef = useRef<() => Promise<void>>(async () => undefined);
+  const handledSearchRequestId = useRef(0);
   const backupInput = useRef<HTMLInputElement>(null);
   const [sourceMessage, setSourceMessage] = useState("");
   const [sourceErrors, setSourceErrors] = useState<string[]>([]);
   const [profileDraft, setProfileDraft] = useState<CandidateProfile>(defaultProfile);
+  const [searchRolesDraft, setSearchRolesDraft] = useState(defaultProfile.roles);
+  const [searchLocationsDraft, setSearchLocationsDraft] = useState(defaultProfile.locations);
+  const [searchRequestId, setSearchRequestId] = useState(0);
   const [cvSuggestions, setCvSuggestions] = useState<CvSuggestions | null>(null);
   const [ocrLanguage, setOcrLanguage] = useState<"eng" | "deu" | "eng+deu">("eng");
   const [cvText, setCvText] = useState("");
@@ -186,6 +189,8 @@ export default function Home() {
         }
         if (cancelled) return;
         setProfile(restored.profile);
+        setSearchRolesDraft(restored.profile.roles);
+        setSearchLocationsDraft(restored.profile.locations);
         setSaved(restored.saved);
         setStatus(restored.status);
         setApplicationNotes(restored.applicationNotes ?? {});
@@ -287,7 +292,7 @@ export default function Home() {
   const hasCurrentCvAssessment = localCvAnalysisReady && cvAnalyzedModel === selectedAiModel;
   const hasStoredScreenings = jobs.some((job) => job.screening?.model === matchingSettings.decisionModel);
   const hasAnyScreenings = hasCurrentCvAssessment || hasStoredScreenings;
-  const matchingConfigurationKey = JSON.stringify(matchingSettings);
+  const matchingConfigurationKey = JSON.stringify({ matchingSettings, roles: profile.roles, locations: profile.locations });
   const currentModelReviews = useMemo(() => matchReviews.filter((review) => review.model === matchingSettings.decisionModel && review.cohortKey === matchCohortKey && review.configurationKey === matchingConfigurationKey), [matchReviews, matchingSettings.decisionModel, matchingConfigurationKey, matchCohortKey]);
   const currentModelMetrics = useMemo(() => summarizeMatchReviews(currentModelReviews), [currentModelReviews]);
   // Keep every location-eligible listing visible. Relevance scores guide sorting;
@@ -373,7 +378,7 @@ export default function Home() {
     const screeningById = new Map<string, NonNullable<Job["screening"]>>();
     const detailedById = new Map<string, NonNullable<Job["aiMatch"]>>();
     const analysisById = new Map<string, NonNullable<Job["detailedAnalysis"]>>();
-    const cvForModel = createCvMatchContext(cvText, cvSuggestions);
+    const cvForModel = createCvMatchContext(cvText, cvSuggestions, profile);
     let error = "";
     let cancelled = false;
     let completed = 0;
@@ -387,7 +392,7 @@ export default function Home() {
         const screened = await Promise.all(batch.map(async (job) => {
           const response = await fetch("/api/jobs/screen", {
             method: "POST", headers: { "Content-Type": "application/json" }, signal,
-            body: JSON.stringify({ model: matchingSettings.decisionModel, cvText: cvForModel.slice(0, 15_000), weights: matchingSettings.weights, preferences: { locations: profile.locations }, job: { company: job.company, role: job.role, location: job.location, mode: job.mode, description: (job.description ?? job.summary).slice(0, 12_000) } }),
+            body: JSON.stringify({ model: matchingSettings.decisionModel, cvText: cvForModel.slice(0, 15_000), weights: matchingSettings.weights, preferences: { locations: profile.locations, targetRoles: profile.roles }, job: { company: job.company, role: job.role, location: job.location, mode: job.mode, description: (job.description ?? job.summary).slice(0, 12_000) } }),
           });
           const result = await response.json() as { screening?: NonNullable<Job["screening"]>; error?: string };
           if (!response.ok || !result.screening) throw new Error(result.error ?? "Local decision screening failed.");
@@ -415,7 +420,7 @@ export default function Home() {
         try {
           const response = await fetch("/api/jobs/match", {
             method: "POST", headers: { "Content-Type": "application/json" }, signal,
-            body: JSON.stringify({ model: selectedAiModel, cvText: cvText.slice(0, MAX_CV_MATCH_CHARS), jobs: batch.map((job) => ({ id: job.id, company: job.company, role: job.role, location: job.location, mode: job.mode, description: (job.description ?? job.summary).slice(0, 2_500) })) }),
+            body: JSON.stringify({ model: selectedAiModel, cvText: cvText.slice(0, MAX_CV_MATCH_CHARS), candidatePreferences: { targetRoles: profile.roles, preferredLocations: profile.locations, profileSkills: profile.skills }, jobs: batch.map((job) => ({ id: job.id, company: job.company, role: job.role, location: job.location, mode: job.mode, description: (job.description ?? job.summary).slice(0, 2_500) })) }),
           });
           const result = await response.json() as { matches?: Array<{ id: string; relevant: boolean; score: number; reason: string; cvEvidence: string; detailedAnalysis: NonNullable<Job["detailedAnalysis"]> }>; error?: string };
           if (!response.ok) throw new Error(result.error ?? "Detailed local analysis failed.");
@@ -449,14 +454,32 @@ export default function Home() {
 
   function saveProfileDraft() {
     const nextProfile = { ...profileDraft, name: profileDraft.name.trim() || "Candidate" };
-    if (nextProfile.locations !== profile.locations) {
+    if (nextProfile.locations !== profile.locations || nextProfile.roles !== profile.roles) {
       invalidateAiAssessment();
       setCvAnalyzedModel("");
       setLiveJobs((current) => current.map((job) => ({ ...job, screening: undefined, aiMatch: undefined, detailedAnalysis: undefined })));
-      setSourceMessage("Location preferences changed. Search again to rescreen jobs against the new preferences.");
+      setSourceMessage("Search preferences changed. Search again to rescreen jobs against the new preferences.");
     }
     setProfile(nextProfile);
+    setSearchRolesDraft(nextProfile.roles);
+    setSearchLocationsDraft(nextProfile.locations);
     setProfileOpen(false);
+  }
+
+  function searchWithPreferences() {
+    const nextProfile = {
+      ...profile,
+      roles: searchRolesDraft.trim(),
+      locations: searchLocationsDraft.trim(),
+    };
+    if (nextProfile.locations !== profile.locations || nextProfile.roles !== profile.roles) {
+      invalidateAiAssessment();
+      setCvAnalyzedModel("");
+      setLiveJobs((current) => current.map((job) => ({ ...job, screening: undefined, aiMatch: undefined, detailedAnalysis: undefined })));
+    }
+    setProfile(nextProfile);
+    setProfileDraft((current) => ({ ...current, roles: nextProfile.roles, locations: nextProfile.locations }));
+    setSearchRequestId((current) => current + 1);
   }
 
   async function parseSelectedCv(event: React.ChangeEvent<HTMLInputElement>) {
@@ -477,7 +500,6 @@ export default function Home() {
       const { parseCvFile } = await import("@/lib/cv-parser");
       const suggestions = await parseCvFile(file, { ocrLanguage, onProgress: setCvAnalysisStatus });
       const cohortKey = await createMatchCohortKey(suggestions.sourceText ?? "");
-      cvAutoSearchPending.current = Boolean(suggestions.sourceText?.trim());
       const browserRoles = suggestions.roles || profile.roles;
       const browserSkills = suggestions.skills || profile.skills;
       const autoFilledProfile = { ...profile, roles: browserRoles, skills: browserSkills };
@@ -489,10 +511,11 @@ export default function Home() {
       setCvFileName(file.name);
       setProfile(autoFilledProfile);
       setProfileDraft(autoFilledProfile);
+      setSearchRolesDraft(browserRoles);
       setCvMessage(`CV text extracted in your browser. Job titles and skills have been filled into your profile; Jobpilot saves them automatically on this device. Your name and preferred locations were left unchanged.${(suggestions.sourceText?.length ?? 0) > MAX_CV_MATCH_CHARS ? ` Matching uses the first ${MAX_CV_MATCH_CHARS.toLocaleString()} characters.` : ""}`);
 
       if (!localAiModels.includes(selectedAiModel)) {
-        setCvAnalysisStatus("Text-based role and skill extraction is ready. Job search will start automatically. Select local Ollama models to enable AI matching.");
+        setCvAnalysisStatus("Text-based role and skill extraction is ready. Review the suggested job titles and locations, then search. Select local Ollama models to enable AI matching.");
         return;
       }
       if (!isLocalJobpilotPage()) {
@@ -526,6 +549,7 @@ export default function Home() {
           roles: current.roles === browserRoles ? analyzedRoles : current.roles,
           skills: current.skills === browserSkills ? analyzedSkills : current.skills,
         }));
+        setSearchRolesDraft(analyzedRoles);
         setProfileDraft((current) => ({ ...current,
           roles: current.roles === browserRoles ? analyzedRoles : current.roles,
           skills: current.skills === browserSkills ? analyzedSkills : current.skills,
@@ -681,6 +705,8 @@ export default function Home() {
       const result = await response.json() as PersistedState & { initialized?: boolean; error?: string };
       if (!response.ok) throw new Error(result.error ?? "The backup data did not pass validation.");
       setProfile(result.profile);
+      setSearchRolesDraft(result.profile.roles);
+      setSearchLocationsDraft(result.profile.locations);
       setSaved(result.saved);
       setStatus(result.status);
       setApplicationNotes(result.applicationNotes ?? {});
@@ -777,10 +803,10 @@ export default function Home() {
   });
 
   useEffect(() => {
-    if (!cvAutoSearchPending.current || cvParsing || cvAnalyzing || checkingLocalAi || loadingJobs || loadingMoreJobs || !cvText.trim() || !stateLoaded) return;
-    cvAutoSearchPending.current = false;
+    if (searchRequestId <= handledSearchRequestId.current || !stateLoaded || loadingJobs || loadingMoreJobs) return;
+    handledSearchRequestId.current = searchRequestId;
     void fetchLiveJobsRef.current();
-  }, [cvParsing, cvAnalyzing, checkingLocalAi, loadingJobs, loadingMoreJobs, cvText, stateLoaded, profile, localAiModels, selectedAiModel, matchingSettings, systemOneAvailable]);
+  }, [searchRequestId, stateLoaded, loadingJobs, loadingMoreJobs]);
 
   async function fetchMoreJobs() {
     if ((nextArbeitnowPage === null && nextJobicyCursor === null) || loadingMoreJobs || loadingJobs) return;
@@ -864,18 +890,19 @@ export default function Home() {
               <p className="application-footnote">Status changes, notes, and follow-up dates are saved on this device. Follow-up dates appear here as reminders; no notification is sent. “Applied” is a manual record; Jobpilot never submits applications.</p>
             </>
           ) : <>
-          <div className="greeting-row"><div><div className="eyebrow">{new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric" }).format(new Date()).toUpperCase()}</div><h1>Your next opportunity <span>starts here.</span></h1><p className="subheading">A focused view of live roles that match your preferences.</p></div><button className="primary-button" onClick={fetchLiveJobs} disabled={loadingJobs || loadingMoreJobs}><span>＋</span> {loadingJobs ? "Searching feeds…" : "Search jobs"}</button></div>
+          <div className="greeting-row"><div><div className="eyebrow">{new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric" }).format(new Date()).toUpperCase()}</div><h1>Your next opportunity <span>starts here.</span></h1><p className="subheading">A focused view of live roles that match your preferences.</p></div><button className="primary-button" onClick={searchWithPreferences} disabled={!stateLoaded || loadingJobs || loadingMoreJobs}><span>＋</span> {loadingJobs ? "Searching feeds…" : "Search jobs"}</button></div>
 
           <section className="source-panel search-panel">
             <div>
-              <span className="eyebrow">AUTOMATIC JOB SEARCH</span>
-              <strong>Search across public job feeds</strong>
-              <p>Jobpilot searches public feeds automatically. Import your CV and select a local Ollama model to analyze role fit on this laptop. No company names or board links are needed.</p>
+              <span className="eyebrow">JOB SEARCH PREFERENCES</span>
+              <strong>Choose the roles and locations you want</strong>
+              <p>CV-suggested titles are ready to edit. These preferences are saved on this device and used to rank and screen listings. All location-eligible jobs remain visible.</p>
             </div>
-            <div className="source-controls">
-              <button className="primary-button" disabled={loadingJobs || loadingMoreJobs} onClick={fetchLiveJobs}>{loadingJobs ? "Searching job feeds…" : loadingMoreJobs ? "Loading more jobs…" : liveJobs.length ? "↻ Search for new jobs" : "Search jobs now"}</button>
-              <span className="feed-summary">Europe listings plus remote roles · Profile stays on this device</span>
+            <div className="job-search-preferences">
+              <label>Job titles<textarea rows={3} value={searchRolesDraft} onChange={(event) => setSearchRolesDraft(event.target.value)} placeholder="Suggested titles from your CV appear here. Add or remove titles; separate alternatives with commas or new lines." /></label>
+              <label>Preferred locations<textarea rows={2} value={searchLocationsDraft} onChange={(event) => setSearchLocationsDraft(event.target.value)} placeholder="For example: Vienna, Austria; Remote Europe. Leave blank for any location." /></label>
             </div>
+            <div className="source-controls"><button className="primary-button" disabled={!stateLoaded || loadingJobs || loadingMoreJobs} onClick={searchWithPreferences}>{loadingJobs ? "Searching job feeds…" : loadingMoreJobs ? "Loading more jobs…" : liveJobs.length ? "↻ Search jobs" : "Search jobs"}</button><span className="feed-summary">You can edit these preferences again at any time.</span></div>
             <p className="directory-credit">Sources: <a href="https://www.arbeitnow.com/" target="_blank" rel="noreferrer">Arbeitnow</a>, <a href="https://remotive.com/remote-jobs/api" target="_blank" rel="noreferrer">Remotive</a>, and <a href="https://jobicy.com/jobs-rss-feed" target="_blank" rel="noreferrer">Jobicy</a>. Feed coverage varies; it does not include every employer.</p>
             {sourceMessage && <p className="source-message" role="status">{sourceMessage}</p>}
             {aiMatchProgress && aiMatchProgress.total > 0 && <div className="ai-assessment-progress" role="status" aria-live="polite">

@@ -60,12 +60,14 @@ export async function POST(request: Request) {
     description: body.job.description as string,
   };
   const description = job.description.trim();
-  const preferences = isRecord(body.preferences) && typeof body.preferences.locations === "string" ? body.preferences.locations.slice(0, 2_000) : "";
-  const state = { cv: cvText || "", candidateLocationPreferences: preferences, job: { company: job.company, role: job.role, location: job.location, mode: job.mode, description: description || "" } };
+  const preferences = isRecord(body.preferences) ? body.preferences : {};
+  const locationPreferences = typeof preferences.locations === "string" ? preferences.locations.slice(0, 2_000) : "";
+  const targetRolePreferences = typeof preferences.targetRoles === "string" ? preferences.targetRoles.slice(0, 2_000) : "";
+  const state = { cv: cvText || "", candidateLocationPreferences: locationPreferences, targetRolePreferences, job: { company: job.company, role: job.role, location: job.location, mode: job.mode, description: description || "" } };
   const questions = {
     skills: { type: "score", instructions: "How well does the candidate's CV support the job's required technical and professional skills? Assess evidence and importance, not keyword overlap.", criteria: ["No relevant evidence", "Limited or transferable evidence", "Some relevant evidence with important gaps", "Strong evidence for core requirements", "Very strong evidence across requirements"] },
-    experience: { type: "score", instructions: "How well do the candidate's demonstrated experience level, responsibilities, and scope match the role?", criteria: ["Major level or responsibility mismatch", "Limited relevant experience", "Partial responsibility and level match", "Strong level and responsibility match", "Very strong direct match"] },
-    domain: { type: "score", instructions: "How well do the candidate's demonstrated domain, product, and delivery experience match this job?", criteria: ["No evidence", "Weak or indirect evidence", "Some adjacent experience", "Strong related experience", "Very strong direct experience"] },
+    experience: { type: "score", instructions: "How well do the candidate's demonstrated experience level, responsibilities, and scope match the role and the user's target role preferences?", criteria: ["Major level or responsibility mismatch", "Limited relevant experience", "Partial responsibility and level match", "Strong level and responsibility match", "Very strong direct match"] },
+    domain: { type: "score", instructions: "How well do the candidate's demonstrated domain, product, and delivery experience match this job and the user's target role preferences?", criteria: ["No evidence", "Weak or indirect evidence", "Some adjacent experience", "Strong related experience", "Very strong direct experience"] },
     disqualifier: { type: "noul", instructions: "What is the probability that the available information explicitly shows a material disqualifier: the job location or work arrangement conflicts with candidateLocationPreferences, a required language conflicts with explicit CV evidence, work authorization conflicts with explicit CV evidence, or a mandatory qualification is absent from clear CV evidence? Missing information alone is not evidence of a mismatch; if unclear, treat as no explicit disqualifier." },
     information: { type: "choice", instructions: "Which information is materially missing or too unclear to assess?", criteria: { sufficient: "CV and job requirements contain enough relevant information", cv_missing: "CV evidence is missing or too unclear", job_missing: "Job requirements are missing or too unclear", both_missing: "Both CV and job requirements are missing or too unclear" } },
   };
