@@ -13,8 +13,22 @@ import { createCoverLetterDraft } from "@/lib/cover-letter";
 const LEGACY_STORAGE_KEY = "jobpilot-local-v1";
 const MAX_BACKUP_BYTES = 23_000_000;
 const MAX_AI_MATCH_CANDIDATES = 60;
-const AI_MATCH_BATCH_SIZE = 4;
-const MAX_CV_MATCH_CHARS = 30_000;
+const AI_MATCH_BATCH_SIZE = 2;
+const MAX_CV_MATCH_CHARS = 10_000;
+
+function createCvMatchContext(cvText: string, suggestions: CvSuggestions | null) {
+  const analysis = suggestions?.analysis;
+  const profileEvidence = [
+    analysis?.summary,
+    analysis?.seniority ? `Seniority: ${analysis.seniority}` : "",
+    analysis?.domains.length ? `Domains: ${analysis.domains.join(", ")}` : "",
+    suggestions?.roles ? `Roles: ${suggestions.roles}` : "",
+    suggestions?.skills ? `Skills: ${suggestions.skills}` : "",
+    analysis?.highlights.length ? `Experience evidence: ${analysis.highlights.join("; ")}` : "",
+  ].filter(Boolean).join("\n");
+  const rawText = cvText.slice(0, MAX_CV_MATCH_CHARS);
+  return [profileEvidence && `CV analysis:\n${profileEvidence}`, rawText && `CV text excerpt:\n${rawText}`].filter(Boolean).join("\n\n");
+}
 
 function isLocalJobpilotPage() {
   return typeof window !== "undefined" && ["localhost", "127.0.0.1", "[::1]"].includes(window.location.hostname);
@@ -510,9 +524,11 @@ export default function Home() {
       setNextArbeitnowPage(result.nextArbeitnowPage ?? null);
       const fetchedJobs = result.jobs ?? [];
       fetchedForFallback = fetchedJobs;
+      setLiveJobs(fetchedJobs);
       const locationJobs = fetchedJobs.filter((job) => matchesPreferredLocation(job.location, profile.locations, job.mode, job.source));
       let analyzedJobs = fetchedJobs;
       let aiAnalyzedCount = 0;
+      let matchingWarning = "";
       if (localCvAnalysisReady) {
         const lexicalPriority = [...locationJobs].sort((a, b) => {
           const aRole = Number(matchesTargetRole(a, profile.roles));
@@ -527,11 +543,12 @@ export default function Home() {
           ...locationJobs.filter((job) => !priorityIds.has(job.id)).slice(0, Math.floor(MAX_AI_MATCH_CANDIDATES / 2)),
         ];
         const matchesById = new Map<string, NonNullable<Job["aiMatch"]>>();
-        const cvForModel = cvText.slice(0, MAX_CV_MATCH_CHARS);
+        const cvForModel = createCvMatchContext(cvText, cvSuggestions);
         for (let offset = 0; offset < candidates.length; offset += AI_MATCH_BATCH_SIZE) {
           const batch = candidates.slice(offset, offset + AI_MATCH_BATCH_SIZE);
           setSourceMessage(`Local AI is comparing your CV with ${Math.min(offset + batch.length, candidates.length)} of ${candidates.length} selected listings…`);
-          const matchResponse = await fetch("/api/jobs/match", {
+          try {
+            const matchResponse = await fetch("/api/jobs/match", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -543,20 +560,25 @@ export default function Home() {
                 role: job.role,
                 location: job.location,
                 mode: job.mode,
-                description: (job.description ?? job.summary).slice(0, 2_500),
+                description: (job.description ?? job.summary).slice(0, 1_500),
               })),
             }),
-          });
-          const matchResult = await matchResponse.json() as { matches?: Array<{ id: string; relevant: boolean; score: number; reason: string; cvEvidence: string }>; error?: string };
-          if (!matchResponse.ok) throw new Error(matchResult.error ?? "Local CV matching failed.");
-          let validatedMatches = 0;
-          for (const match of matchResult.matches ?? []) {
-            if (batch.some((job) => job.id === match.id) && typeof match.relevant === "boolean" && Number.isFinite(match.score)) {
-              matchesById.set(match.id, { model: selectedAiModel, relevant: match.relevant, score: Math.max(0, Math.min(100, Math.round(match.score))), reason: match.reason, cvEvidence: match.cvEvidence });
-              validatedMatches += 1;
+            });
+            const matchResult = await matchResponse.json() as { matches?: Array<{ id: string; relevant: boolean; score: number; reason: string; cvEvidence: string }>; error?: string };
+            if (!matchResponse.ok) throw new Error(matchResult.error ?? "Local CV matching failed.");
+            let validatedMatches = 0;
+            for (const match of matchResult.matches ?? []) {
+              if (batch.some((job) => job.id === match.id) && typeof match.relevant === "boolean" && Number.isFinite(match.score)) {
+                matchesById.set(match.id, { model: selectedAiModel, relevant: match.relevant, score: Math.max(0, Math.min(100, Math.round(match.score))), reason: match.reason, cvEvidence: match.cvEvidence });
+                validatedMatches += 1;
+              }
             }
+            aiAnalyzedCount += validatedMatches;
+            setLiveJobs((current) => current.map((job) => matchesById.has(job.id) ? { ...job, aiMatch: matchesById.get(job.id) } : job));
+          } catch (error) {
+            matchingWarning = error instanceof Error ? error.message : "Local CV matching stopped before all batches finished.";
+            break;
           }
-          aiAnalyzedCount += validatedMatches;
         }
         analyzedJobs = fetchedJobs.map((job) => ({ ...job, ...(matchesById.has(job.id) ? { aiMatch: matchesById.get(job.id) } : { aiMatch: undefined }) }));
         setCvAnalyzedModel(selectedAiModel);
@@ -566,7 +588,7 @@ export default function Home() {
         && (job.aiMatch ? job.aiMatch.relevant : !localCvAnalysisReady && isRelevantToProfile(job, candidateSkills, profile.roles)));
       setSourceMessage(result.jobs?.length
         ? localCvAnalysisReady
-          ? `Local Ollama compared your CV with ${aiAnalyzedCount} of ${locationJobs.length} location-eligible listings. ${matchingJobs.length} were judged relevant. Scores and explanations are estimates; check the original postings.`
+          ? `Local Ollama compared your CV with ${aiAnalyzedCount} of ${Math.min(locationJobs.length, MAX_AI_MATCH_CANDIDATES)} selected listings. ${matchingJobs.length} were judged potential matches. ${matchingWarning ? `Some matches remain unassessed: ${matchingWarning}` : locationJobs.length > MAX_AI_MATCH_CANDIDATES ? `${locationJobs.length - MAX_AI_MATCH_CANDIDATES} more listings remain unassessed.` : ""} Scores and explanations are estimates; check the original postings.`
           : cvText.trim() && !isLocalJobpilotPage()
             ? `CV analysis is blocked here for privacy. Open Jobpilot from localhost on this laptop; no CV text was sent. Showing exact profile matches only.`
             : cvText.trim()
@@ -594,43 +616,59 @@ export default function Home() {
     if (!nextArbeitnowPage || loadingMoreJobs) return;
     setLoadingMoreJobs(true);
     setSourceMessage("");
+    let fetchedMore: Job[] = [];
     try {
       const response = await fetch(`/api/jobs/search?arbeitnowStartPage=${nextArbeitnowPage}`, { cache: "no-store" });
       const result = await response.json() as { jobs?: Job[]; errors?: string[]; error?: string; nextArbeitnowPage?: number | null };
       if (!response.ok) throw new Error(result.error ?? "Could not load more jobs.");
       const fetchedJobs = result.jobs ?? [];
+      fetchedMore = fetchedJobs;
       setNextArbeitnowPage(result.nextArbeitnowPage ?? null);
       setSourceErrors((current) => [...current.filter((error) => !result.errors?.includes(error)), ...(result.errors ?? [])]);
+      setLiveJobs((current) => {
+        const seen = new Set(current.map((job) => job.sourceUrl ?? job.id));
+        return [...current, ...fetchedJobs.filter((job) => !seen.has(job.sourceUrl ?? job.id))];
+      });
       let analyzedJobs = fetchedJobs;
+      let matchingWarning = "";
       if (localCvAnalysisReady && selectedAiModel && fetchedJobs.length) {
         const candidates = fetchedJobs.filter((job) => matchesPreferredLocation(job.location, profile.locations, job.mode, job.source));
         const matchesById = new Map<string, NonNullable<Job["aiMatch"]>>();
         for (let offset = 0; offset < Math.min(candidates.length, MAX_AI_MATCH_CANDIDATES); offset += AI_MATCH_BATCH_SIZE) {
           const batch = candidates.slice(offset, Math.min(offset + AI_MATCH_BATCH_SIZE, MAX_AI_MATCH_CANDIDATES));
           setSourceMessage(`Local AI is comparing your CV with ${Math.min(offset + batch.length, candidates.length, MAX_AI_MATCH_CANDIDATES)} of ${candidates.length} new location-eligible listings…`);
-          const matchResponse = await fetch("/api/jobs/match", {
+          try {
+            const matchResponse = await fetch("/api/jobs/match", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ model: selectedAiModel, cvText: cvText.slice(0, MAX_CV_MATCH_CHARS), jobs: batch.map((job) => ({ id: job.id, company: job.company, role: job.role, location: job.location, mode: job.mode, description: (job.description ?? job.summary).slice(0, 2_500) })) }),
-          });
-          const matchResult = await matchResponse.json() as { matches?: Array<{ id: string; relevant: boolean; score: number; reason: string; cvEvidence: string }>; error?: string };
-          if (!matchResponse.ok) throw new Error(matchResult.error ?? "Local CV matching failed.");
-          for (const match of matchResult.matches ?? []) {
-            if (batch.some((job) => job.id === match.id) && typeof match.relevant === "boolean" && Number.isFinite(match.score)) {
-              matchesById.set(match.id, { model: selectedAiModel, relevant: match.relevant, score: Math.max(0, Math.min(100, Math.round(match.score))), reason: match.reason, cvEvidence: match.cvEvidence });
+            body: JSON.stringify({ model: selectedAiModel, cvText: createCvMatchContext(cvText, cvSuggestions), jobs: batch.map((job) => ({ id: job.id, company: job.company, role: job.role, location: job.location, mode: job.mode, description: (job.description ?? job.summary).slice(0, 1_500) })) }),
+            });
+            const matchResult = await matchResponse.json() as { matches?: Array<{ id: string; relevant: boolean; score: number; reason: string; cvEvidence: string }>; error?: string };
+            if (!matchResponse.ok) throw new Error(matchResult.error ?? "Local CV matching failed.");
+            for (const match of matchResult.matches ?? []) {
+              if (batch.some((job) => job.id === match.id) && typeof match.relevant === "boolean" && Number.isFinite(match.score)) {
+                matchesById.set(match.id, { model: selectedAiModel, relevant: match.relevant, score: Math.max(0, Math.min(100, Math.round(match.score))), reason: match.reason, cvEvidence: match.cvEvidence });
+              }
             }
+            setLiveJobs((current) => current.map((job) => matchesById.has(job.id) ? { ...job, aiMatch: matchesById.get(job.id) } : job));
+          } catch (error) {
+            matchingWarning = error instanceof Error ? error.message : "Local CV matching stopped before all batches finished.";
+            break;
           }
         }
         analyzedJobs = fetchedJobs.map((job) => ({ ...job, ...(matchesById.has(job.id) ? { aiMatch: matchesById.get(job.id) } : {}) }));
         setCvAnalyzedModel(selectedAiModel);
       }
-      setLiveJobs((current) => {
-        const seen = new Set(current.map((job) => job.sourceUrl ?? job.id));
-        return [...current, ...analyzedJobs.filter((job) => !seen.has(job.sourceUrl ?? job.id))];
-      });
-      setSourceMessage(`Loaded ${fetchedJobs.length} more listings from Arbeitnow. ${result.nextArbeitnowPage ? "More feed pages are available." : "No further Arbeitnow pages were reported."}`);
+      setLiveJobs((current) => current.map((job) => analyzedJobs.find((item) => item.id === job.id) ?? job));
+      setSourceMessage(`Loaded ${fetchedJobs.length} more listings from Arbeitnow. ${matchingWarning ? `Some remain unassessed: ${matchingWarning}` : ""} ${result.nextArbeitnowPage ? "More feed pages are available." : "No further Arbeitnow pages were reported."}`);
     } catch (error) {
-      setSourceMessage(error instanceof Error ? error.message : "Could not load more jobs.");
+      if (fetchedMore.length) {
+        setLiveJobs((current) => {
+          const seen = new Set(current.map((job) => job.sourceUrl ?? job.id));
+          return [...current, ...fetchedMore.filter((job) => !seen.has(job.sourceUrl ?? job.id))];
+        });
+        setSourceMessage(`Loaded ${fetchedMore.length} more listings, but CV matching failed: ${error instanceof Error ? error.message : "unknown error"}. They remain available for review.`);
+      } else setSourceMessage(error instanceof Error ? error.message : "Could not load more jobs.");
     } finally {
       setLoadingMoreJobs(false);
     }
