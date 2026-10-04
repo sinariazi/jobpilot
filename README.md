@@ -1,50 +1,106 @@
 # Jobpilot
 
-A local-first job-search assistant built with Next.js and TypeScript. It searches multiple public job feeds automatically, filters listings against the candidate's preferred locations and profile evidence, and explains which target roles and skills matched.
+Jobpilot is a job-search helper that runs on your computer. It finds public job listings, compares them with your CV using Ollama (a local AI app), and helps you prepare application drafts. You review every result and submit applications yourself.
 
-> **Current scope:** Jobpilot is an early-stage, local-first job-search and application-preparation agent. It searches public feeds from configured providers, but does not cover every employer or vacancy. With a CV loaded and Ollama running locally, a configurable decision model quickly screens location-eligible jobs; only shortlisted or uncertain results go to detailed local LLM analysis. CV parsing runs in the browser; extracted text and job descriptions used for matching are sent only to Ollama on this laptop. Jobpilot does not yet tailor CVs or submit applications.
+## Get started (no coding experience needed)
 
-## Working now
+Follow these steps in order. You only need to do the setup once.
 
-- Searches three broad public job feeds automatically; no company names, board slugs, or employer setup are required. Each listing links to its provider or original listing, with visible source attribution.
-- Filters listings using locations in the editable candidate profile. Common English/German aliases for Vienna, Graz, Linz, Salzburg, Innsbruck, Klagenfurt, Bregenz, St. Pölten, Munich, Cologne, Zurich, Geneva, and Prague are normalized; some city-only listings can match their country. An empty location means any location; an unqualified “Remote” listing is not assumed to be available in a specific country.
-- Filters loaded listings by keywords, posting age, work mode, department, and minimum estimated score; sorts by best match, newest, or company name. Without a successful CV assessment, “best match” prioritizes target-role matches and exact skill evidence. The fallback percentage measures skill overlap only, not overall fit. Results appear in batches of 25; **Show more** reveals fetched jobs, while **Load more jobs** requests more provider listings.
-- Imports text-based and scanned PDF, DOCX, and TXT CVs. Scanned PDF pages are rendered in the browser and OCR'd by local Tesseract, with English, German, or both selectable; no page image is sent to a hosted OCR service. PDF text extraction preserves visual line breaks, detects repeated column gutters (including columns with independent vertical baselines) and full-width headings, and recognizes common English and German section names, including inline skill headings. Dated role entries handle common title/date layouts. When local Ollama is available, it analyzes the CV, shows an in-app preview for PDFs, extracted text, summary, and evidence, and automatically fills and saves target roles and skills in the local profile. Name and preferred location are not inferred. Review the extracted role and skill suggestions against the original CV. The selected file and full text remain in memory and are not saved.
-- When a CV and local Ollama are available, the app sends every fetched location-eligible job and a compact CV excerpt to the configurable decision model through Ollama `/v1/systemone`. The first stage scores skills, experience, and domain fit; checks explicit material-disqualifier risk; reports missing information and model confidence; and combines outputs using editable whole-percentage weights that total 100 (default: 40/30/20/10). Detailed analysis runs only above the configurable score threshold (default 65), below its confidence threshold (default 60), or when CV/job information is missing or unclear. Every location-eligible listing remains visible, including low-scoring listings. The detail view keeps the local screening score/confidence separate from second-stage analysis and shows matched requirements, gaps, and exact CV/job evidence quotes when the model provides valid source spans. Scores are estimates, not probabilities of hiring. The second-stage Ollama chat model is independently configurable. CV and job text are sent only to a loopback Ollama service; there is no cloud AI fallback. Users can label screened jobs as relevant or not relevant; observed false positives/negatives and other review metrics are scoped to that model and CV fingerprint. Because users choose which jobs to review, this feedback is a selected sample and does not establish general accuracy or calibration.
-- Without local AI matching, hides listings without an exact profile signal: a target-role match, a profile skill in the title, or at least one (for profiles with one or two skills) / two (for larger profiles) skills in the title or description. Keyword percentages are text overlap indicators, not probabilities of getting a job.
-- Caches the Remotive feed for six hours in keeping with its published request guidance, the Jobicy feed for at least one hour in keeping with its polling guidance, and Arbeitnow feeds for 30 minutes.
-- Saves live listings, saved jobs, application statuses, per-job notes and follow-up dates, and editable cover-letter drafts to local JSON storage. Follow-up dates show upcoming, due-today, or overdue reminders in the tracker; no operating-system notification is sent.
-- Exports and restores a versioned JSON backup of the local profile, listings, saved jobs, application statuses, notes, follow-up dates, and cover-letter drafts; restores are validated and require confirmation.
-- Includes a manual application tracker with status and private per-job notes. It never submits an application.
-- Creates an editable cover-letter first draft for a selected job using its role and company, exact profile skill overlaps, and user-entered interest and experience details. Missing personal claims are shown as placeholders; drafts are saved locally and included in backups.
-- Can create an AI-written cover-letter draft with an Ollama model running locally. Jobpilot discovers installed models and lets the user choose one. Inference is sent only to the loopback Ollama service on this laptop; there is no hosted AI provider or API key. An offline template remains available when Ollama is unavailable.
-- Migrates prior browser-local profile and review state on first launch.
-- Lint, typecheck, Vitest, and production build run in GitHub Actions.
+### 1. Install Node.js
 
-## TODO
+Download and install **Node.js 22.13 or newer** from [nodejs.org](https://nodejs.org/). Choose the regular installer for your computer and accept the suggested options. If the installer asks, allow it to install npm too. Restart your computer if the installer asks you to.
 
-- Extend location normalization beyond the current limited English/German alias set. Other languages, city/country relationships, and inconsistent feed formats still need coverage. Ambiguous remote listings are excluded for country-specific preferences unless a compatible region is stated or known from the feed query.
-- Add a licensed, broad-coverage job search provider to find roles beyond the current public feeds and geographies; public feeds do not contain every employer or vacancy.
-- Add more job-source adapters after checking each provider's API and display/attribution terms.
-- Add pagination for Remotive and Jobicy if their public APIs support it; initial search retrieves one Remotive response and up to 100 Jobicy listings. Arbeitnow's next pages can now be requested with **Load more jobs**.
-- Encrypt local profile and tracker data, which can include sensitive details accepted from a CV.
-- Tailor and export the candidate's CV using verified CV source material; current analysis extracts profile evidence but does not generate tailored CV files.
-- Add application-form preparation and employer-specific ATS integrations. Jobpilot currently opens the original posting but does not fill or submit external forms.
-- Improve AI drafting with editable user preferences, structured outputs, and stronger source-to-claim verification; AI drafting currently creates cover-letter text only.
-- Formally review accessibility and the existing responsive layout across supported browsers and screen sizes; responsive breakpoints exist, but this review has not been completed.
-- Add automated end-to-end tests for the main job search, details, profile, and tracking workflows.
-- Evaluate the local decision model on a real, human-reviewed set of strong, borderline, and poor job matches from the user's CV; the repository has no such reviewed dataset, so actual false-positive and false-negative rates have not yet been measured. Current tests verify score math, routing, and failure cases using synthetic response fixtures only.
+### 2. Download Jobpilot
 
-The app fetches public listings from its configured feeds and applies location and role preferences locally. Candidate profile fields are not sent to feed providers. Feed coverage, update frequency, and availability depend on each provider.
+1. Open the [Jobpilot GitHub page](https://github.com/sinariazi/jobpilot).
+2. Click the green **Code** button, then **Download ZIP**.
+3. Open your Downloads folder and extract/unzip the downloaded file. You should now have a folder named `jobpilot-main`.
 
-## Tech stack
+### 3. Install Ollama for local AI
 
-- Next.js 16, React 19, TypeScript
-- Node.js file APIs for local JSON persistence
-- Arbeitnow, Remotive, and Jobicy public job feeds
-- Vitest, ESLint, TypeScript
+1. Download Ollama from [ollama.com/download](https://ollama.com/download) and install it.
+2. Open the Ollama app and leave it running while you use Jobpilot.
+3. Install a local chat model from the [Ollama model library](https://ollama.com/library). For example, open the model's page, follow its **CLI** instructions, and run the shown `ollama pull ...` command in a terminal. Models take disk space and may take several minutes to download.
+4. For automatic CV-to-job scoring, also install a model that Ollama documents as compatible with its `/v1/systemone` decision endpoint. This feature requires Ollama 0.35 or newer. If you skip this, you can still browse jobs, but automatic decision-model scores will not be available.
 
-## Run locally
+### 4. Open a terminal in the Jobpilot folder
+
+The terminal is an app where you paste the commands below.
+
+- **Windows:** Open the extracted `jobpilot-main` folder in File Explorer. Click the address bar, type `powershell`, then press **Enter**.
+- **Mac:** Open **Applications → Utilities → Terminal**, type `cd ~/Downloads/jobpilot-main`, then press **Enter**. If you extracted the folder somewhere else, use that folder's location instead.
+- **Linux:** Open Terminal and go to the extracted folder. For the default Downloads location, type `cd ~/Downloads/jobpilot-main` and press **Enter**.
+
+### 5. Install and start Jobpilot
+
+In that terminal window, run these commands one at a time. Press **Enter** after each command and wait for it to finish:
+
+```bash
+npm install
+npm run dev
+```
+
+Keep this terminal window open. When it says the server is ready, open [http://localhost:3000](http://localhost:3000) in your web browser. Jobpilot is now running on your computer.
+
+### 6. Set up your profile and find jobs
+
+1. In Jobpilot, click **Candidate profile**.
+2. Under **Analyze CV**, choose your CV file (PDF, DOCX, or TXT). For a scanned PDF, see [Scanned CVs](#scanned-cvs-optional).
+3. Review the CV summary, suggested job titles, and skills. Edit anything that is incorrect. Enter your preferred locations (for example, `Austria`) and click **Save profile**.
+4. In **Local AI status**, choose the Ollama chat model you installed. If available, choose a compatible decision model too. Jobpilot discovers models installed on your computer.
+5. Go back to the main page and click **Search jobs**. Wait for the feeds and local AI to finish. Select a result to read its details, evidence, and original job posting.
+
+To use Jobpilot another day, open Ollama, open a terminal in the `jobpilot-main` folder, run `npm run dev`, and visit [http://localhost:3000](http://localhost:3000). To stop Jobpilot, focus the terminal window and press **Ctrl+C**. Your profile and saved job tracker remain on this computer.
+
+## If something goes wrong
+
+- **`npm` is not recognized / command not found:** Install Node.js from [nodejs.org](https://nodejs.org/), close and reopen the terminal, then try again.
+- **The page does not open:** Make sure the terminal is still running `npm run dev`, then refresh `http://localhost:3000`.
+- **No Ollama models appear:** Open the Ollama app, install a model, and refresh Jobpilot. To check installed models, run `ollama ls` in a terminal.
+- **Decision screening is unavailable:** Update Ollama to 0.35 or newer and select a model compatible with `/v1/systemone`. A chat model may not support decision screening. Jobpilot shows an error and does not send your CV or job text to a hosted AI service instead.
+- **Model takes a long time or fails:** Try a smaller model that fits your computer's memory. Jobpilot can still show fetched jobs without AI scores.
+- **Need help with the command window?** Leave the message visible and share the exact error text when asking for help. Do not share your CV or personal profile data.
+
+## What Jobpilot does
+
+- Searches public job feeds automatically; you do not need to enter company names or board slugs. Public feeds do not include every vacancy.
+- Filters by locations in your profile. Leave preferred locations blank only if you want jobs from any location. A generic “Remote” listing is not assumed to be available in Austria unless the listing/feed indicates it.
+- Uses local Ollama `/v1/systemone` decision screening for a fast first estimate, then a local chat model for shortlisted, uncertain, or incomplete cases. You can adjust score weights and detailed-analysis thresholds in the app. Scores are estimates, not hiring probabilities. Low-scoring jobs remain visible.
+- The default score weights are skills 40%, experience 30%, domain fit 20%, and penalty for explicit disqualifiers 10%. Detailed analysis runs by default at scores of 65 or higher, confidence below 60, or whenever important information is missing/unclear. Change these settings in Jobpilot; the score is not a probability of being hired.
+- Shows score breakdowns, confidence when the model provides it, missing information, and detailed matched requirements/gaps with source evidence when available. Verify every result against the original listing.
+- Lets you save jobs, track application status, add private notes and follow-up dates, and create editable cover-letter drafts. It never submits an application.
+- Stores profile and job-tracker data on this device in `~/.jobpilot/state.json` (or the folder set by `JOBPILOT_DATA_DIR`). The file is not encrypted. Use **Candidate profile → Data backup** to save or restore a local backup.
+
+## CV privacy and local AI
+
+The CV file is read in your browser and is not saved by Jobpilot. Extracted CV text is held in memory and sent to Ollama on this same computer for CV analysis and job matching. Job descriptions used for matching are also sent only to local Ollama. Jobpilot has no hosted AI fallback and does not send candidate data to job-feed providers. Extracted role and skill suggestions, AI scores/explanations, review labels, profile fields, and tracker data are stored locally; the stored data is not encrypted. Cover-letter generation sends the job details, profile name and skills, and notes you enter to local Ollama, but not the full CV text. Keep Jobpilot bound to `localhost`; do not expose it to your network.
+
+Job discovery needs an internet connection. AI matching needs Ollama and installed models. The model's speed and quality depend on the model and your computer. User-reviewed match feedback is a selected sample and does not establish general accuracy or calibration.
+
+### Scanned CVs (optional)
+
+Text-based PDF, DOCX, and TXT CVs work without extra OCR software. Scanned PDFs need Tesseract OCR installed on the computer. On macOS with Homebrew, open Terminal and run:
+
+```bash
+brew install tesseract tesseract-lang
+```
+
+Restart Jobpilot and choose English, German, or both in the CV upload section. The browser renders pages and sends them only to Jobpilot on localhost; Tesseract processes temporary local image files, which are deleted after OCR. Up to 20 scanned pages are supported. If Tesseract is not installed, text-based CV extraction continues to work.
+
+## Current limitations (TODO)
+
+- Broaden location/country normalization and cover more languages and inconsistent feed formats.
+- Add a licensed job provider with broader employer and geography coverage, after checking provider terms.
+- Add Remotive and Jobicy pagination where their public APIs allow it. Arbeitnow pagination is available through **Load more jobs**.
+- Encrypt local profile, tracker, and backup data.
+- Tailor and export a CV from verified source material; currently Jobpilot analyzes CVs but does not generate tailored CV files.
+- Add application-form preparation and employer-specific ATS support; Jobpilot currently opens original postings but does not fill external forms.
+- Improve cover-letter drafting preferences, structured output, and source-to-claim checks.
+- Review accessibility and responsive layouts across supported browsers and screen sizes.
+- Add end-to-end tests for job search, job details, profile, and tracking.
+- Evaluate local decision scores against a real human-reviewed set of strong, borderline, and poor matches. No such reviewed dataset is currently available, so false-positive/false-negative rates and model calibration have not been established.
+
+## For developers
 
 Requirements: Node.js 22.13 or newer and npm.
 
@@ -53,85 +109,7 @@ npm install
 npm run dev
 ```
 
-Open <http://localhost:3000>.
-
-The app stores data in `~/.jobpilot/state.json` (the current user's home directory). You can change the folder with `JOBPILOT_DATA_DIR`. Keep the app bound to `localhost`; don't expose it on your network.
-
-### Optional: enable OCR for scanned CVs
-
-OCR uses Tesseract installed on this laptop. On macOS, install English OCR support with:
-
-```bash
-brew install tesseract
-```
-
-To read German CVs, also install Tesseract's additional language data:
-
-```bash
-brew install tesseract-lang
-```
-
-Check that the selected language appears in `tesseract --list-langs`, then restart Jobpilot. The CV profile has an OCR language selector for English, German, or both. OCR works only when Jobpilot is open at `http://localhost:3000`. It handles up to 20 scanned pages in one CV. If `tesseract` is not on `PATH`, set `TESSERACT_PATH` in `.env.local` to its executable path and restart the app. The OCR engine and language files run locally; if Tesseract is absent, text-based PDF, DOCX, and TXT extraction still works.
-
-**Privacy:** CV parsing runs in the browser. For scanned PDFs, page images are rendered in the browser and sent only to Jobpilot on localhost; the local Tesseract process reads a temporary image file that is deleted immediately after OCR. The selected CV file is never sent to Ollama or saved. Extracted CV text is sent from the browser to the local Jobpilot app and then to Ollama at a loopback address on the same laptop for profile analysis after upload and for job matching when you search; it remains in memory and is not written to the local state file. Extracted role and skill fields are automatically saved to the local JSON state file, which is not encrypted. AI match explanations, scores, and the user's match-review labels are stored locally. A SHA-256 fingerprint of extracted CV text is stored with those labels so calibration feedback is reused only for the same CV; the CV itself is not stored. Cover-letter notes and drafts are also stored locally and in unencrypted JSON backups. Jobpilot sends no candidate data to job-feed providers. For AI cover-letter drafting, job details, profile name and skills, and entered interest/evidence notes are sent to local Ollama; full CV text is not included in a cover-letter request. Keep Jobpilot bound to localhost.
-
-## Local AI setup
-
-### 1. Install and start Ollama
-
-Download Ollama for your operating system from [ollama.com/download](https://ollama.com/download), install it, and open the Ollama app. Leave it running while you use Jobpilot. Ollama is the local program that loads and runs the AI model on your laptop.
-
-### 2. Download a model
-
-Open Terminal (on macOS, open **Applications → Utilities → Terminal**) and run this example:
-
-```bash
-ollama pull MODEL_NAME
-```
-
-Replace `MODEL_NAME` with a model tag from the [Ollama model library](https://ollama.com/library). For detailed analysis and drafting, choose a compatible chat model. For first-stage screening, install an Ollama decision model that supports `/v1/systemone`; do not assume that a standard chat model supports this endpoint. Model names and versions are not baked into Jobpilot: the app lists tags installed by the user and the selection is saved locally. Larger models can require more disk space and memory. After downloading, check that Ollama can see it:
-
-```bash
-ollama ls
-```
-
-The model name shown by `ollama list` is the name Jobpilot will show you.
-
-### 3. Start Jobpilot and select the model
-
-In the Jobpilot project folder, start the app if it is not already running:
-
-```bash
-npm run dev
-```
-
-Open <http://localhost:3000> and choose the installed chat model and the installed decision model in the **Local AI status** panel. The `/v1/systemone` API requires Ollama 0.35 or newer. Jobpilot checks the local Ollama version, lists installed tags, and reports an actionable error if this endpoint is unsupported or the selected model is missing/incompatible. Open **Candidate profile → Analyze CV** and select a text-based or scanned CV. Scanned PDFs require the optional local Tesseract installation described above; choose the OCR language. Jobpilot shows a summary and evidence, then fills and saves target roles and skills automatically; review or edit those fields. The extracted CV text stays in memory. Return to the overview and select **Search jobs now**. The decision model screens each currently fetched, location-eligible listing; the slower chat model analyzes only jobs over the score threshold, below the confidence threshold, or with missing/unclear information. Adjust thresholds and weights under **Screening weights and detailed-analysis thresholds**. Watch or cancel progress. If Ollama or a model fails, listings remain visible and Jobpilot does not send candidate data to a hosted model. Re-upload your CV after restarting Jobpilot. To draft a cover letter, select a job, open **Create draft**, enter a specific interest and a true experience example, and select **Generate on this laptop**. Review every estimate and citation; models can be wrong.
-
-### If Jobpilot cannot see the model
-
-1. Make sure the Ollama app is open and still running.
-2. Run `ollama --version`; upgrade to Ollama 0.35 or newer to use local decision screening.
-3. Run `ollama ls` and confirm both selected model tags are installed. A chat model may not support `/v1/systemone`; select a decision model that Ollama documents for this endpoint. Refresh local AI status after installing models.
-4. If screening says the endpoint is unsupported, check the reported Ollama version and update Ollama. If it says the model is missing or unsupported, install/select another local decision model. A timeout may indicate model size or memory pressure; choose a smaller compatible model.
-5. If you changed Ollama's default local address or port, copy `.env.example` to `.env.local`, set `OLLAMA_BASE_URL` to Ollama's **local loopback** address, and restart Jobpilot. `OLLAMA_MODEL` can set the preferred detailed chat model and `OLLAMA_DECISION_MODEL` the preferred decision model; both can be changed in the UI. Jobpilot rejects remote Ollama addresses to keep candidate text on your laptop.
-
-No AI API key or hosted AI account is needed. Jobpilot sends extracted CV text to Ollama on this laptop for profile analysis and job matching. It does not send the CV file itself. For cover-letter drafting it sends job details, profile name and skills, and the notes you enter, but not the CV text. Job discovery still needs an internet connection. Model speed and output quality depend on your model and laptop hardware.
-
-## Search jobs
-
-Select **Search jobs now** in the overview. Jobpilot retrieves listings from public feeds and filters them against preferred locations. Common English/German aliases are normalized; location filtering remains based on the configured profile. The local decision model returns a 0–100 weighted screening estimate and confidence as separate values. Confidence is the mean of model-provided confidence values across the fit categories and information-status answer; when the model supplies none, confidence is shown as unavailable and the job is sent to detailed analysis. The score defaults to 40% skills, 30% experience, 20% domain, and 10% inverse explicit-disqualifier risk. Default routing sends scores of 65 or higher, confidence below 60, and any missing/unclear CV or job information to detailed analysis; these settings are editable. Detailed analysis shows matched requirements, gaps, and CV/job quotations only when the quoted spans occur in the submitted extracted CV/job text. Use score sorting and the minimum-score filter to navigate results. Low-score roles are never hidden by the matcher itself. Use progress controls to cancel. New pages are screened without repeating jobs already screened by the selected decision model and configuration. Mark results relevant/not relevant to inspect observed false positives and false negatives for that model, CV, and matching configuration. These are user-reviewed sample metrics; they are not a general accuracy claim or hiring probability. If Ollama or the decision endpoint is unavailable, Jobpilot shows an actionable error and leaves the listings available without AI scores; it does not fall back to hosted AI.
-
-Enter preferred locations explicitly in **Candidate profile**. Separate alternatives with semicolons, for example `Austria; Remote Europe`. Leave the field blank only if you want jobs from any location. CV addresses are not imported or used as preferences. A generic `Remote` label does not identify eligible countries; select `Remote` explicitly if you want all such postings.
-
-Use the keyword box to search role, company, location, and department text. The posting-age filter offers any date, the last 7 days, or the last 30 days; listings without a publication date are omitted when a date range is selected. Work-mode filtering uses the feed's mode and location text, so an employer's listing is the source of truth. Department choices come from the current results and appear only when a feed provides department information. **Show more jobs** displays 25 more entries from the current batch. **Load more jobs from Arbeitnow** fetches up to five subsequent provider pages; new listings are deduplicated and are compared with the CV locally when Ollama is ready.
-
-The app preserves each provider's job URL and displays source attribution. Remotive listings are delayed by 24 hours; its public API asks consumers to request data no more than four times per day, so the app caches that feed for six hours. Jobicy requests are cached for at least one hour per its polling guidance.
-
-## Back up or restore local data
-
-Open **Candidate profile** and use the **Data backup** controls. **Download backup** saves a versioned JSON file containing the profile, fetched listings, saved jobs, application statuses, notes, cover-letter drafts, and local match-review calibration data. **Restore backup** accepts a Jobpilot backup, validates it, and asks for confirmation before replacing the current local state. Keep backup files private: they contain profile data and are not encrypted.
-
-## Development checks
+Useful checks:
 
 ```bash
 npm run lint
@@ -140,8 +118,4 @@ npm test
 npm run build
 ```
 
-GitHub Actions runs these checks for pushes and pull requests.
-
-## Privacy and repository contents
-
-This repository contains no seeded job listings, employer boards, or personal candidate facts. The generic profile label is a UI default; all candidate preferences come from the user's profile. Public feed endpoint URLs are integration constants. Test fixtures use example values only to verify behavior. Do not commit a real CV, personal job-search profile, credentials, or `.env` files. Local state is stored outside the repository.
+GitHub Actions runs these checks on pushes and pull requests. Public feed endpoints and test fixtures are integration/test data; the repository contains no real CV or personal candidate profile. Do not commit CVs, personal job-search data, credentials, or `.env` files.
