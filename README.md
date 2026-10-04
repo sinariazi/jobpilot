@@ -48,7 +48,7 @@ Keep this terminal window open. When it says the server is ready, open [http://l
 2. Under **Analyze CV**, choose your CV file (PDF, DOCX, or TXT). For a scanned PDF, see [Scanned CVs](#scanned-cvs-optional).
 3. Review the CV summary, suggested job titles, and skills. Edit anything that is incorrect. Enter your preferred locations (for example, `Austria`) and click **Save profile**.
 4. In **Local AI status**, choose the Ollama chat model you installed. If available, choose a compatible decision model too. Jobpilot discovers models installed on your computer.
-5. Go back to the main page and click **Search jobs**. Wait for the feeds and local AI to finish. Select a result to read its details, evidence, and original job posting.
+5. After CV analysis, Jobpilot automatically searches the public feeds and screens eligible jobs with your selected local models. If you have not uploaded a CV, you can start a search from the main page. Select a result to read its details, evidence, and original job posting.
 
 ### Optional: fill basic employer form fields locally
 
