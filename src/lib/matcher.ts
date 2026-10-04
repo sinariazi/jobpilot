@@ -23,7 +23,18 @@ export function matchesTargetRole(job: Job, targetRoles: string) {
   const roles = targetRoles.split(/[,;\n|]+/).map(normalizeSkill).filter(Boolean);
   if (roles.length === 0) return false;
   const title = normalizeSkill(job.role);
-  return roles.some((role) => ` ${title} `.includes(` ${role} `) || ` ${role} `.includes(` ${title} `));
+  const titleTokens = new Set(title.split(" ").filter(Boolean));
+  return roles.some((role) => {
+    if (` ${title} `.includes(` ${role} `)) return true;
+    const roleTokens = [...new Set(role.split(" ").filter(Boolean))];
+    if (roleTokens.includes("manager") && titleTokens.has("management") && !titleTokens.has("manager")) return false;
+    const modifiers = new Set(["senior", "staff", "principal", "lead", "junior", "entry", "level", "intern", "manager", "management"]);
+    const candidate = roleTokens.filter((token) => !modifiers.has(token));
+    const overlap = candidate.filter((token) => titleTokens.has(token)).length;
+    const aligned = overlap > 0 && overlap / Math.max(candidate.length, roleTokens.length) >= 0.5;
+    const noContradictoryCore = !((roleTokens.includes("manager") && titleTokens.has("engineer")) || (roleTokens.includes("engineer") && titleTokens.has("manager")));
+    return candidate.length > 0 && aligned && noContradictoryCore;
+  });
 }
 
 export function isRelevantToProfile(job: Job, candidateSkills: string[], targetRoles: string) {
