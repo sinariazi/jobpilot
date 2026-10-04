@@ -32,6 +32,7 @@ export default function Home() {
   const [saved, setSaved] = useState<string[]>([]);
   const [status, setStatus] = useState<Record<string, ApplicationStatus>>({});
   const [applicationNotes, setApplicationNotes] = useState<Record<string, string>>({});
+  const [applicationFollowUps, setApplicationFollowUps] = useState<Record<string, string>>({});
   const [coverLetterDrafts, setCoverLetterDrafts] = useState<Record<string, CoverLetterDraftRecord>>({});
   const [profileOpen, setProfileOpen] = useState(false);
   const [activeView, setActiveView] = useState<"overview" | "applications">("overview");
@@ -105,6 +106,7 @@ export default function Home() {
                 saved: legacy.saved ?? [],
                 status: legacy.status ?? {},
                 applicationNotes: legacy.applicationNotes ?? {},
+                applicationFollowUps: legacy.applicationFollowUps ?? {},
                 liveJobs: [],
               }),
             });
@@ -119,6 +121,7 @@ export default function Home() {
         setSaved(restored.saved);
         setStatus(restored.status);
         setApplicationNotes(restored.applicationNotes ?? {});
+        setApplicationFollowUps(restored.applicationFollowUps ?? {});
         setCoverLetterDrafts(restored.coverLetterDrafts ?? {});
         setLiveJobs(restored.liveJobs ?? []);
         selectJob(restored.liveJobs?.[0]?.id ?? "");
@@ -176,7 +179,7 @@ export default function Home() {
   useEffect(() => {
     if (!stateLoaded) return;
     let cancelled = false;
-    const snapshot = { profile, saved, status, applicationNotes, coverLetterDrafts, liveJobs } satisfies PersistedState;
+    const snapshot = { profile, saved, status, applicationNotes, applicationFollowUps, coverLetterDrafts, liveJobs } satisfies PersistedState;
     const timeout = window.setTimeout(() => {
       setStorageMessage("Saving on this device…");
       saveQueue.current = saveQueue.current.catch(() => undefined).then(async () => {
@@ -199,7 +202,7 @@ export default function Home() {
       cancelled = true;
       window.clearTimeout(timeout);
     };
-  }, [profile, saved, status, applicationNotes, coverLetterDrafts, liveJobs, stateLoaded]);
+  }, [profile, saved, status, applicationNotes, applicationFollowUps, coverLetterDrafts, liveJobs, stateLoaded]);
 
   const locationMatchedJobs = useMemo(() => jobs.filter((job) => matchesPreferredLocation(job.location, profile.locations, job.mode, job.source)), [jobs, profile.locations]);
   const localCvAnalysisReady = Boolean(cvText.trim() && localAiModels.includes(selectedAiModel) && isLocalJobpilotPage());
@@ -227,12 +230,33 @@ export default function Home() {
   const matchedJobs = preferredJobs.filter((job) => scoreJob(job, candidateSkills).matched.length > 0).length;
   const reviewedCount = preferredJobs.filter((job) => status[job.id]).length;
   const applicationJobs = jobs.filter((job) => saved.includes(job.id) || status[job.id]);
+  const todayKey = (() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  })();
+  const followUpJobs = applicationJobs.filter((job) => Boolean(applicationFollowUps[job.id]));
+  const overdueFollowUps = followUpJobs.filter((job) => applicationFollowUps[job.id] < todayKey).length;
   const applicationGroups: Array<{ title: string; items: Job[] }> = [
     { title: "Needs review", items: applicationJobs.filter((job) => !status[job.id] || status[job.id] === "Needs review") },
     { title: "Approved to prepare", items: applicationJobs.filter((job) => status[job.id] === "Approved to prepare") },
     { title: "Applied", items: applicationJobs.filter((job) => status[job.id] === "Applied") },
     { title: "Rejected", items: applicationJobs.filter((job) => status[job.id] === "Rejected") },
   ];
+
+  function followUpLabel(date: string) {
+    if (date < todayKey) return "Overdue";
+    if (date === todayKey) return "Due today";
+    return `Due ${new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(`${date}T00:00:00`))}`;
+  }
+
+  function updateFollowUp(jobId: string, date: string) {
+    setApplicationFollowUps((current) => {
+      const next = { ...current };
+      if (date) next[jobId] = date;
+      else delete next[jobId];
+      return next;
+    });
+  }
   const emptyJobMessage = locationMatchedJobs.length === 0
     ? profile.locations.trim() ? `No fetched jobs match ${profile.locations}. Check your preferred locations or refresh the feeds.` : "No jobs are available in the current feeds. Try searching again later."
     : hasCurrentCvAssessment
@@ -327,7 +351,7 @@ export default function Home() {
   }
 
   function downloadBackup() {
-    const backup = createBackup({ profile, saved, status, applicationNotes, coverLetterDrafts, liveJobs });
+    const backup = createBackup({ profile, saved, status, applicationNotes, applicationFollowUps, coverLetterDrafts, liveJobs });
     const url = URL.createObjectURL(new Blob([backup], { type: "application/json" }));
     const link = document.createElement("a");
     link.href = url;
@@ -453,6 +477,7 @@ export default function Home() {
       setSaved(result.saved);
       setStatus(result.status);
       setApplicationNotes(result.applicationNotes ?? {});
+      setApplicationFollowUps(result.applicationFollowUps ?? {});
       setCoverLetterDrafts(result.coverLetterDrafts ?? {});
       setLiveJobs(result.liveJobs);
       selectJob(result.liveJobs[0]?.id ?? "");
@@ -583,9 +608,9 @@ export default function Home() {
           {activeView === "applications" ? (
             <>
               <div className="greeting-row"><div><div className="eyebrow">YOUR JOB SEARCH</div><h1>Applications <span>tracker.</span></h1><p className="subheading">Track saved roles and move each one through your review process.</p></div><button className="primary-button" onClick={() => setActiveView("overview")}>＋ Find jobs</button></div>
-              <div className="application-summary"><strong>{applicationJobs.length}</strong><span>roles in your tracker</span><span className="summary-divider"/><span>{applicationGroups.find((group) => group.title === "Applied")?.items.length ?? 0} applied</span><span>{saved.length} saved</span></div>
-              <div className="application-board">{applicationGroups.map((group) => <section className="application-column" key={group.title}><div className="application-column-heading"><h2>{group.title}</h2><span>{group.items.length}</span></div>{group.items.length ? group.items.map((job) => <article className="application-card" key={job.id}><div className="application-company"><div className={`company-logo logo-${job.source.toLowerCase()}`}>{job.company.slice(0, 1)}</div><div><strong>{job.company}</strong><span>{job.location}</span></div></div><h3>{job.role}</h3><details className="application-notes"><summary>{applicationNotes[job.id]?.trim() ? "Edit notes" : "Add a note"}</summary><label><span className="visually-hidden">Notes for {job.role} at {job.company}</span><textarea maxLength={2000} rows={3} value={applicationNotes[job.id] ?? ""} onChange={(event) => setApplicationNotes((current) => ({ ...current, [job.id]: event.target.value }))} placeholder="Interview details, next steps, or why you saved this role…"/></label></details><div className="application-card-footer"><span>{job.source}</span><select aria-label={`Update ${job.company} application status`} value={status[job.id] ?? "Needs review"} onChange={(event) => setStatus((current) => ({ ...current, [job.id]: event.target.value as ApplicationStatus }))}><option>Needs review</option><option>Approved to prepare</option><option>Applied</option><option>Rejected</option></select></div></article>) : <p className="application-empty">No roles here yet.</p>}</section>)}</div>
-              <p className="application-footnote">Status changes are saved on this device. “Applied” is a manual record; Jobpilot never submits applications.</p>
+              <div className="application-summary"><strong>{applicationJobs.length}</strong><span>roles in your tracker</span><span className="summary-divider"/><span>{applicationGroups.find((group) => group.title === "Applied")?.items.length ?? 0} applied</span><span>{saved.length} saved</span><span>{followUpJobs.length} follow-ups</span>{overdueFollowUps > 0 && <span className="follow-up-overdue-count">{overdueFollowUps} overdue</span>}</div>
+              <div className="application-board">{applicationGroups.map((group) => <section className="application-column" key={group.title}><div className="application-column-heading"><h2>{group.title}</h2><span>{group.items.length}</span></div>{group.items.length ? group.items.map((job) => <article className="application-card" key={job.id}><div className="application-company"><div className={`company-logo logo-${job.source.toLowerCase()}`}>{job.company.slice(0, 1)}</div><div><strong>{job.company}</strong><span>{job.location}</span></div></div><h3>{job.role}</h3><div className="follow-up-row"><label>Follow-up date<input type="date" aria-label={`Set follow-up date for ${job.company} — ${job.role}`} value={applicationFollowUps[job.id] ?? ""} onChange={(event) => updateFollowUp(job.id, event.target.value)}/></label>{applicationFollowUps[job.id] && <span className={`follow-up-badge ${applicationFollowUps[job.id] < todayKey ? "overdue" : applicationFollowUps[job.id] === todayKey ? "today" : "upcoming"}`}>{followUpLabel(applicationFollowUps[job.id])}</span>}</div><details className="application-notes"><summary>{applicationNotes[job.id]?.trim() ? "Edit notes" : "Add a note"}</summary><label><span className="visually-hidden">Notes for {job.role} at {job.company}</span><textarea maxLength={2000} rows={3} value={applicationNotes[job.id] ?? ""} onChange={(event) => setApplicationNotes((current) => ({ ...current, [job.id]: event.target.value }))} placeholder="Interview details, next steps, or why you saved this role…"/></label></details><div className="application-card-footer"><span>{job.source}</span><select aria-label={`Update ${job.company} application status`} value={status[job.id] ?? "Needs review"} onChange={(event) => setStatus((current) => ({ ...current, [job.id]: event.target.value as ApplicationStatus }))}><option>Needs review</option><option>Approved to prepare</option><option>Applied</option><option>Rejected</option></select></div></article>) : <p className="application-empty">No roles here yet.</p>}</section>)}</div>
+              <p className="application-footnote">Status changes, notes, and follow-up dates are saved on this device. Follow-up dates appear here as reminders; no notification is sent. “Applied” is a manual record; Jobpilot never submits applications.</p>
             </>
           ) : <>
           <div className="greeting-row"><div><div className="eyebrow">{new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric" }).format(new Date()).toUpperCase()}</div><h1>Your next opportunity <span>starts here.</span></h1><p className="subheading">A focused view of live roles that match your preferences.</p></div><button className="primary-button" onClick={fetchLiveJobs} disabled={loadingJobs}><span>＋</span> {loadingJobs ? "Searching feeds…" : "Search jobs"}</button></div>
