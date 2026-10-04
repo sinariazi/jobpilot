@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isRelevantToProfile, matchesTargetRole, scoreJob } from "./matcher";
+import { isRelevantToProfile, jobsForReview, matchesTargetRole, scoreJob } from "./matcher";
 import type { Job } from "./types";
 
 const role: Job = {
@@ -37,7 +37,6 @@ describe("matchesTargetRole", () => {
   });
 });
 
-
 describe("profile relevance filter", () => {
   it("keeps jobs that match an explicitly chosen target role", () => {
     expect(isRelevantToProfile({ ...role, role: "Senior Product Manager" }, [], "Product Manager")).toBe(true);
@@ -51,5 +50,10 @@ describe("profile relevance filter", () => {
 
   it("hides everything when no profile matching criteria are set", () => {
     expect(isRelevantToProfile(role, [], "")).toBe(false);
+  });
+
+  it("keeps all location-filtered jobs reviewable after CV assessment, including low AI matches", () => {
+    const assessed = [{ ...role, aiMatch: { model: "local", relevant: false, score: 18, reason: "Few overlapping requirements", cvEvidence: "TypeScript experience" } }];
+    expect(jobsForReview(assessed, true, [], "")).toEqual(assessed);
   });
 });
