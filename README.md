@@ -132,7 +132,7 @@ flowchart TB
     browser --> app["Local Jobpilot server: Next.js UI and API"]
     app -->|"Public listing requests"| feeds["Job feeds: Arbeitnow, Remotive, Jobicy"]
     feeds -->|"Listings"| app
-    app -->|"Loopback only: CV text and job descriptions"| ollama["Ollama on this computer<br/>decision model and chat model"]
+    app -->|"Loopback only: CV text and job descriptions"| ollama["Ollama: decision and chat models on this computer"]
     ollama -->|"Scores and analysis"| app
     app -->|"Profile, jobs, scores, drafts"| state["Local JSON state file"]
     app --> browser
@@ -152,7 +152,7 @@ flowchart TB
     screen --> route{"Score threshold, low confidence, or unclear information?"}
     route -->|"Yes"| detailed["Local chat model checks requirements, gaps, and evidence"]
     route -->|"No"| estimate["Keep first-stage estimate"]
-    detailed --> results["Show score, confidence, breakdown,<br/>analysis, and original posting"]
+    detailed --> results["Show score, confidence, breakdown, analysis, and original posting"]
     estimate --> results
     results --> human["Candidate reviews and decides whether to apply"]
 ```
