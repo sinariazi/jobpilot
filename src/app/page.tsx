@@ -9,11 +9,11 @@ import { matchesDepartment, matchesPostedWithin, matchesWorkMode, type PostedWit
 import type { CvSuggestions } from "@/lib/cv-parser";
 import { createBackup, parseBackup } from "@/lib/backup";
 import { createCoverLetterDraft } from "@/lib/cover-letter";
+import { jobsToAssess } from "@/lib/job-assessment";
 import { calibratedFitScore, createMatchCohortKey, MAX_MATCH_REVIEWS, MIN_MATCH_REVIEWS_FOR_CALIBRATION, MIN_MATCH_REVIEWS_PER_BAND, summarizeMatchReviews } from "@/lib/match-calibration";
 
 const LEGACY_STORAGE_KEY = "jobpilot-local-v1";
 const MAX_BACKUP_BYTES = 23_000_000;
-const MAX_AI_MATCH_CANDIDATES = 60;
 const AI_MATCH_BATCH_SIZE = 2;
 const MAX_CV_MATCH_CHARS = 10_000;
 
@@ -66,6 +66,7 @@ export default function Home() {
   const [storageMessage, setStorageMessage] = useState("Loading saved data from this device…");
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
   const aiMatchAbortController = useRef<AbortController | null>(null);
+  const aiMatchGeneration = useRef(0);
   const backupInput = useRef<HTMLInputElement>(null);
   const [sourceMessage, setSourceMessage] = useState("");
   const [sourceErrors, setSourceErrors] = useState<string[]>([]);
@@ -105,7 +106,15 @@ export default function Home() {
     setCoverLetterMessage("");
   }
 
+  function invalidateAiAssessment() {
+    aiMatchGeneration.current += 1;
+    aiMatchAbortController.current?.abort();
+    aiMatchAbortController.current = null;
+    setAiMatchProgress(null);
+  }
+
   function chooseLocalAiModel(model: string) {
+    invalidateAiAssessment();
     setSelectedAiModel(model);
     setCvAnalyzedModel("");
     setLiveJobs((current) => current.map((job) => ({ ...job, aiMatch: undefined })));
@@ -332,6 +341,9 @@ export default function Home() {
     const file = event.currentTarget.files?.[0];
     event.currentTarget.value = "";
     if (!file) return;
+    invalidateAiAssessment();
+    setCvAnalyzedModel("");
+    setLiveJobs((current) => current.map((job) => ({ ...job, aiMatch: undefined })));
     if (cvPreviewUrl) URL.revokeObjectURL(cvPreviewUrl);
     setCvPreviewUrl(file.name.toLocaleLowerCase().endsWith(".pdf") ? URL.createObjectURL(file) : "");
     setCvParsing(true);
@@ -559,6 +571,8 @@ export default function Home() {
   }
 
   async function fetchLiveJobs() {
+    if (loadingJobs || loadingMoreJobs) return;
+    const searchGeneration = aiMatchGeneration.current;
     setLoadingJobs(true);
     setCvAnalyzedModel("");
     setSourceMessage("");
@@ -576,10 +590,11 @@ export default function Home() {
       fetchedForFallback = fetchedJobs;
       setLiveJobs(fetchedJobs);
       const locationJobs = fetchedJobs.filter((job) => matchesPreferredLocation(job.location, profile.locations, job.mode, job.source));
+      const assessWithCurrentContext = localCvAnalysisReady && searchGeneration === aiMatchGeneration.current;
       let analyzedJobs = fetchedJobs;
       let aiAnalyzedCount = 0;
       let matchingWarning = "";
-      if (localCvAnalysisReady) {
+      if (assessWithCurrentContext) {
         const lexicalPriority = [...locationJobs].sort((a, b) => {
           const aRole = Number(matchesTargetRole(a, profile.roles));
           const bRole = Number(matchesTargetRole(b, profile.roles));
@@ -587,11 +602,8 @@ export default function Home() {
           const bFit = scoreJob(b, candidateSkills);
           return bRole - aRole || bFit.titleMatched.length - aFit.titleMatched.length || bFit.matched.length - aFit.matched.length;
         });
-        const priorityIds = new Set(lexicalPriority.slice(0, Math.ceil(MAX_AI_MATCH_CANDIDATES / 2)).map((job) => job.id));
-        const candidates = [
-          ...lexicalPriority.slice(0, Math.ceil(MAX_AI_MATCH_CANDIDATES / 2)),
-          ...locationJobs.filter((job) => !priorityIds.has(job.id)).slice(0, Math.floor(MAX_AI_MATCH_CANDIDATES / 2)),
-        ];
+        const candidates = jobsToAssess(lexicalPriority);
+        const assessmentGeneration = ++aiMatchGeneration.current;
         const abortController = new AbortController();
         aiMatchAbortController.current = abortController;
         setAiMatchProgress({ completed: 0, total: candidates.length });
@@ -622,6 +634,7 @@ export default function Home() {
               })),
             }),
             });
+            if (assessmentGeneration !== aiMatchGeneration.current) break;
             const matchResult = await matchResponse.json() as { matches?: Array<{ id: string; relevant: boolean; score: number; reason: string; cvEvidence: string }>; error?: string };
             if (!matchResponse.ok) throw new Error(matchResult.error ?? "Local CV matching failed.");
             let validatedMatches = 0;
@@ -644,6 +657,7 @@ export default function Home() {
             break;
           }
         }
+        if (assessmentGeneration !== aiMatchGeneration.current) return;
         aiMatchAbortController.current = null;
         setAiMatchProgress(null);
         analyzedJobs = fetchedJobs.map((job) => ({ ...job, ...(matchesById.has(job.id) ? { aiMatch: matchesById.get(job.id) } : { aiMatch: undefined }) }));
@@ -651,10 +665,12 @@ export default function Home() {
       }
       setLiveJobs(analyzedJobs);
       const matchingJobs = analyzedJobs.filter((job) => matchesPreferredLocation(job.location, profile.locations, job.mode, job.source)
-        && (job.aiMatch ? job.aiMatch.relevant : !localCvAnalysisReady && isRelevantToProfile(job, candidateSkills, profile.roles)));
+        && (job.aiMatch ? job.aiMatch.relevant : !assessWithCurrentContext && isRelevantToProfile(job, candidateSkills, profile.roles)));
       setSourceMessage(result.jobs?.length
-        ? localCvAnalysisReady
-          ? `Local Ollama compared your CV with ${aiAnalyzedCount} of ${Math.min(locationJobs.length, MAX_AI_MATCH_CANDIDATES)} selected listings. ${matchingJobs.length} were judged potential matches. ${assessmentCancelled ? `You stopped the assessment after ${assessmentCompleted} of ${Math.min(locationJobs.length, MAX_AI_MATCH_CANDIDATES)} jobs; remaining listings are still available without AI assessment.` : matchingWarning ? `Some matches remain unassessed: ${matchingWarning}` : locationJobs.length > MAX_AI_MATCH_CANDIDATES ? `${locationJobs.length - MAX_AI_MATCH_CANDIDATES} more listings remain unassessed.` : ""} Scores and explanations are estimates; check the original postings.`
+        ? assessWithCurrentContext
+          ? `Local Ollama compared your CV with ${aiAnalyzedCount} of ${locationJobs.length} location-eligible listings. ${matchingJobs.length} were judged potential matches. ${assessmentCancelled ? `You stopped the assessment after ${assessmentCompleted} jobs; other fetched listings remain available without AI assessment.` : matchingWarning ? `Some matches remain unassessed: ${matchingWarning}` : ""} Scores and explanations are estimates; check the original postings.`
+          : localCvAnalysisReady && searchGeneration !== aiMatchGeneration.current
+            ? "Listings loaded. Your CV or model changed during the search, so no outdated AI assessment was applied. Search again to assess with the current CV and model."
           : cvText.trim() && !isLocalJobpilotPage()
             ? `CV analysis is blocked here for privacy. Open Jobpilot from localhost on this laptop; no CV text was sent. Showing exact profile matches only.`
             : cvText.trim()
@@ -681,12 +697,14 @@ export default function Home() {
   }
 
   async function fetchMoreJobs() {
-    if (!nextArbeitnowPage || loadingMoreJobs) return;
+    if (!nextArbeitnowPage || loadingMoreJobs || loadingJobs) return;
+    const searchGeneration = aiMatchGeneration.current;
     setLoadingMoreJobs(true);
     setSourceMessage("");
     let fetchedMore: Job[] = [];
     let assessmentCancelled = false;
     let assessmentCompleted = 0;
+    let assessmentTotal = 0;
     try {
       const response = await fetch(`/api/jobs/search?arbeitnowStartPage=${nextArbeitnowPage}`, { cache: "no-store" });
       const result = await response.json() as { jobs?: Job[]; errors?: string[]; error?: string; nextArbeitnowPage?: number | null };
@@ -701,19 +719,22 @@ export default function Home() {
       });
       let analyzedJobs = fetchedJobs;
       let matchingWarning = "";
-      if (localCvAnalysisReady && selectedAiModel && fetchedJobs.length) {
-        const candidates = fetchedJobs.filter((job) => matchesPreferredLocation(job.location, profile.locations, job.mode, job.source));
-        const assessmentTotal = Math.min(candidates.length, MAX_AI_MATCH_CANDIDATES);
+      const assessWithCurrentContext = localCvAnalysisReady && selectedAiModel && searchGeneration === aiMatchGeneration.current;
+      if (assessWithCurrentContext && fetchedJobs.length) {
+        const previouslyAssessed = liveJobs.filter((job) => job.aiMatch?.model === selectedAiModel).map((job) => job.sourceUrl ?? job.id);
+        const candidates = jobsToAssess(fetchedJobs.filter((job) => matchesPreferredLocation(job.location, profile.locations, job.mode, job.source)), previouslyAssessed);
+        assessmentTotal = candidates.length;
+        const assessmentGeneration = ++aiMatchGeneration.current;
         const abortController = new AbortController();
         aiMatchAbortController.current = abortController;
         setAiMatchProgress({ completed: 0, total: assessmentTotal });
         const matchesById = new Map<string, NonNullable<Job["aiMatch"]>>();
-        for (let offset = 0; offset < Math.min(candidates.length, MAX_AI_MATCH_CANDIDATES); offset += AI_MATCH_BATCH_SIZE) {
+        for (let offset = 0; offset < candidates.length; offset += AI_MATCH_BATCH_SIZE) {
           if (abortController.signal.aborted) {
             assessmentCancelled = true;
             break;
           }
-          const batch = candidates.slice(offset, Math.min(offset + AI_MATCH_BATCH_SIZE, MAX_AI_MATCH_CANDIDATES));
+          const batch = candidates.slice(offset, offset + AI_MATCH_BATCH_SIZE);
           setSourceMessage(`Local AI is comparing your CV with ${Math.min(offset + batch.length, assessmentTotal)} of ${assessmentTotal} new location-eligible listings…`);
           try {
             const matchResponse = await fetch("/api/jobs/match", {
@@ -722,6 +743,7 @@ export default function Home() {
             signal: abortController.signal,
             body: JSON.stringify({ model: selectedAiModel, cvText: createCvMatchContext(cvText, cvSuggestions), jobs: batch.map((job) => ({ id: job.id, company: job.company, role: job.role, location: job.location, mode: job.mode, description: (job.description ?? job.summary).slice(0, 1_500) })) }),
             });
+            if (assessmentGeneration !== aiMatchGeneration.current) break;
             const matchResult = await matchResponse.json() as { matches?: Array<{ id: string; relevant: boolean; score: number; reason: string; cvEvidence: string }>; error?: string };
             if (!matchResponse.ok) throw new Error(matchResult.error ?? "Local CV matching failed.");
             for (const match of matchResult.matches ?? []) {
@@ -741,13 +763,14 @@ export default function Home() {
             break;
           }
         }
+        if (assessmentGeneration !== aiMatchGeneration.current) return;
         aiMatchAbortController.current = null;
         setAiMatchProgress(null);
         analyzedJobs = fetchedJobs.map((job) => ({ ...job, ...(matchesById.has(job.id) ? { aiMatch: matchesById.get(job.id) } : {}) }));
         setCvAnalyzedModel(selectedAiModel);
       }
       setLiveJobs((current) => current.map((job) => analyzedJobs.find((item) => item.id === job.id) ?? job));
-      setSourceMessage(`Loaded ${fetchedJobs.length} more listings from Arbeitnow. ${assessmentCancelled ? `You stopped AI assessment after ${assessmentCompleted} of the new location-eligible jobs; all fetched listings remain available for review.` : matchingWarning ? `Some remain unassessed: ${matchingWarning}` : ""} ${result.nextArbeitnowPage ? "More feed pages are available." : "No further Arbeitnow pages were reported."}`);
+      setSourceMessage(`Loaded ${fetchedJobs.length} more listings from Arbeitnow. ${assessmentCancelled ? `You stopped AI assessment after ${assessmentCompleted} of ${assessmentTotal} new location-eligible jobs; all fetched listings remain available for review.` : matchingWarning ? `Some remain unassessed: ${matchingWarning}` : assessmentTotal ? `AI assessed all ${assessmentTotal} new location-eligible jobs.` : localCvAnalysisReady && searchGeneration !== aiMatchGeneration.current ? "Your CV or model changed during loading; search again to assess with the current settings." : ""} ${result.nextArbeitnowPage ? "More feed pages are available." : "No further Arbeitnow pages were reported."}`);
     } catch (error) {
       if (fetchedMore.length) {
         setLiveJobs((current) => {
@@ -793,7 +816,7 @@ export default function Home() {
               <p className="application-footnote">Status changes, notes, and follow-up dates are saved on this device. Follow-up dates appear here as reminders; no notification is sent. “Applied” is a manual record; Jobpilot never submits applications.</p>
             </>
           ) : <>
-          <div className="greeting-row"><div><div className="eyebrow">{new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric" }).format(new Date()).toUpperCase()}</div><h1>Your next opportunity <span>starts here.</span></h1><p className="subheading">A focused view of live roles that match your preferences.</p></div><button className="primary-button" onClick={fetchLiveJobs} disabled={loadingJobs}><span>＋</span> {loadingJobs ? "Searching feeds…" : "Search jobs"}</button></div>
+          <div className="greeting-row"><div><div className="eyebrow">{new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric" }).format(new Date()).toUpperCase()}</div><h1>Your next opportunity <span>starts here.</span></h1><p className="subheading">A focused view of live roles that match your preferences.</p></div><button className="primary-button" onClick={fetchLiveJobs} disabled={loadingJobs || loadingMoreJobs}><span>＋</span> {loadingJobs ? "Searching feeds…" : "Search jobs"}</button></div>
 
           <section className="source-panel search-panel">
             <div>
@@ -802,7 +825,7 @@ export default function Home() {
               <p>Jobpilot searches public feeds automatically. Import your CV and select a local Ollama model to analyze role fit on this laptop. No company names or board links are needed.</p>
             </div>
             <div className="source-controls">
-              <button className="primary-button" disabled={loadingJobs} onClick={fetchLiveJobs}>{loadingJobs ? "Searching job feeds…" : liveJobs.length ? "↻ Search for new jobs" : "Search jobs now"}</button>
+              <button className="primary-button" disabled={loadingJobs || loadingMoreJobs} onClick={fetchLiveJobs}>{loadingJobs ? "Searching job feeds…" : loadingMoreJobs ? "Loading more jobs…" : liveJobs.length ? "↻ Search for new jobs" : "Search jobs now"}</button>
               <span className="feed-summary">Europe listings plus remote roles · Profile stays on this device</span>
             </div>
             <p className="directory-credit">Sources: <a href="https://www.arbeitnow.com/" target="_blank" rel="noreferrer">Arbeitnow</a>, <a href="https://remotive.com/remote-jobs/api" target="_blank" rel="noreferrer">Remotive</a>, and <a href="https://jobicy.com/jobs-rss-feed" target="_blank" rel="noreferrer">Jobicy</a>. Feed coverage varies; it does not include every employer.</p>
