@@ -73,7 +73,7 @@ export async function POST(request: Request) {
   if (!input) return Response.json({ error: "Provide readable CV text, one to twelve complete job listings, and an installed model." }, { status: 400 });
 
   try {
-    const tags = await fetch(`${baseUrl}/api/tags`, { cache: "no-store", signal: AbortSignal.timeout(2_000) });
+    const tags = await fetch(`${baseUrl}/api/tags`, { cache: "no-store", signal: AbortSignal.any([request.signal, AbortSignal.timeout(2_000)]) });
     if (!tags.ok) return Response.json({ error: "Ollama is not reachable. Start it on this laptop and try again." }, { status: 503 });
     const installedPayload: unknown = await tags.json();
     if (!isRecord(installedPayload) || !Array.isArray(installedPayload.models)
@@ -85,7 +85,7 @@ export async function POST(request: Request) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       cache: "no-store",
-      signal: AbortSignal.timeout(180_000),
+      signal: AbortSignal.any([request.signal, AbortSignal.timeout(180_000)]),
       body: JSON.stringify({
         model: input.model,
         stream: false,
@@ -136,6 +136,7 @@ export async function POST(request: Request) {
     }
     return Response.json({ matches }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    if (request.signal.aborted) return Response.json({ error: "Local CV matching was cancelled." }, { status: 499 });
     const timedOut = error instanceof Error && error.name === "TimeoutError";
     return Response.json({ error: timedOut ? "Local job matching took too long. Try a smaller Ollama model or fewer jobs." : "Could not connect to the local Ollama service for CV matching." }, { status: 503 });
   }
