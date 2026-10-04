@@ -39,4 +39,23 @@ describe("searchPublicJobs", () => {
     expect(result.jobs).toEqual([]);
     expect(result.errors).toEqual(["Remotive is temporarily unavailable."]);
   });
+
+  it("loads only the requested subsequent Arbeitnow batch and reports the next page", async () => {
+    const requests: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      requests.push(url);
+      const page = Number(new URL(url).searchParams.get("page"));
+      return Response.json({
+        data: [{ slug: `role-${page}`, company_name: "Example", title: "Engineer", url: `https://employer.example/jobs/${page}` }],
+        links: page === 10 ? { next: null } : { next: `https://www.arbeitnow.com/api/job-board-api?page=${page + 1}` },
+      });
+    }));
+
+    const result = await searchPublicJobs({ arbeitnowStartPage: 6 });
+    expect(requests.map((url) => Number(new URL(url).searchParams.get("page")))).toEqual([6, 7, 8, 9, 10]);
+    expect(requests.every((url) => url.includes("arbeitnow"))).toBe(true);
+    expect(result.jobs).toHaveLength(5);
+    expect(result.nextArbeitnowPage).toBe(11);
+  });
 });
