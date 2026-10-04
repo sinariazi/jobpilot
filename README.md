@@ -2,15 +2,16 @@
 
 A local-first job-search assistant built with Next.js and TypeScript. It searches multiple public job feeds automatically, filters listings against the candidate's preferred locations and profile evidence, and explains which target roles and skills matched.
 
-> **Current scope:** Jobpilot is an early-stage, local-first job-search and application-preparation agent. It searches public feeds from Arbeitnow (Europe-wide), Remotive (remote), and Jobicy (Europe remote), but does not cover every employer or vacancy. Matching is deterministic. When Ollama is running on the same laptop, Jobpilot can use an installed local model to draft a cover letter; candidate text stays on the laptop. CV import currently extracts role and skill suggestions only. Jobpilot does not yet tailor CVs or submit applications.
+> **Current scope:** Jobpilot is an early-stage, local-first job-search and application-preparation agent. It searches public feeds from Arbeitnow (Europe-wide), Remotive (remote), and Jobicy (Europe remote), but does not cover every employer or vacancy. With a CV loaded and Ollama running locally, the selected model assesses job fit and gives evidence-based explanations. CV text is processed only by Ollama on this laptop. Jobpilot does not yet tailor CVs or submit applications.
 
 ## Working now
 
 - Searches three broad public job feeds automatically; no company names, board slugs, or employer setup are required. Each listing links to its provider or original listing, with visible source attribution.
 - Filters listings using locations in the editable candidate profile. An empty location means any location; an unqualified “Remote” listing is not assumed to be available in a specific country.
 - Filters loaded listings by keywords, posting age, work mode, and department when those feed details are available. Results appear in batches of 25; **Show more** reveals additional jobs already fetched.
-- Hides listings without a profile relevance signal: a target-role match, a profile skill in the title, or at least one (for profiles with one or two skills) / two (for larger profiles) skills in the title or description. The UI marks title evidence; the percentage is a text overlap indicator, not a probability of getting the job.
-- Imports text-based PDF, DOCX, and TXT CVs in the browser and proposes past role titles and skills for review. The CV file and extracted full text are not uploaded or saved; only fields the user accepts and then saves are written to the local profile.
+- Imports text-based PDF, DOCX, and TXT CVs in the browser and proposes past role titles and skills for review. The selected file and full text are not saved. Accepted profile suggestions are stored locally.
+- When a CV and local Ollama model are available, semantically assesses up to 60 location-eligible jobs per search in small batches. Results include a relevance decision, fit estimate, and the CV evidence behind the match; no CV text is stored.
+- Without local AI matching, hides listings without an exact profile signal: a target-role match, a profile skill in the title, or at least one (for profiles with one or two skills) / two (for larger profiles) skills in the title or description. Keyword percentages are text overlap indicators, not probabilities of getting a job.
 - Caches the Remotive feed for six hours in keeping with its published request guidance, the Jobicy feed for at least one hour in keeping with its polling guidance, and Arbeitnow feeds for 30 minutes.
 - Saves live listings, saved jobs, application statuses, per-job notes, and editable cover-letter drafts to local JSON storage.
 - Exports and restores a versioned JSON backup of the local profile, listings, saved jobs, application statuses, notes, and cover-letter drafts; restores are validated and require confirmation.
@@ -22,7 +23,8 @@ A local-first job-search assistant built with Next.js and TypeScript. It searche
 
 ## TODO
 
-- Add local-model semantic CV-to-job matching. Current filtering is deterministic exact-phrase matching, so related wording and equivalent job titles can be missed; it does not send the CV to Ollama.
+- Expand AI assessment beyond the first 60 location-eligible jobs and add progress/cancellation controls for larger searches.
+- Calibrate local-model fit estimates and evaluate false-positive/false-negative rates against reviewed matches; model explanations are estimates and can be wrong.
 - Improve location normalization for city/country aliases and location formats used by job feeds. Ambiguous remote listings are excluded for country-specific preferences unless a compatible region is stated or known from the feed query.
 - Add a licensed, broad-coverage job search provider to find roles beyond the current public feeds and geographies; public feeds do not contain every employer or vacancy.
 - Add more job-source adapters after checking each provider's API and display/attribution terms.
@@ -61,7 +63,7 @@ Open <http://localhost:3000>.
 
 The app stores data in `~/.jobpilot/state.json` (the current user's home directory). You can change the folder with `JOBPILOT_DATA_DIR`. Keep the app bound to `localhost`; don't expose it on your network.
 
-**Privacy:** CV parsing runs in the browser. The selected file and extracted full text are held in memory for parsing and are not uploaded or saved. If you accept suggestions and save the profile, those role and skill fields are written to the local JSON state file, which is not encrypted. Cover-letter source notes and drafts are also stored locally and in downloaded backups, which are unencrypted JSON. Jobpilot sends no candidate data to job-feed providers. For AI cover-letter drafting, job details, profile name and skills, and entered interest/evidence notes are sent to Ollama on the same laptop. The CV file and full extracted text are not sent to the model. The old browser-local profile is moved to the local file on first launch and removed from browser storage after that succeeds.
+**Privacy:** CV parsing runs in the browser. The selected CV file is never sent to Ollama or saved. When you choose to search with a local model, extracted CV text is sent from the browser to the local Jobpilot app and then to Ollama at a loopback address on the same laptop; it remains in memory and is not written to the local state file. If you accept CV suggestions and save the profile, those role and skill fields are written to the local JSON state file, which is not encrypted. AI match explanations and scores are saved with local job listings, but the CV itself is not. Cover-letter notes and drafts are also stored locally and in unencrypted JSON backups. Jobpilot sends no candidate data to job-feed providers. For AI cover-letter drafting, job details, profile name and skills, and entered interest/evidence notes are sent to local Ollama; full CV text is not included in a cover-letter request. Keep Jobpilot bound to localhost.
 
 ## Local AI setup
 
@@ -93,7 +95,7 @@ In the Jobpilot project folder, start the app if it is not already running:
 npm run dev
 ```
 
-Open <http://localhost:3000>, search for jobs, select one, and open **Create draft** in the job details. Choose the installed model from **Local AI model**, enter your interest and a true example from your experience, then select **Generate on this laptop**. Jobpilot saves the draft locally; review it before using it.
+Open <http://localhost:3000> and choose the installed model in the **Local AI status** panel. Open **Candidate profile → Import from CV** and select a text-based CV. Review any role and skill suggestions; the full CV text stays in memory. Return to the overview and select **Search jobs now**. Jobpilot sends the extracted text only to local Ollama and compares it with up to 60 location-eligible listings. Re-upload your CV after restarting Jobpilot. To draft a cover letter, select a job, open **Create draft**, enter a specific interest and a true experience example, and select **Generate on this laptop**. Review every result; the model's fit assessment can be wrong.
 
 ### If Jobpilot cannot see the model
 
@@ -106,7 +108,7 @@ No AI API key or hosted AI account is needed. Jobpilot sends the selected job de
 
 ## Search jobs
 
-Select **Search jobs now** in the overview. Jobpilot retrieves listings from public feeds and filters them against preferred locations and saved profile evidence. Jobs must match a target role, a profile skill in the title, or the minimum skill overlap before they appear. Matching uses exact normalized phrases; semantic similarity is not implemented yet. The displayed percentage is the share of profile skills found in the posting text, not an estimate of hiring chances.
+Select **Search jobs now** in the overview. Jobpilot retrieves listings from public feeds and filters them against preferred locations. If you imported a CV and selected an installed Ollama model, Jobpilot compares the CV text with up to 60 location-eligible postings locally, in batches, and shows the model's relevance decision, estimated fit, and supporting CV evidence. If the model is unavailable, Jobpilot falls back to exact target-role and skill phrase matching. AI scores are estimates, not hiring probabilities; review each posting yourself.
 
 Enter preferred locations explicitly in **Candidate profile**. Separate alternatives with semicolons, for example `Austria; Remote Europe`. Leave the field blank only if you want jobs from any location. CV addresses are not imported or used as preferences. A generic `Remote` label does not identify eligible countries; select `Remote` explicitly if you want all such postings.
 
