@@ -7,7 +7,7 @@ A local-first job-search assistant built with Next.js and TypeScript. It searche
 ## Working now
 
 - Searches three broad public job feeds automatically; no company names, board slugs, or employer setup are required. Each listing links to its provider or original listing, with visible source attribution.
-- Filters listings using locations in the editable candidate profile. An empty location means any location; an unqualified “Remote” listing is not assumed to be available in a specific country.
+- Filters listings using locations in the editable candidate profile. Common English/German aliases for Vienna, Graz, Linz, Salzburg, Innsbruck, Klagenfurt, Bregenz, St. Pölten, Munich, Cologne, Zurich, Geneva, and Prague are normalized; some city-only listings can match their country. An empty location means any location; an unqualified “Remote” listing is not assumed to be available in a specific country.
 - Filters loaded listings by keywords, posting age, work mode, and department when those feed details are available; sorts by best match, newest, or company name. Without a successful CV assessment, “best match” prioritizes target-role matches and exact skill evidence. The fallback percentage measures skill overlap only, not overall fit. Results appear in batches of 25; **Show more** reveals additional jobs already fetched.
 - Imports text-based PDF, DOCX, and TXT CVs in the browser. When local Ollama is available, it analyzes the CV, shows an in-app preview for PDFs, extracted text, summary, and evidence, and automatically fills and saves target roles and skills in the local profile. Name and preferred location are not inferred. The selected file and full text remain in memory and are not saved.
 - When a CV and local Ollama model are available, semantically assesses up to 60 location-eligible jobs per search in batches of four, using at most the first 30,000 CV text characters for responsiveness. Results include a relevance decision, fit estimate, and the CV evidence behind the match; no CV text is stored.
@@ -26,17 +26,17 @@ A local-first job-search assistant built with Next.js and TypeScript. It searche
 - Expand AI assessment beyond the first 60 location-eligible jobs and add progress/cancellation controls for larger searches.
 - Improve inference resilience and latency for slower local models; small batches and a 30,000-character CV limit reduce context pressure, but model speed varies by laptop.
 - Calibrate local-model fit estimates and evaluate false-positive/false-negative rates against reviewed matches; model explanations are estimates and can be wrong.
-- Expand the initial location alias map. It currently covers common English/German names for several cities and maps some city-only listings to their country; other languages, city/country relationships, and inconsistent feed formats still need coverage. Ambiguous remote listings are excluded for country-specific preferences unless a compatible region is stated or known from the feed query.
+- Extend location normalization beyond the current limited English/German alias set. Other languages, city/country relationships, and inconsistent feed formats still need coverage. Ambiguous remote listings are excluded for country-specific preferences unless a compatible region is stated or known from the feed query.
 - Add a licensed, broad-coverage job search provider to find roles beyond the current public feeds and geographies; public feeds do not contain every employer or vacancy.
 - Add more job-source adapters after checking each provider's API and display/attribution terms.
-- Add provider-side pagination so searches can retrieve more than each feed's current fetched batch; “Show more” currently reveals jobs already retrieved.
+- Extend provider pagination beyond current request limits: searches currently fetch five Arbeitnow pages, one Remotive response, and up to 100 Jobicy listings. “Show more” only reveals jobs already retrieved.
 - Add OCR for scanned/image-only CVs; current parsing requires selectable text.
-- Improve layout-aware parsing for multi-column CVs and more heading formats; extraction is heuristic and suggestions require user review.
+- Improve parsing of multi-column CVs and varied section layouts. Text extraction can reorder or omit content; review the role and skill fields produced by the CV analysis.
 - Encrypt local profile and tracker data, which can include sensitive details accepted from a CV.
 - Tailor and export the candidate's CV using verified CV source material; current analysis extracts profile evidence but does not generate tailored CV files.
 - Add application-form preparation and employer-specific ATS integrations. Jobpilot currently opens the original posting but does not fill or submit external forms.
 - Improve AI drafting with editable user preferences, structured outputs, and stronger source-to-claim verification; AI drafting currently creates cover-letter text only.
-- Add accessibility and responsive-layout review across supported browsers and screen sizes.
+- Formally review accessibility and the existing responsive layout across supported browsers and screen sizes; responsive breakpoints exist, but this review has not been completed.
 - Add automated end-to-end tests for the main job search, details, profile, and tracking workflows.
 - Add optional follow-up dates and reminders to the application tracker.
 
