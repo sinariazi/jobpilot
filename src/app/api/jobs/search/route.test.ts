@@ -21,6 +21,7 @@ describe("public job search pagination API", () => {
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
       requests.push(url);
+      if (url.includes("get=locations")) return Response.json({ locations: [{ geoName: "Austria", geoSlug: "austria" }, { geoName: "Europe", geoSlug: "europe" }] });
       return Response.json({ jobs: [{ id: 120, url: "https://jobicy.com/jobs/next", jobTitle: "Next role", companyName: "Example" }], nextCursor: null, hasMore: false });
     }));
 
@@ -30,9 +31,10 @@ describe("public job search pagination API", () => {
     expect(response.status).toBe(200);
     expect(result.jobs).toHaveLength(1);
     expect(result.nextJobicyCursor).toBeNull();
-    expect(requests).toHaveLength(1);
-    expect(new URL(requests[0]).searchParams.get("cursor")).toBe(cursor);
-    expect(new URL(requests[0]).searchParams.get("geo")).toBe("europe");
+    expect(requests).toHaveLength(2);
+    const feed = requests.find((url) => !url.includes("get=locations"))!;
+    expect(new URL(feed).searchParams.get("cursor")).toBe(cursor);
+    expect(new URL(feed).searchParams.get("geo")).toBe("europe");
   });
 
 });
