@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { matchesPreferredLocation } from "./locations";
+import { matchesPreferredLocation, resolveProviderGeographies } from "./locations";
 
 describe("preferred job locations", () => {
+  it("maps user preferences to the current public provider taxonomy", () => {
+    const available = [{ name: "Austria", slug: "austria" }, { name: "Europe", slug: "europe" }, { name: "Anywhere", slug: "anywhere" }];
+    expect(resolveProviderGeographies("Austria", available).geographies).toEqual([{ name: "Austria", slug: "austria" }]);
+    expect(resolveProviderGeographies("Remote Europe", available).geographies).toEqual([{ name: "Europe", slug: "europe" }]);
+  });
+
   it("matches all words in a preferred location and supports several preferences", () => {
     expect(matchesPreferredLocation("Vienna, Austria", "Austria")).toBe(true);
     expect(matchesPreferredLocation("Remote — Europe", "Austria; Remote Europe")).toBe(true);
@@ -25,6 +31,10 @@ describe("preferred job locations", () => {
     expect(matchesPreferredLocation("Europe", "Vienna, Austria; Remote Europe", "Remote", "Jobicy")).toBe(true);
     expect(matchesPreferredLocation("Vienna, Austria", "Vienna, Austria; Remote Europe", "Remote", "Arbeitnow")).toBe(true);
     expect(matchesPreferredLocation("Remote", "Vienna, Austria; Remote Europe", "Remote", "Remotive")).toBe(false);
+  });
+
+  it("accepts a Jobicy role eligible for the queried country when its displayed geo is broad", () => {
+    expect(matchesPreferredLocation("Remote", "Austria", "Remote", "Jobicy", "Austria")).toBe(true);
   });
 
   it("does not match a remote listing with an explicit conflicting region", () => {
