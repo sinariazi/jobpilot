@@ -39,7 +39,8 @@ describe("local match calibration", () => {
   });
 
   it("does not calibrate scores until there is enough reviewed evidence per band", () => {
-    const sparse = Array.from({ length: MIN_MATCH_REVIEWS_FOR_CALIBRATION }, (_, index) => review(index, 90, true, index % 2 === 0));
+    const scoreBands = [10, 30, 50, 70, 90];
+    const sparse = Array.from({ length: MIN_MATCH_REVIEWS_FOR_CALIBRATION }, (_, index) => review(index, scoreBands[index % scoreBands.length], true, index % 2 === 0));
     expect(calibratedFitScore(90, sparse)).toBeNull();
     expect(summarizeMatchReviews(sparse).bands[4].calibratedEstimate).toBeNull();
   });
