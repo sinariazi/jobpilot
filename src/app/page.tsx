@@ -12,6 +12,12 @@ import { createCoverLetterDraft } from "@/lib/cover-letter";
 
 const LEGACY_STORAGE_KEY = "jobpilot-local-v1";
 const MAX_BACKUP_BYTES = 23_000_000;
+const MAX_AI_MATCH_CANDIDATES = 60;
+const AI_MATCH_BATCH_SIZE = 12;
+
+function isLocalJobpilotPage() {
+  return typeof window !== "undefined" && ["localhost", "127.0.0.1", "[::1]"].includes(window.location.hostname);
+}
 
 export default function Home() {
   const [profile, setProfile] = useState<CandidateProfile>(defaultProfile);
@@ -37,6 +43,7 @@ export default function Home() {
   const [sourceErrors, setSourceErrors] = useState<string[]>([]);
   const [profileDraft, setProfileDraft] = useState<CandidateProfile>(defaultProfile);
   const [cvSuggestions, setCvSuggestions] = useState<CvSuggestions | null>(null);
+  const [cvText, setCvText] = useState("");
   const [cvFileName, setCvFileName] = useState("");
   const [cvParsing, setCvParsing] = useState(false);
   const [cvError, setCvError] = useState("");
@@ -51,7 +58,7 @@ export default function Home() {
   const [selectedAiModel, setSelectedAiModel] = useState("");
   const [localAiConnected, setLocalAiConnected] = useState<boolean | null>(null);
   const [localAiRuntimeVersion, setLocalAiRuntimeVersion] = useState("");
-  const [localAiModelDetails, setLocalAiModelDetails] = useState<Record<string, { details?: { family?: string; parameterSize?: string; quantizationLevel?: string } }>>({});
+  const [localAiModelDetails, setLocalAiModelDetails] = useState<Record<string, { size?: number; digest?: string; details?: { family?: string; parameterSize?: string; quantizationLevel?: string } }>>({});
   const [checkingLocalAi, setCheckingLocalAi] = useState(false);
   const [localAiStatus, setLocalAiStatus] = useState("Checking for Ollama on this laptop…");
   const [aiDrafting, setAiDrafting] = useState(false);
@@ -65,6 +72,12 @@ export default function Home() {
   function selectJob(jobId: string) {
     setSelectedId(jobId);
     setCoverLetterMessage("");
+  }
+
+  function chooseLocalAiModel(model: string) {
+    setSelectedAiModel(model);
+    setLiveJobs((current) => current.map((job) => ({ ...job, aiMatch: undefined })));
+    setSourceMessage("Local model changed. Search again to reassess your CV against the jobs.");
   }
 
   useEffect(() => {
@@ -123,13 +136,13 @@ export default function Home() {
       const result = await response.json() as {
         connected?: boolean;
         available?: boolean;
-        models?: Array<string | { name: string; details?: { family?: string; parameterSize?: string; quantizationLevel?: string } }>;
+        models?: Array<string | { name: string; size?: number; digest?: string; details?: { family?: string; parameterSize?: string; quantizationLevel?: string } }>;
         preferredModel?: string;
         runtimeVersion?: string;
         message?: string;
       };
       const names = (result.models ?? []).map((model) => typeof model === "string" ? model : model.name);
-      const details = Object.fromEntries((result.models ?? []).filter((model): model is Exclude<typeof model, string> => typeof model !== "string").map((model) => [model.name, { details: model.details }]));
+      const details = Object.fromEntries((result.models ?? []).filter((model): model is Exclude<typeof model, string> => typeof model !== "string").map((model) => [model.name, { size: model.size, digest: model.digest, details: model.details }]));
       setLocalAiModels(names);
       setLocalAiModelDetails(details);
       setLocalAiConnected(result.connected ?? Boolean(result.available));
@@ -180,10 +193,18 @@ export default function Home() {
   }, [profile, saved, status, applicationNotes, coverLetterDrafts, liveJobs, stateLoaded]);
 
   const locationMatchedJobs = useMemo(() => jobs.filter((job) => matchesPreferredLocation(job.location, profile.locations, job.mode, job.source)), [jobs, profile.locations]);
-  const preferredJobs = useMemo(() => locationMatchedJobs.filter((job) => isRelevantToProfile(job, candidateSkills, profile.roles)), [locationMatchedJobs, candidateSkills, profile.roles]);
-  const ranked = useMemo(() => preferredJobs.map((job) => ({ job, ...scoreJob(job, candidateSkills), roleMatch: matchesTargetRole(job, profile.roles) }))
+  const localCvAnalysisReady = Boolean(cvText.trim() && localAiModels.includes(selectedAiModel) && isLocalJobpilotPage());
+  const preferredJobs = useMemo(() => locationMatchedJobs.filter((job) => localCvAnalysisReady
+    ? job.aiMatch?.relevant === true && job.aiMatch.model === selectedAiModel
+    : job.aiMatch ? job.aiMatch.relevant : isRelevantToProfile(job, candidateSkills, profile.roles)), [locationMatchedJobs, localCvAnalysisReady, selectedAiModel, candidateSkills, profile.roles]);
+  const ranked = useMemo(() => preferredJobs.map((job) => {
+    const keywordMatch = scoreJob(job, candidateSkills);
+    return { job, ...keywordMatch, score: job.aiMatch?.score ?? keywordMatch.score, roleMatch: matchesTargetRole(job, profile.roles) };
+  })
     .filter(({ job }) => `${job.role} ${job.company} ${job.location} ${job.department ?? ""}`.toLowerCase().includes(query.toLowerCase()))
-    .sort((a, b) => Number(b.roleMatch) - Number(a.roleMatch) || b.titleMatched.length - a.titleMatched.length || b.score - a.score), [query, candidateSkills, preferredJobs, profile.roles]);
+    .sort((a, b) => a.job.aiMatch && b.job.aiMatch
+      ? b.score - a.score
+      : Number(b.roleMatch) - Number(a.roleMatch) || b.titleMatched.length - a.titleMatched.length || b.score - a.score), [query, candidateSkills, preferredJobs, profile.roles]);
   const filteredRanked = useMemo(() => ranked.filter(({ job }) => matchesPostedWithin(job, postedWithin) && matchesWorkMode(job, workMode) && matchesDepartment(job, department)), [ranked, postedWithin, workMode, department]);
   const visibleJobs = filteredRanked.slice(0, visibleCount);
   const departments = useMemo(() => [...new Set(preferredJobs.map((job) => job.department?.trim()).filter((value): value is string => Boolean(value)))].sort((a, b) => a.localeCompare(b)), [preferredJobs]);
@@ -200,7 +221,9 @@ export default function Home() {
   ];
   const emptyJobMessage = locationMatchedJobs.length === 0
     ? profile.locations.trim() ? `No fetched jobs match ${profile.locations}. Check your preferred locations or refresh the feeds.` : "No jobs are available in the current feeds. Try searching again later."
-    : "No jobs match your saved target roles or CV skills. Review those fields in your profile, then search again.";
+    : localCvAnalysisReady
+      ? "The local model did not identify a strong CV match in the analyzed listings. Review your preferred locations or try again after more jobs are available."
+      : "No jobs match your saved target roles or CV skills. Review those fields in your profile, then search again.";
 
   function openProfile() {
     setProfileDraft(profile);
@@ -222,10 +245,13 @@ export default function Home() {
       const { parseCvFile } = await import("@/lib/cv-parser");
       const suggestions = await parseCvFile(file);
       setCvSuggestions(suggestions);
+      setCvText(suggestions.sourceText ?? "");
+      setLiveJobs((current) => current.map((job) => ({ ...job, aiMatch: undefined })));
       setCvFileName(file.name);
-      setCvMessage("Text extracted in this browser. The CV was not uploaded or saved.");
+      setCvMessage(`CV text extracted in your browser and held in memory. Matching sends it to Ollama only when Jobpilot is open at localhost on this laptop.${(suggestions.sourceText?.length ?? 0) > 80_000 ? " For speed, matching uses the first 80,000 characters." : " Re-upload the CV after restarting Jobpilot."}`);
     } catch (error) {
       setCvSuggestions(null);
+      setCvText("");
       setCvFileName("");
       setCvError(error instanceof Error ? error.message : "Could not read this CV.");
     } finally {
@@ -397,21 +423,88 @@ export default function Home() {
     setLoadingJobs(true);
     setSourceMessage("");
     setSourceErrors([]);
+    let fetchedForFallback: Job[] = [];
     try {
       const response = await fetch("/api/jobs/search", { cache: "no-store" });
       const result = await response.json() as { jobs?: Job[]; errors?: string[]; error?: string };
       if (!response.ok) throw new Error(result.error ?? "Could not fetch jobs.");
-      setLiveJobs(result.jobs ?? []);
       setSourceErrors(result.errors ?? []);
-      const matchingJobs = (result.jobs ?? []).filter((job) => matchesPreferredLocation(job.location, profile.locations, job.mode, job.source)
-        && isRelevantToProfile(job, candidateSkills, profile.roles));
+      const fetchedJobs = result.jobs ?? [];
+      fetchedForFallback = fetchedJobs;
+      const locationJobs = fetchedJobs.filter((job) => matchesPreferredLocation(job.location, profile.locations, job.mode, job.source));
+      let analyzedJobs = fetchedJobs;
+      let aiAnalyzedCount = 0;
+      if (localCvAnalysisReady) {
+        const lexicalPriority = [...locationJobs].sort((a, b) => {
+          const aRole = Number(matchesTargetRole(a, profile.roles));
+          const bRole = Number(matchesTargetRole(b, profile.roles));
+          const aFit = scoreJob(a, candidateSkills);
+          const bFit = scoreJob(b, candidateSkills);
+          return bRole - aRole || bFit.titleMatched.length - aFit.titleMatched.length || bFit.matched.length - aFit.matched.length;
+        });
+        const priorityIds = new Set(lexicalPriority.slice(0, Math.ceil(MAX_AI_MATCH_CANDIDATES / 2)).map((job) => job.id));
+        const candidates = [
+          ...lexicalPriority.slice(0, Math.ceil(MAX_AI_MATCH_CANDIDATES / 2)),
+          ...locationJobs.filter((job) => !priorityIds.has(job.id)).slice(0, Math.floor(MAX_AI_MATCH_CANDIDATES / 2)),
+        ];
+        const matchesById = new Map<string, NonNullable<Job["aiMatch"]>>();
+        const cvForModel = cvText.slice(0, 80_000);
+        for (let offset = 0; offset < candidates.length; offset += AI_MATCH_BATCH_SIZE) {
+          const batch = candidates.slice(offset, offset + AI_MATCH_BATCH_SIZE);
+          setSourceMessage(`Local AI is comparing your CV with ${Math.min(offset + batch.length, candidates.length)} of ${candidates.length} selected listings…`);
+          const matchResponse = await fetch("/api/jobs/match", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              model: selectedAiModel,
+              cvText: cvForModel,
+              jobs: batch.map((job) => ({
+                id: job.id,
+                company: job.company,
+                role: job.role,
+                location: job.location,
+                mode: job.mode,
+                description: (job.description ?? job.summary).slice(0, 2_500),
+              })),
+            }),
+          });
+          const matchResult = await matchResponse.json() as { matches?: Array<{ id: string; relevant: boolean; score: number; reason: string; cvEvidence: string }>; error?: string };
+          if (!matchResponse.ok) throw new Error(matchResult.error ?? "Local CV matching failed.");
+          let validatedMatches = 0;
+          for (const match of matchResult.matches ?? []) {
+            if (batch.some((job) => job.id === match.id) && typeof match.relevant === "boolean" && Number.isFinite(match.score)) {
+              matchesById.set(match.id, { model: selectedAiModel, relevant: match.relevant, score: Math.max(0, Math.min(100, Math.round(match.score))), reason: match.reason, cvEvidence: match.cvEvidence });
+              validatedMatches += 1;
+            }
+          }
+          aiAnalyzedCount += validatedMatches;
+        }
+        analyzedJobs = fetchedJobs.map((job) => ({ ...job, ...(matchesById.has(job.id) ? { aiMatch: matchesById.get(job.id) } : { aiMatch: undefined }) }));
+      }
+      setLiveJobs(analyzedJobs);
+      const matchingJobs = analyzedJobs.filter((job) => matchesPreferredLocation(job.location, profile.locations, job.mode, job.source)
+        && (job.aiMatch ? job.aiMatch.relevant : !localCvAnalysisReady && isRelevantToProfile(job, candidateSkills, profile.roles)));
       setSourceMessage(result.jobs?.length
-        ? `Searched public job feeds and found ${result.jobs.length} listings; ${matchingJobs.length} match both your location and your profile. Jobs without a target-role or skill match are hidden.`
+        ? localCvAnalysisReady
+          ? `Local Ollama compared your CV with ${aiAnalyzedCount} of ${locationJobs.length} location-eligible listings. ${matchingJobs.length} were judged relevant. Scores and explanations are estimates; check the original postings.`
+          : cvText.trim() && !isLocalJobpilotPage()
+            ? `CV analysis is blocked here for privacy. Open Jobpilot from localhost on this laptop; no CV text was sent. Showing exact profile matches only.`
+            : cvText.trim()
+              ? `Found ${result.jobs.length} listings, but local CV analysis is unavailable. Start Ollama, choose an installed model, and search again. Showing exact profile matches only.`
+            : `Searched public job feeds and found ${result.jobs.length} listings; ${matchingJobs.length} match your location and saved profile evidence. Import your CV and choose a local model for AI matching.`
         : "No listings came back from the public job feeds. Try again later.");
       setSourceErrors(result.errors ?? []);
       selectJob(matchingJobs[0]?.id ?? "");
     } catch (error) {
-      setSourceMessage(error instanceof Error ? error.message : "Could not fetch listings.");
+      if (fetchedForFallback.length > 0) {
+        const fallback = fetchedForFallback.filter((job) => matchesPreferredLocation(job.location, profile.locations, job.mode, job.source)
+          && isRelevantToProfile(job, candidateSkills, profile.roles));
+        setLiveJobs(fetchedForFallback.map((job) => ({ ...job, aiMatch: undefined })));
+        selectJob(fallback[0]?.id ?? "");
+        setSourceMessage(`Local AI analysis failed (${error instanceof Error ? error.message : "unknown error"}). Showing ${fallback.length} exact profile matches instead. Check that Ollama is running, then retry.`);
+      } else {
+        setSourceMessage(error instanceof Error ? error.message : "Could not fetch job listings.");
+      }
     } finally {
       setLoadingJobs(false);
     }
@@ -449,7 +542,7 @@ export default function Home() {
             <div>
               <span className="eyebrow">AUTOMATIC JOB SEARCH</span>
               <strong>Search across public job feeds</strong>
-              <p>Jobpilot checks multiple public feeds automatically, then filters by your preferred locations and ranks your target roles and skills. No company names or board links needed.</p>
+              <p>Jobpilot searches public feeds automatically. Import your CV and select a local Ollama model to analyze role fit on this laptop. No company names or board links are needed.</p>
             </div>
             <div className="source-controls">
               <button className="primary-button" disabled={loadingJobs} onClick={fetchLiveJobs}>{loadingJobs ? "Searching job feeds…" : liveJobs.length ? "↻ Search for new jobs" : "Search jobs now"}</button>
@@ -457,6 +550,7 @@ export default function Home() {
             </div>
             <p className="directory-credit">Sources: <a href="https://www.arbeitnow.com/" target="_blank" rel="noreferrer">Arbeitnow</a>, <a href="https://remotive.com/remote-jobs/api" target="_blank" rel="noreferrer">Remotive</a>, and <a href="https://jobicy.com/jobs-rss-feed" target="_blank" rel="noreferrer">Jobicy</a>. Feed coverage varies; it does not include every employer.</p>
             {sourceMessage && <p className="source-message" role="status">{sourceMessage}</p>}
+            {cvText && <p className="source-message" role="status">CV ready for local matching · {localAiModels.includes(selectedAiModel) ? `Model: ${selectedAiModel}` : "Start Ollama and select a model to enable AI analysis"}{!isLocalJobpilotPage() && " · open Jobpilot at localhost to keep CV processing on this laptop"}</p>}
             {sourceErrors.length > 0 && <ul className="source-errors" role="status">{sourceErrors.map((error) => <li key={error}>{error}</li>)}</ul>}
             <p className="source-message" role="status">{storageMessage}</p>
           </section>
@@ -466,7 +560,7 @@ export default function Home() {
             <div className="local-ai-facts">
               <div><span>Connection</span><strong className="ai-connection"><i />{localAiConnected === null ? "Checking" : localAiConnected ? "Connected" : "Not connected"}</strong></div>
               <div><span>Ollama version</span><strong>{localAiRuntimeVersion ? `v${localAiRuntimeVersion}` : localAiConnected ? "Version unavailable" : "—"}</strong></div>
-              <div><span>Selected model</span><strong>{selectedAiModel || "No model selected"}</strong><small>{selectedAiModel && localAiModelDetails[selectedAiModel]?.details ? [localAiModelDetails[selectedAiModel].details?.family, localAiModelDetails[selectedAiModel].details?.parameterSize, localAiModelDetails[selectedAiModel].details?.quantizationLevel].filter(Boolean).join(" · ") : selectedAiModel ? "Installed locally · version shown in model tag" : "Install a model with Ollama, then refresh"}</small></div>
+              <div><span>Model for CV matching and drafting</span><select className="ai-model-picker" aria-label="Select local Ollama model" value={selectedAiModel} onChange={(event) => chooseLocalAiModel(event.target.value)} disabled={!localAiModels.length || aiDrafting || checkingLocalAi}><option value="">Choose an installed model</option>{localAiModels.map((model) => <option key={model} value={model}>{model}</option>)}</select><small>{selectedAiModel && localAiModelDetails[selectedAiModel]?.details ? [localAiModelDetails[selectedAiModel].details?.family, localAiModelDetails[selectedAiModel].details?.parameterSize, localAiModelDetails[selectedAiModel].details?.quantizationLevel].filter(Boolean).join(" · ") : selectedAiModel ? "Installed locally · model version is shown in its tag" : "Install a model with Ollama, then refresh"}</small></div>
             </div>
             {localAiStatus && <p className="local-ai-message" role="status">{localAiStatus}</p>}
           </section>
@@ -489,7 +583,7 @@ export default function Home() {
                 <span className="location-filter">Locations: {profile.locations || "Any"}</span>
               </div>
               {filteredRanked.length > 0 ? <>
-                <div className="job-list">{visibleJobs.map(({ job, score, matched, titleMatched }) => <article key={job.id} className={`job-card ${selected?.job.id === job.id ? "selected" : ""}`}><button type="button" className="job-card-main" aria-pressed={selected?.job.id === job.id} onClick={() => { selectJob(job.id); setStatus((current) => current[job.id] ? current : { ...current, [job.id]: "Needs review" }); }}><div className="job-card-top"><div className={`company-logo logo-${job.source.toLowerCase()}`}>{job.company.slice(0, 1)}</div><span className="match-tag">{score}% match</span></div><div className="job-title">{job.role}</div><div className="company-name">{job.company} <span>·</span> {job.location}</div><div className="job-meta"><span>◷ {job.posted}</span><span>⌂ {job.mode}</span><span className="source-tag">{job.source} · feed</span></div></button><div className="job-card-bottom"><div className="skill-pills">{matched.slice(0, 3).map((skill) => <span className={titleMatched.includes(skill) ? "skill-in-title" : ""} key={skill}>{skill}{titleMatched.includes(skill) && <small>title</small>}</span>)}{matched.length > 3 && <span className="more-skills">+{matched.length - 3}</span>}</div><button type="button" className={`bookmark ${saved.includes(job.id) ? "bookmarked" : ""}`} onClick={() => setSaved((current) => current.includes(job.id) ? current.filter((id) => id !== job.id) : [...current, job.id])} aria-label={saved.includes(job.id) ? "Remove saved job" : "Save job"} aria-pressed={saved.includes(job.id)}>{saved.includes(job.id) ? "★" : "☆"}</button></div></article>)}</div>
+                <div className="job-list">{visibleJobs.map(({ job, score, matched, titleMatched }) => <article key={job.id} className={`job-card ${selected?.job.id === job.id ? "selected" : ""}`}><button type="button" className="job-card-main" aria-pressed={selected?.job.id === job.id} onClick={() => { selectJob(job.id); setStatus((current) => current[job.id] ? current : { ...current, [job.id]: "Needs review" }); }}><div className="job-card-top"><div className={`company-logo logo-${job.source.toLowerCase()}`}>{job.company.slice(0, 1)}</div><span className="match-tag">{job.aiMatch ? `${score}% AI fit` : `${score}% profile match`}</span></div><div className="job-title">{job.role}</div><div className="company-name">{job.company} <span>·</span> {job.location}</div><div className="job-meta"><span>◷ {job.posted}</span><span>⌂ {job.mode}</span><span className="source-tag">{job.source} · feed</span></div></button><div className="job-card-bottom"><div className="skill-pills">{matched.slice(0, 3).map((skill) => <span className={titleMatched.includes(skill) ? "skill-in-title" : ""} key={skill}>{skill}{titleMatched.includes(skill) && <small>title</small>}</span>)}{matched.length > 3 && <span className="more-skills">+{matched.length - 3}</span>}</div><button type="button" className={`bookmark ${saved.includes(job.id) ? "bookmarked" : ""}`} onClick={() => setSaved((current) => current.includes(job.id) ? current.filter((id) => id !== job.id) : [...current, job.id])} aria-label={saved.includes(job.id) ? "Remove saved job" : "Save job"} aria-pressed={saved.includes(job.id)}>{saved.includes(job.id) ? "★" : "☆"}</button></div></article>)}</div>
                 {visibleJobs.length < filteredRanked.length && <button className="load-more" onClick={() => setVisibleCount((count) => count + 25)}>Show more jobs <span>({filteredRanked.length - visibleJobs.length} remaining)</span></button>}
               </> : <div className="empty-state">{liveJobs.length === 0 ? "No jobs loaded yet. Select “Search jobs now” to check public job feeds." : ranked.length === 0 ? query ? "No live jobs match that search. Try another role or company." : emptyJobMessage : "No jobs match these filters. Try a different date, work mode, or department."}</div>}
             </section>
@@ -507,6 +601,7 @@ export default function Home() {
                 <div className="divider"/>
                 <div className="fit-heading"><div><h4>Your match <span className="info-dot">i</span></h4><p>Profile skills mentioned in the posting</p></div><div className="score-ring" style={{ "--score": `${selected.score}%` } as React.CSSProperties}><span>{selected.score}%</span></div></div>
                 <div className="fit-meter"><i style={{ width: `${selected.score}%` }}/></div>
+                {selected.job.aiMatch && <section className="ai-match-explanation" aria-label="Local AI CV match explanation"><div className="ai-match-title"><h4>Local AI assessment</h4><strong>{selected.job.aiMatch.score}% estimated fit · {selected.job.aiMatch.model}</strong></div><p>{selected.job.aiMatch.reason}</p><small>CV evidence: {selected.job.aiMatch.cvEvidence}</small><small>AI estimates can be wrong. Verify the original posting and every requirement.</small></section>}
                 <div className="evidence-label">PROFILE SKILLS MENTIONED IN POSTING <span>{selected.matched.length} found</span></div>
                 <div className="evidence-pills">{selected.matched.map((skill) => <span key={skill}>✓ {skill}{selected.titleMatched.includes(skill) && <small> · title</small>}</span>)}</div>
                 {selected.missing.length > 0 && <><div className="evidence-label gap-label">PROFILE SKILLS NOT MENTIONED <span>{selected.missing.length}</span></div><div className="evidence-pills missing-pills">{selected.missing.map((skill) => <span key={skill}>! {skill}</span>)}</div><p className="match-caveat">A skill missing from the posting text is not proof that the job requires it.</p></>}
@@ -518,8 +613,8 @@ export default function Home() {
                     <p className="cover-letter-help">Add a reason and a specific, truthful experience example. AI drafting runs through Ollama on this laptop. Review every claim before use.</p>
                     <label>Why are you interested in this role or company?<textarea rows={2} maxLength={2000} value={selectedCoverLetter?.interest ?? ""} onChange={(event) => updateSelectedCoverLetter({ interest: event.target.value })} placeholder="Add a specific reason…" /></label>
                     <label>Relevant example and outcome from your experience<textarea rows={2} maxLength={4000} value={selectedCoverLetter?.evidence ?? ""} onChange={(event) => updateSelectedCoverLetter({ evidence: event.target.value })} placeholder="Describe your contribution and the result…" /></label>
-                    <label className="local-model-select">Local AI model<select value={selectedAiModel} onChange={(event) => setSelectedAiModel(event.target.value)} disabled={!localAiModels.length || aiDrafting}><option value="">Choose an installed model</option>{localAiModels.map((model) => <option key={model} value={model}>{model}</option>)}</select></label>
-                    <p className="cover-letter-help">Job details and profile text are processed by Ollama at this laptop’s local address. The CV file is not sent to the model.</p>
+                    <label className="local-model-select">Local AI model<select value={selectedAiModel} onChange={(event) => chooseLocalAiModel(event.target.value)} disabled={!localAiModels.length || aiDrafting}><option value="">Choose an installed model</option>{localAiModels.map((model) => <option key={model} value={model}>{model}</option>)}</select></label>
+                    <p className="cover-letter-help">Cover-letter drafting uses your profile and notes. CV text is used only for local job matching, not sent with a cover-letter request.</p>
                     {localAiStatus && <p className="cover-letter-message" role="status">{localAiStatus}</p>}
                     <div className="cover-letter-actions"><button type="button" className="primary-button cover-letter-generate" onClick={() => void generateAiCoverLetter()} disabled={!localAiModels.includes(selectedAiModel) || aiDrafting}>{aiDrafting ? "Generating locally…" : "Generate on this laptop"}</button><button type="button" className="secondary-button cover-letter-generate" onClick={buildCoverLetter}>Use simple template</button></div>
                     {selectedCoverLetter?.draft && <><label>Draft text<textarea rows={11} maxLength={20000} value={selectedCoverLetter.draft} onChange={(event) => updateSelectedCoverLetter({ draft: event.target.value })} /></label><div className="cover-letter-actions"><button type="button" className="secondary-button" onClick={() => void copyCoverLetter()}>Copy</button><button type="button" className="secondary-button" onClick={downloadCoverLetter}>Download .txt</button></div><p className="cover-letter-help">Saved on this device · Updated {new Date(selectedCoverLetter.updatedAt).toLocaleString()}</p></>}
@@ -534,7 +629,7 @@ export default function Home() {
           </>}
         </div>
       </section>
-      {profileOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setProfileOpen(false); }}><section className="profile-modal" role="dialog" aria-modal="true" aria-labelledby="profile-title"><div className="modal-heading"><div><span className="eyebrow">YOUR LOCAL SEARCH PROFILE</span><h2 id="profile-title">Candidate profile</h2><p>These editable details are stored in a file on this device.</p></div><button className="icon-button" onClick={() => setProfileOpen(false)} aria-label="Close profile">×</button></div><section className="cv-import" aria-labelledby="cv-import-title"><div className="cv-import-heading"><div><h3 id="cv-import-title">Import from CV</h3><p>Extract role titles and skills locally, then review suggestions before saving your profile.</p></div><span className="local-only-tag">ON THIS DEVICE</span></div><label className="cv-file-label" htmlFor="cv-file">{cvParsing ? "Reading CV…" : "Choose a CV file"}<input id="cv-file" type="file" accept=".pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain" onChange={(event) => void parseSelectedCv(event)} disabled={cvParsing}/></label><p className="cv-file-hint">PDF, DOCX, or TXT · up to 12 MB · Scanned PDFs need OCR (not implemented yet)</p>{cvError && <p className="cv-error" role="alert">{cvError}</p>}{cvMessage && <p className="cv-message" role="status">{cvMessage}</p>}{cvSuggestions && <div className="cv-preview"><strong className="cv-file-name">{cvFileName}</strong>{cvSuggestions.pageCount && <span className="cv-page-count">{cvSuggestions.pageCount} PDF pages</span>}<label className="cv-option"><input type="checkbox" checked={includeCvRoles} onChange={(event) => setIncludeCvRoles(event.target.checked)}/> Add past role titles as target role suggestions <small>(review before saving)</small></label><textarea aria-label="Role titles extracted from CV" rows={2} value={cvSuggestions.roles} onChange={(event) => setCvSuggestions({ ...cvSuggestions, roles: event.target.value })} placeholder="No role titles detected"/><label className="cv-option"><input type="checkbox" checked={includeCvSkills} onChange={(event) => setIncludeCvSkills(event.target.checked)}/> Add extracted skills</label><textarea aria-label="Skills extracted from CV" rows={3} value={cvSuggestions.skills} onChange={(event) => setCvSuggestions({ ...cvSuggestions, skills: event.target.value })} placeholder="No skills detected"/>{cvSuggestions.notes.map((note) => <p className="cv-file-hint" key={note}>{note}</p>)}<p className="cv-file-hint">CV addresses are not imported as preferred job locations. Your source file and extracted text are not uploaded or stored by this importer.</p><button type="button" className="secondary-button" onClick={applyCvSuggestions} disabled={(!includeCvRoles || !cvSuggestions.roles) && (!includeCvSkills || !cvSuggestions.skills)}>Add selected suggestions to profile draft</button></div>}</section><label>Display name<input value={profileDraft.name} onChange={(event) => setProfileDraft({ ...profileDraft, name: event.target.value })}/></label><label>Target roles<span className="field-hint">Enter the roles you want to apply for, separated by commas or new lines. CV role titles are only suggestions; remove roles you do not want.</span><textarea rows={2} value={profileDraft.roles} onChange={(event) => setProfileDraft({ ...profileDraft, roles: event.target.value })}/></label><label>Preferred locations<span className="field-hint">Enter locations explicitly, for example Austria or Vienna, Austria. Separate alternatives with semicolons. Leave blank to show any location. A bare “Remote” listing is excluded unless you choose Remote.</span><textarea rows={2} value={profileDraft.locations} onChange={(event) => setProfileDraft({ ...profileDraft, locations: event.target.value })}/></label><label>Skills <span className="field-hint">Enter relevant skills separated by commas. Matching looks for exact skill mentions in job titles and descriptions.</span><textarea rows={4} value={profileDraft.skills} onChange={(event) => setProfileDraft({ ...profileDraft, skills: event.target.value })}/></label><div className="modal-actions"><button className="secondary-button" onClick={() => setProfileDraft(defaultProfile)}>Reset default profile</button><button className="primary-button" onClick={() => { setProfile({ ...profileDraft, name: profileDraft.name.trim() || "Candidate" }); setProfileOpen(false); }}>Save profile</button></div><section className="data-backup" aria-label="Profile and job data backup"><div><strong>Data backup</strong><p>Download a copy of your profile and job tracker, or restore a previous backup.</p></div><div className="data-backup-actions"><button type="button" className="secondary-button" onClick={downloadBackup}>Download backup</button><button type="button" className="secondary-button" onClick={() => backupInput.current?.click()} disabled={backupBusy}>{backupBusy ? "Restoring…" : "Restore backup"}</button><input ref={backupInput} className="visually-hidden" type="file" accept="application/json,.json" aria-label="Choose Jobpilot backup file" onChange={(event) => void restoreBackup(event)}/></div>{backupMessage && <p role="status">{backupMessage}</p>}</section><p className="privacy-explainer">The CV itself is parsed in your browser and is not saved. Role and skill suggestions you accept are stored in the local profile file, which is not encrypted.</p></section></div>}
+      {profileOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setProfileOpen(false); }}><section className="profile-modal" role="dialog" aria-modal="true" aria-labelledby="profile-title"><div className="modal-heading"><div><span className="eyebrow">YOUR LOCAL SEARCH PROFILE</span><h2 id="profile-title">Candidate profile</h2><p>These editable details are stored in a file on this device.</p></div><button className="icon-button" onClick={() => setProfileOpen(false)} aria-label="Close profile">×</button></div><section className="cv-import" aria-labelledby="cv-import-title"><div className="cv-import-heading"><div><h3 id="cv-import-title">Import from CV</h3><p>Extract role titles and skills locally, then review suggestions before saving your profile.</p></div><span className="local-only-tag">ON THIS DEVICE</span></div><label className="cv-file-label" htmlFor="cv-file">{cvParsing ? "Reading CV…" : "Choose a CV file"}<input id="cv-file" type="file" accept=".pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain" onChange={(event) => void parseSelectedCv(event)} disabled={cvParsing}/></label><p className="cv-file-hint">PDF, DOCX, or TXT · up to 12 MB · Scanned PDFs need OCR (not implemented yet)</p>{cvError && <p className="cv-error" role="alert">{cvError}</p>}{cvMessage && <p className="cv-message" role="status">{cvMessage}</p>}{cvSuggestions && <div className="cv-preview"><strong className="cv-file-name">{cvFileName}</strong>{cvSuggestions.pageCount && <span className="cv-page-count">{cvSuggestions.pageCount} PDF pages</span>}<label className="cv-option"><input type="checkbox" checked={includeCvRoles} onChange={(event) => setIncludeCvRoles(event.target.checked)}/> Add past role titles as target role suggestions <small>(review before saving)</small></label><textarea aria-label="Role titles extracted from CV" rows={2} value={cvSuggestions.roles} onChange={(event) => setCvSuggestions({ ...cvSuggestions, roles: event.target.value })} placeholder="No role titles detected"/><label className="cv-option"><input type="checkbox" checked={includeCvSkills} onChange={(event) => setIncludeCvSkills(event.target.checked)}/> Add extracted skills</label><textarea aria-label="Skills extracted from CV" rows={3} value={cvSuggestions.skills} onChange={(event) => setCvSuggestions({ ...cvSuggestions, skills: event.target.value })} placeholder="No skills detected"/>{cvSuggestions.notes.map((note) => <p className="cv-file-hint" key={note}>{note}</p>)}<p className="cv-file-hint">The CV address is not used as a search location. The file is not uploaded or saved; extracted text stays in memory and is sent only to Ollama on this laptop when you search for matches.</p><button type="button" className="secondary-button" onClick={applyCvSuggestions} disabled={(!includeCvRoles || !cvSuggestions.roles) && (!includeCvSkills || !cvSuggestions.skills)}>Add selected suggestions to profile draft</button></div>}</section><label>Display name<input value={profileDraft.name} onChange={(event) => setProfileDraft({ ...profileDraft, name: event.target.value })}/></label><label>Target roles<span className="field-hint">Enter the roles you want to apply for, separated by commas or new lines. CV role titles are only suggestions; remove roles you do not want.</span><textarea rows={2} value={profileDraft.roles} onChange={(event) => setProfileDraft({ ...profileDraft, roles: event.target.value })}/></label><label>Preferred locations<span className="field-hint">Enter locations explicitly, for example Austria or Vienna, Austria. Separate alternatives with semicolons. Leave blank to show any location. A bare “Remote” listing is excluded unless you choose Remote.</span><textarea rows={2} value={profileDraft.locations} onChange={(event) => setProfileDraft({ ...profileDraft, locations: event.target.value })}/></label><label>Skills <span className="field-hint">Enter relevant skills separated by commas. Matching looks for exact skill mentions in job titles and descriptions.</span><textarea rows={4} value={profileDraft.skills} onChange={(event) => setProfileDraft({ ...profileDraft, skills: event.target.value })}/></label><div className="modal-actions"><button className="secondary-button" onClick={() => setProfileDraft(defaultProfile)}>Reset default profile</button><button className="primary-button" onClick={() => { setProfile({ ...profileDraft, name: profileDraft.name.trim() || "Candidate" }); setProfileOpen(false); }}>Save profile</button></div><section className="data-backup" aria-label="Profile and job data backup"><div><strong>Data backup</strong><p>Download a copy of your profile and job tracker, or restore a previous backup.</p></div><div className="data-backup-actions"><button type="button" className="secondary-button" onClick={downloadBackup}>Download backup</button><button type="button" className="secondary-button" onClick={() => backupInput.current?.click()} disabled={backupBusy}>{backupBusy ? "Restoring…" : "Restore backup"}</button><input ref={backupInput} className="visually-hidden" type="file" accept="application/json,.json" aria-label="Choose Jobpilot backup file" onChange={(event) => void restoreBackup(event)}/></div>{backupMessage && <p role="status">{backupMessage}</p>}</section><p className="privacy-explainer">The CV file and full text are never saved. Extracted text is sent only to local Ollama when matching jobs; accepted role and skill suggestions are stored in the local profile file, which is not encrypted.</p></section></div>}
     </main>
   );
 }
