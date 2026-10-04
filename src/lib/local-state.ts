@@ -1,8 +1,9 @@
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import type { ApplicationStatus, CandidateProfile, CoverLetterDraftRecord, Job, PersistedState } from "./types";
+import type { ApplicationStatus, CandidateProfile, CoverLetterDraftRecord, Job, MatchReview, PersistedState } from "./types";
 import { defaultProfile } from "./types";
+import { MAX_MATCH_REVIEWS } from "./match-calibration";
 
 const STORAGE_VERSION = 1;
 const MAX_TRACKED_JOBS = 2_000;
@@ -16,7 +17,7 @@ const allowedStatuses = new Set<ApplicationStatus>([
 export type LoadedState = PersistedState & { initialized: boolean };
 
 export function defaultState(): LoadedState {
-  return { profile: defaultProfile, saved: [], status: {}, applicationNotes: {}, applicationFollowUps: {}, coverLetterDrafts: {}, liveJobs: [], initialized: false };
+  return { profile: defaultProfile, saved: [], status: {}, applicationNotes: {}, applicationFollowUps: {}, coverLetterDrafts: {}, matchReviews: [], matchCohortKey: "", liveJobs: [], initialized: false };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -121,6 +122,24 @@ export function parsePersistedState(value: unknown): PersistedState | null {
       || typeof entry.updatedAt !== "string" || !Number.isFinite(Date.parse(entry.updatedAt))) return null;
     parsedDrafts[id] = { interest: entry.interest, evidence: entry.evidence, draft: entry.draft, updatedAt: entry.updatedAt };
   }
+  const matchReviews = value.matchReviews === undefined ? [] : value.matchReviews;
+  if (!Array.isArray(matchReviews) || matchReviews.length > MAX_MATCH_REVIEWS) return null;
+  const parsedMatchReviews: MatchReview[] = [];
+  for (const entry of matchReviews) {
+    if (!isRecord(entry) || !boundedString(entry.jobId, 300) || !boundedString(entry.company, 160)
+      || !boundedString(entry.role, 300) || !boundedString(entry.model, 200)
+      || typeof entry.cohortKey !== "string" || !/^[a-f0-9]{64}$/.test(entry.cohortKey)
+      || typeof entry.score !== "number" || !Number.isInteger(entry.score) || entry.score < 0 || entry.score > 100
+      || typeof entry.predictedRelevant !== "boolean" || typeof entry.reviewedRelevant !== "boolean"
+      || typeof entry.reviewedAt !== "string" || !Number.isFinite(Date.parse(entry.reviewedAt))) return null;
+    parsedMatchReviews.push({
+      jobId: entry.jobId.trim(), company: entry.company.trim(), role: entry.role.trim(), model: entry.model.trim(),
+      cohortKey: entry.cohortKey, score: entry.score, predictedRelevant: entry.predictedRelevant,
+      reviewedRelevant: entry.reviewedRelevant, reviewedAt: entry.reviewedAt,
+    });
+  }
+  const matchCohortKey = value.matchCohortKey === undefined ? "" : value.matchCohortKey;
+  if (typeof matchCohortKey !== "string" || (matchCohortKey !== "" && !/^[a-f0-9]{64}$/.test(matchCohortKey))) return null;
   if (value.liveJobs !== undefined && (!Array.isArray(value.liveJobs) || value.liveJobs.length > MAX_TRACKED_JOBS)) return null;
   const liveJobs = value.liveJobs === undefined ? [] : value.liveJobs.map(parseJob);
   if (liveJobs.some((job) => job === null)) return null;
@@ -131,6 +150,8 @@ export function parsePersistedState(value: unknown): PersistedState | null {
     applicationNotes: Object.fromEntries(Object.entries(applicationNotes)) as Record<string, string>,
     applicationFollowUps: Object.fromEntries(Object.entries(applicationFollowUps)) as Record<string, string>,
     coverLetterDrafts: parsedDrafts,
+    matchReviews: parsedMatchReviews,
+    matchCohortKey,
     liveJobs: liveJobs as Job[],
   };
 }
