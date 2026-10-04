@@ -31,6 +31,7 @@ const exampleJob: Job = {
   department: "Engineering",
   summary: "Build a product feature.",
   description: "What you will do:\n\nBuild and ship product features.",
+  aiMatch: { model: "local-model:latest", relevant: true, score: 84, reason: "Your experience building product software fits this role.", cvEvidence: "Full-stack product engineering experience" },
 };
 
 describe("local state storage", () => {
@@ -96,6 +97,11 @@ describe("local state storage", () => {
     expect(parsePersistedState({
       ...defaultState(),
       coverLetterDrafts: { "gh-example-1": { interest: "", evidence: "", draft: "x".repeat(20_001), updatedAt: "2026-10-02T12:00:00.000Z" } },
+    })).toBeNull();
+
+    expect(parsePersistedState({
+      ...defaultState(),
+      liveJobs: [{ ...exampleJob, aiMatch: { model: "local-model:latest", relevant: true, score: 101, reason: "Invalid score", cvEvidence: "Evidence" } }],
     })).toBeNull();
   });
 
