@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 21777)
-Total output lines: 987
-
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -463,7 +460,419 @@ export default function Home() {
     event.currentTarget.value = "";
     if (!file) return;
     invalidateAiAssessment();
-    setCvAna…7777 tokens truncated…e="matching-settings-grid">{(["skills", "experience", "domain", "disqualifier"] as const).map((key) => <label key={key}>{key === "disqualifier" ? "Explicit disqualifier penalty" : `${key[0].toUpperCase()}${key.slice(1)} evidence`}<input type="number" min="0" max="100" value={matchingSettings.weights[key]} onChange={(event) => updateMatchWeight(key, Number(event.target.value))} />%</label>)}
+    setCvAnalyzedModel("");
+        setLiveJobs((current) => current.map((job) => ({ ...job, aiMatch: undefined, screening: undefined, detailedAnalysis: undefined })));
+    if (cvPreviewUrl) URL.revokeObjectURL(cvPreviewUrl);
+    setCvPreviewUrl(file.name.toLocaleLowerCase().endsWith(".pdf") ? URL.createObjectURL(file) : "");
+    setCvParsing(true);
+    setCvAnalyzing(false);
+    setCvError("");
+    setCvMessage("");
+    setCvAnalysisStatus("");
+    try {
+      const { parseCvFile } = await import("@/lib/cv-parser");
+      const suggestions = await parseCvFile(file, { ocrLanguage, onProgress: setCvAnalysisStatus });
+      const cohortKey = await createMatchCohortKey(suggestions.sourceText ?? "");
+      const browserRoles = suggestions.roles || profile.roles;
+      const browserSkills = suggestions.skills || profile.skills;
+      const autoFilledProfile = { ...profile, roles: browserRoles, skills: browserSkills };
+      setCvSuggestions(suggestions);
+      setCvText(suggestions.sourceText ?? "");
+      setMatchCohortKey(cohortKey);
+      setCvAnalyzedModel("");
+      setLiveJobs((current) => current.map((job) => ({ ...job, aiMatch: undefined, screening: undefined, detailedAnalysis: undefined })));
+      setCvFileName(file.name);
+      setProfile(autoFilledProfile);
+      setProfileDraft(autoFilledProfile);
+      setCvMessage(`CV text extracted in your browser. Job titles and skills have been filled into your profile; Jobpilot saves them automatically on this device. Your name and preferred locations were left unchanged.${(suggestions.sourceText?.length ?? 0) > MAX_CV_MATCH_CHARS ? ` Matching uses the first ${MAX_CV_MATCH_CHARS.toLocaleString()} characters.` : ""}`);
+
+      if (!localAiModels.includes(selectedAiModel)) {
+        setCvAnalysisStatus("Text-based role and skill extraction is ready. Select an installed Ollama model and upload the CV again for a deeper local analysis.");
+        return;
+      }
+      if (!isLocalJobpilotPage()) {
+        setCvAnalysisStatus("AI analysis is disabled here for privacy. Open Jobpilot at localhost on this laptop. The CV was not sent for AI analysis.");
+        return;
+      }
+
+      setCvAnalyzing(true);
+      setCvAnalysisStatus(`Analyzing your CV with local model ${selectedAiModel}…`);
+      try {
+        const response = await fetch("/api/cv/analyze", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store",
+          body: JSON.stringify({ model: selectedAiModel, cvText: (suggestions.sourceText ?? "").slice(0, MAX_CV_MATCH_CHARS) }),
+        });
+        const result = await response.json() as { summary?: string; roles?: string[]; skills?: string[]; seniority?: string; domains?: string[]; highlights?: string[]; error?: string };
+        if (!response.ok || !result.summary || !Array.isArray(result.roles) || !Array.isArray(result.skills)) {
+          throw new Error(result.error ?? "The local model returned incomplete CV analysis.");
+        }
+        const analyzedRoles = result.roles.join("; ") || browserRoles;
+        const analyzedSkills = result.skills.join(", ") || browserSkills;
+        const analysis = {
+          summary: result.summary,
+          seniority: result.seniority ?? "Not identified",
+          domains: result.domains ?? [],
+          highlights: result.highlights ?? [],
+        };
+        setCvSuggestions({ ...suggestions, roles: analyzedRoles, skills: analyzedSkills, analysis });
+        setProfile((current) => ({ ...current,
+          roles: current.roles === browserRoles ? analyzedRoles : current.roles,
+          skills: current.skills === browserSkills ? analyzedSkills : current.skills,
+        }));
+        setProfileDraft((current) => ({ ...current,
+          roles: current.roles === browserRoles ? analyzedRoles : current.roles,
+          skills: current.skills === browserSkills ? analyzedSkills : current.skills,
+        }));
+        setCvAnalysisStatus(`CV analyzed locally with ${selectedAiModel}. Target roles and skills were updated automatically; review or edit them below. Your name and location were not inferred from the CV.`);
+      } catch (error) {
+        setCvAnalysisStatus(`Local AI analysis could not finish: ${error instanceof Error ? error.message : "unknown error"} Text-extracted role and skill fields are already filled. You can still search or try another model.`);
+      } finally {
+        setCvAnalyzing(false);
+      }
+    } catch (error) {
+      setCvSuggestions(null);
+      setCvText("");
+      setCvAnalyzedModel("");
+      setCvFileName("");
+      setCvError(error instanceof Error ? error.message : "Could not read this CV.");
+    } finally {
+      setCvParsing(false);
+    }
+  }
+
+  function downloadBackup() {
+    const backup = createBackup({ profile, saved, status, applicationNotes, applicationFollowUps, coverLetterDrafts, matchReviews, matchCohortKey, matchingSettings, liveJobs });
+    const url = URL.createObjectURL(new Blob([backup], { type: "application/json" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `jobpilot-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setBackupMessage("Backup downloaded. Store the file somewhere safe; it contains your local profile and job tracking data.");
+  }
+
+  function buildCoverLetter() {
+    if (!selected) return;
+    setCoverLetterDrafts((current) => {
+      const prior = current[selected.job.id] ?? { interest: "", evidence: "", draft: "", updatedAt: "" };
+      return { ...current, [selected.job.id]: {
+        ...prior,
+        draft: createCoverLetterDraft({ candidateName: profile.name, role: selected.job.role, company: selected.job.company, matchedSkills: selected.matched, reason: prior.interest, evidence: prior.evidence }),
+        updatedAt: new Date().toISOString(),
+      } };
+    });
+    setCoverLetterMessage("Draft created. Review every statement and replace any placeholders before use.");
+  }
+
+  async function generateAiCoverLetter() {
+    if (!selected || !localAiModels.includes(selectedAiModel) || aiDrafting) return;
+    setAiDrafting(true);
+    setCoverLetterMessage("Drafting with the configured AI provider…");
+    try {
+      const response = await fetch("/api/application/draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: selectedAiModel,
+          job: {
+            company: selected.job.company,
+            role: selected.job.role,
+            location: selected.job.location,
+            description: selected.job.description ?? selected.job.summary,
+          },
+          candidate: { name: profile.name, skills: profile.skills },
+          interest: selectedCoverLetter?.interest ?? "",
+          evidence: selectedCoverLetter?.evidence ?? "",
+        }),
+      });
+      const result = await response.json() as { draft?: string; error?: string };
+      if (!response.ok || !result.draft) throw new Error(result.error ?? "The AI provider returned no draft.");
+      updateSelectedCoverLetter({ draft: result.draft });
+      setCoverLetterMessage("AI draft created and saved locally. Verify every claim before use.");
+    } catch (error) {
+      setCoverLetterMessage(error instanceof Error ? error.message : "Could not create the AI draft.");
+    } finally {
+      setAiDrafting(false);
+    }
+  }
+
+  function updateSelectedCoverLetter(patch: Partial<CoverLetterDraftRecord>) {
+    if (!selected) return;
+    setCoverLetterDrafts((current) => ({
+      ...current,
+      [selected.job.id]: {
+        ...(current[selected.job.id] ?? { interest: "", evidence: "", draft: "", updatedAt: "" }),
+        ...patch,
+        updatedAt: new Date().toISOString(),
+      },
+    }));
+  }
+
+  async function copyCoverLetter() {
+    try {
+      await navigator.clipboard.writeText(coverLetterDrafts[selected?.job.id ?? ""]?.draft ?? "");
+      setCoverLetterMessage("Draft copied to clipboard.");
+    } catch {
+      setCoverLetterMessage("Clipboard access is unavailable. Select and copy the draft text manually.");
+    }
+  }
+
+  function downloadCoverLetter() {
+    const draft = coverLetterDrafts[selected?.job.id ?? ""]?.draft;
+    if (!selected || !draft) return;
+    const safeName = `${selected.job.company}-${selected.job.role}`.replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/g, "").toLowerCase() || "application";
+    const url = URL.createObjectURL(new Blob([draft], { type: "text/plain;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `cover-letter-${safeName}.txt`;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setCoverLetterMessage("Draft downloaded as a text file.");
+  }
+
+  async function restoreBackup(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (!file) return;
+    if (file.size > MAX_BACKUP_BYTES) {
+      setBackupMessage("This backup is too large to restore (maximum 23 MB).");
+      return;
+    }
+    let restoredState: PersistedState | null;
+    try {
+      restoredState = parseBackup(await file.text());
+    } catch {
+      setBackupMessage("Could not read the selected backup file.");
+      return;
+    }
+    if (!restoredState) {
+      setBackupMessage("This file is not a valid Jobpilot backup or uses an unsupported backup version.");
+      return;
+    }
+    if (!window.confirm("Restore this backup? It will replace the profile, saved jobs, application statuses, fetched listings, and local AI match reviews on this device.")) {
+      setBackupMessage("Restore cancelled. Your current data was not changed.");
+      return;
+    }
+    setBackupBusy(true);
+    setBackupMessage("Validating and restoring backup…");
+    const operation = saveQueue.current.catch(() => undefined).then(async () => {
+      const response = await fetch("/api/state", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(restoredState),
+      });
+      const result = await response.json() as PersistedState & { initialized?: boolean; error?: string };
+      if (!response.ok) throw new Error(result.error ?? "The backup data did not pass validation.");
+      setProfile(result.profile);
+      setSaved(result.saved);
+      setStatus(result.status);
+      setApplicationNotes(result.applicationNotes ?? {});
+      setApplicationFollowUps(result.applicationFollowUps ?? {});
+      setCoverLetterDrafts(result.coverLetterDrafts ?? {});
+      setMatchReviews(result.matchReviews ?? []);
+      setMatchCohortKey(result.matchCohortKey ?? "");
+      setMatchingSettings(result.matchingSettings ?? DEFAULT_MATCHING_SETTINGS);
+      setLiveJobs(result.liveJobs);
+      selectJob(result.liveJobs[0]?.id ?? "");
+      setStorageMessage("Backup restored and saved on this device.");
+    });
+    saveQueue.current = operation.then(() => undefined, () => undefined);
+    try {
+      await operation;
+      setBackupMessage("Backup restored successfully.");
+    } catch (error) {
+      setBackupMessage(error instanceof Error ? error.message : "Could not restore this backup.");
+    } finally {
+      setBackupBusy(false);
+    }
+  }
+
+  async function fetchLiveJobs() {
+    if (loadingJobs || loadingMoreJobs) return;
+    const searchGeneration = aiMatchGeneration.current;
+    setLoadingJobs(true);
+    setCvAnalyzedModel("");
+    setSourceMessage("");
+    setSourceErrors([]);
+    let fetchedJobs: Job[] = [];
+    try {
+      const response = await fetch("/api/jobs/search", { cache: "no-store" });
+      const result = await response.json() as { jobs?: Job[]; errors?: string[]; error?: string; nextArbeitnowPage?: number | null; nextJobicyCursor?: string | null };
+      if (!response.ok) throw new Error(result.error ?? "Could not fetch jobs.");
+      setSourceErrors(result.errors ?? []);
+      setNextArbeitnowPage(result.nextArbeitnowPage ?? null);
+      setNextJobicyCursor(result.nextJobicyCursor ?? null);
+      fetchedJobs = result.jobs ?? [];
+      const locationJobs = fetchedJobs.filter((job) => matchesPreferredLocation(job.location, profile.locations, job.mode, job.source));
+      const assessWithCurrentContext = localCvAnalysisReady && searchGeneration === aiMatchGeneration.current;
+      let analyzedJobs = fetchedJobs;
+      let completed = 0;
+      let cancelled = false;
+      let matchingWarning = "";
+      let detailedCount = 0;
+      if (assessWithCurrentContext) {
+        const candidates = jobsToAssess(locationJobs);
+        const generation = ++aiMatchGeneration.current;
+        const controller = new AbortController();
+        aiMatchAbortController.current = controller;
+        const outcome = await assessJobsLocally(candidates, controller.signal);
+        if (generation !== aiMatchGeneration.current) return;
+        completed = outcome.completed;
+        cancelled = outcome.cancelled;
+        matchingWarning = outcome.error;
+        detailedCount = outcome.detailedCount;
+        aiMatchAbortController.current = null;
+        analyzedJobs = fetchedJobs.map((job) => ({
+          ...job,
+          ...(outcome.screeningById.has(job.id) ? { screening: outcome.screeningById.get(job.id) } : { screening: undefined }),
+          ...(outcome.detailedById.has(job.id) ? { aiMatch: outcome.detailedById.get(job.id), detailedAnalysis: outcome.analysisById.get(job.id) } : { aiMatch: undefined, detailedAnalysis: undefined }),
+        }));
+        setCvAnalyzedModel(selectedAiModel);
+      }
+      setLiveJobs(analyzedJobs);
+      const locationCount = locationJobs.length;
+      setSourceMessage(result.jobs?.length
+        ? assessWithCurrentContext
+          ? `Local decision screening assessed ${completed} of ${locationCount} location-eligible jobs; ${detailedCount} received detailed analysis. ${cancelled ? "Assessment cancelled; fetched listings remain available." : matchingWarning ? `Some jobs remain unassessed: ${matchingWarning}` : ""} Scores are estimates, not hiring probabilities. Review the evidence and original postings.`
+          : cvText.trim() && !isLocalJobpilotPage()
+            ? "CV analysis is blocked here for privacy. Open Jobpilot from localhost on this laptop; no CV text was sent. Showing profile matches."
+            : cvText.trim()
+              ? `Found ${result.jobs.length} listings, but local decision screening is unavailable. Start/update Ollama to 0.35 or newer, choose an installed decision model, and try again. ${localAiStatus}`
+              : `Searched public job feeds and found ${result.jobs.length} listings; ${locationCount} match your location. Import your CV and select local models for the two-stage match.`
+        : "No listings came back from the public job feeds. Try again later.");
+      selectJob(locationJobs[0]?.id ?? "");
+    } catch (error) {
+      if (fetchedJobs.length) {
+        const fallback = fetchedJobs.filter((job) => matchesPreferredLocation(job.location, profile.locations, job.mode, job.source));
+        setLiveJobs(fetchedJobs.map((job) => ({ ...job, screening: undefined, aiMatch: undefined, detailedAnalysis: undefined })));
+        selectJob(fallback[0]?.id ?? "");
+        setSourceMessage(`Local job screening failed: ${error instanceof Error ? error.message : "unknown error"}. Jobs are still available to review; no hosted model fallback was used.`);
+      } else setSourceMessage(error instanceof Error ? error.message : "Could not fetch job listings.");
+    } finally {
+      aiMatchAbortController.current = null;
+      setAiMatchProgress(null);
+      setLoadingJobs(false);
+    }
+  }
+
+  async function fetchMoreJobs() {
+    if ((nextArbeitnowPage === null && nextJobicyCursor === null) || loadingMoreJobs || loadingJobs) return;
+    const searchGeneration = aiMatchGeneration.current;
+    setLoadingMoreJobs(true);
+    setSourceMessage("");
+    let fetchedMore: Job[] = [];
+    try {
+      const params = new URLSearchParams();
+      if (nextArbeitnowPage !== null) params.set("arbeitnowStartPage", String(nextArbeitnowPage));
+      if (nextJobicyCursor !== null) params.set("jobicyCursor", nextJobicyCursor);
+      const response = await fetch(`/api/jobs/search?${params}`, { cache: "no-store" });
+      const result = await response.json() as { jobs?: Job[]; errors?: string[]; error?: string; nextArbeitnowPage?: number | null; nextJobicyCursor?: string | null };
+      if (!response.ok) throw new Error(result.error ?? "Could not load more jobs.");
+      fetchedMore = result.jobs ?? [];
+      setNextArbeitnowPage(result.nextArbeitnowPage ?? null);
+      setNextJobicyCursor(result.nextJobicyCursor ?? null);
+      setSourceErrors((current) => [...current.filter((error) => !result.errors?.includes(error)), ...(result.errors ?? [])]);
+      setLiveJobs((current) => {
+        const seen = new Set(current.map((job) => job.sourceUrl ?? job.id));
+        return [...current, ...fetchedMore.filter((job) => !seen.has(job.sourceUrl ?? job.id))];
+      });
+      const assessWithCurrentContext = localCvAnalysisReady && searchGeneration === aiMatchGeneration.current;
+      if (!assessWithCurrentContext || !fetchedMore.length) {
+        const moreSources = [result.nextArbeitnowPage !== null && result.nextArbeitnowPage !== undefined ? "Arbeitnow" : "", result.nextJobicyCursor ? "Jobicy" : ""].filter(Boolean);
+        setSourceMessage(`Loaded ${fetchedMore.length} more listings. ${moreSources.length ? `More pages are available from ${moreSources.join(" and ")}.` : "No further pages are available."} ${assessWithCurrentContext ? "" : "Local two-stage CV matching is unavailable; listings remain visible."}`);
+        return;
+      }
+      const previouslyScreened = liveJobs.filter((job) => job.screening?.model === matchingSettings.decisionModel).map((job) => job.sourceUrl ?? job.id);
+      const candidates = jobsToAssess(fetchedMore.filter((job) => matchesPreferredLocation(job.location, profile.locations, job.mode, job.source)), previouslyScreened);
+      const generation = ++aiMatchGeneration.current;
+      const controller = new AbortController();
+      aiMatchAbortController.current = controller;
+      const outcome = await assessJobsLocally(candidates, controller.signal);
+      if (generation !== aiMatchGeneration.current) return;
+      const analyzed = fetchedMore.map((job) => ({ ...job,
+        ...(outcome.screeningById.has(job.id) ? { screening: outcome.screeningById.get(job.id) } : {}),
+        ...(outcome.detailedById.has(job.id) ? { aiMatch: outcome.detailedById.get(job.id), detailedAnalysis: outcome.analysisById.get(job.id) } : {}),
+      }));
+      setLiveJobs((current) => current.map((job) => analyzed.find((item) => item.id === job.id) ?? job));
+      setCvAnalyzedModel(selectedAiModel);
+      const moreSources = [result.nextArbeitnowPage !== null && result.nextArbeitnowPage !== undefined ? "Arbeitnow" : "", result.nextJobicyCursor ? "Jobicy" : ""].filter(Boolean);
+      setSourceMessage(`Loaded ${fetchedMore.length} more listings. Screened ${outcome.completed} of ${candidates.length}; detailed analysis ran for ${outcome.detailedCount}. ${outcome.error || (outcome.cancelled ? "Assessment cancelled." : "Scores are estimates, not hiring probabilities.")} ${moreSources.length ? `More pages are available from ${moreSources.join(" and ")}.` : "No further pages are available."}`);
+    } catch (error) {
+      if (fetchedMore.length) setSourceMessage(`Loaded ${fetchedMore.length} more listings, but local screening failed: ${error instanceof Error ? error.message : "unknown error"}.`);
+      else setSourceMessage(error instanceof Error ? error.message : "Could not load more jobs.");
+    } finally {
+      aiMatchAbortController.current = null;
+      setAiMatchProgress(null);
+      setLoadingMoreJobs(false);
+    }
+  }
+
+  function cancelAiAssessment() {
+    aiMatchAbortController.current?.abort();
+  }
+
+  return (
+    <main className="app-shell">
+      <aside className="sidebar">
+        <div className="brand"><span className="brand-mark">J</span><span>jobpilot<span className="brand-dot">.</span></span></div>
+        <div className="sidebar-label">WORKSPACE</div>
+        <button className={`nav-item ${activeView === "overview" ? "active" : ""}`} onClick={() => setActiveView("overview")}><span>▦</span> Overview</button>
+        <button className="nav-item" onClick={() => setActiveView("overview")}><span>⌕</span> Job matches <b className="nav-count">{ranked.length}</b></button>
+        <button className={`nav-item ${activeView === "applications" ? "active" : ""}`} onClick={() => setActiveView("applications")}><span>▤</span> Applications <b className="nav-count">{applicationJobs.length}</b></button>
+        <button className="nav-item" onClick={openProfile}><span>♧</span> Candidate profile</button>
+        <div className="sidebar-bottom">
+          <div className="local-status"><i /> Local workspace <span>●</span></div>
+          <button className="profile-chip profile-chip-button" onClick={openProfile}><div className="avatar">{profile.name.split(/\s+/).map((part) => part[0]).slice(0, 2).join("").toUpperCase()}</div><div><strong>{profile.name}</strong><small>Private to this device</small></div><span className="more">···</span></button>
+        </div>
+      </aside>
+
+      <section className="main-panel">
+        <header className="topbar"><div className="breadcrumb">Workspace <span>/</span> {activeView === "applications" ? "Applications" : "Overview"}</div><div className="topbar-right"><span className="privacy-pill"><i /> LOCAL ONLY</span><button className="icon-button" aria-label="Edit candidate profile" onClick={openProfile}>⚙</button><div className="avatar small">{profile.name.split(/\s+/).map((part) => part[0]).slice(0, 2).join("").toUpperCase()}</div></div></header>
+        <div className="content">
+          {activeView === "applications" ? (
+            <>
+              <div className="greeting-row"><div><div className="eyebrow">YOUR JOB SEARCH</div><h1>Applications <span>tracker.</span></h1><p className="subheading">Track saved roles and move each one through your review process.</p></div><button className="primary-button" onClick={() => setActiveView("overview")}>＋ Find jobs</button></div>
+              <div className="application-summary"><strong>{applicationJobs.length}</strong><span>roles in your tracker</span><span className="summary-divider"/><span>{applicationGroups.find((group) => group.title === "Applied")?.items.length ?? 0} applied</span><span>{saved.length} saved</span><span>{followUpJobs.length} follow-ups</span>{overdueFollowUps > 0 && <span className="follow-up-overdue-count">{overdueFollowUps} overdue</span>}</div>
+              <div className="application-board">{applicationGroups.map((group) => <section className="application-column" key={group.title}><div className="application-column-heading"><h2>{group.title}</h2><span>{group.items.length}</span></div>{group.items.length ? group.items.map((job) => <article className="application-card" key={job.id}><div className="application-company"><div className={`company-logo logo-${job.source.toLowerCase()}`}>{job.company.slice(0, 1)}</div><div><strong>{job.company}</strong><span>{job.location}</span></div></div><h3>{job.role}</h3><div className="follow-up-row"><label>Follow-up date<input type="date" aria-label={`Set follow-up date for ${job.company} — ${job.role}`} value={applicationFollowUps[job.id] ?? ""} onChange={(event) => updateFollowUp(job.id, event.target.value)}/></label>{applicationFollowUps[job.id] && <span className={`follow-up-badge ${applicationFollowUps[job.id] < todayKey ? "overdue" : applicationFollowUps[job.id] === todayKey ? "today" : "upcoming"}`}>{followUpLabel(applicationFollowUps[job.id])}</span>}</div><details className="application-notes"><summary>{applicationNotes[job.id]?.trim() ? "Edit notes" : "Add a note"}</summary><label><span className="visually-hidden">Notes for {job.role} at {job.company}</span><textarea maxLength={2000} rows={3} value={applicationNotes[job.id] ?? ""} onChange={(event) => setApplicationNotes((current) => ({ ...current, [job.id]: event.target.value }))} placeholder="Interview details, next steps, or why you saved this role…"/></label></details><div className="application-card-footer"><span>{job.source}</span><select aria-label={`Update ${job.company} application status`} value={status[job.id] ?? "Needs review"} onChange={(event) => setStatus((current) => ({ ...current, [job.id]: event.target.value as ApplicationStatus }))}><option>Needs review</option><option>Approved to prepare</option><option>Applied</option><option>Rejected</option></select></div></article>) : <p className="application-empty">No roles here yet.</p>}</section>)}</div>
+              <p className="application-footnote">Status changes, notes, and follow-up dates are saved on this device. Follow-up dates appear here as reminders; no notification is sent. “Applied” is a manual record; Jobpilot never submits applications.</p>
+            </>
+          ) : <>
+          <div className="greeting-row"><div><div className="eyebrow">{new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric" }).format(new Date()).toUpperCase()}</div><h1>Your next opportunity <span>starts here.</span></h1><p className="subheading">A focused view of live roles that match your preferences.</p></div><button className="primary-button" onClick={fetchLiveJobs} disabled={loadingJobs || loadingMoreJobs}><span>＋</span> {loadingJobs ? "Searching feeds…" : "Search jobs"}</button></div>
+
+          <section className="source-panel search-panel">
+            <div>
+              <span className="eyebrow">AUTOMATIC JOB SEARCH</span>
+              <strong>Search across public job feeds</strong>
+              <p>Jobpilot searches public feeds automatically. Import your CV and select a local Ollama model to analyze role fit on this laptop. No company names or board links are needed.</p>
+            </div>
+            <div className="source-controls">
+              <button className="primary-button" disabled={loadingJobs || loadingMoreJobs} onClick={fetchLiveJobs}>{loadingJobs ? "Searching job feeds…" : loadingMoreJobs ? "Loading more jobs…" : liveJobs.length ? "↻ Search for new jobs" : "Search jobs now"}</button>
+              <span className="feed-summary">Europe listings plus remote roles · Profile stays on this device</span>
+            </div>
+            <p className="directory-credit">Sources: <a href="https://www.arbeitnow.com/" target="_blank" rel="noreferrer">Arbeitnow</a>, <a href="https://remotive.com/remote-jobs/api" target="_blank" rel="noreferrer">Remotive</a>, and <a href="https://jobicy.com/jobs-rss-feed" target="_blank" rel="noreferrer">Jobicy</a>. Feed coverage varies; it does not include every employer.</p>
+            {sourceMessage && <p className="source-message" role="status">{sourceMessage}</p>}
+            {aiMatchProgress && aiMatchProgress.total > 0 && <div className="ai-assessment-progress" role="status" aria-live="polite">
+              <div><span>Screening and analyzing locally: {aiMatchProgress.completed} of {aiMatchProgress.total}</span><button type="button" className="secondary-button" onClick={cancelAiAssessment}>Cancel assessment</button></div>
+              <progress aria-label="CV matching progress" max={aiMatchProgress.total} value={aiMatchProgress.completed} />
+            </div>}
+            {cvText && <p className="source-message" role="status">CV ready for local matching · {localAiModels.includes(selectedAiModel) ? `Model: ${selectedAiModel}` : "Start Ollama and select a model to enable AI analysis"}{!isLocalJobpilotPage() && " · open Jobpilot at localhost to keep CV processing on this laptop"}</p>}
+            {sourceErrors.length > 0 && <ul className="source-errors" role="status">{sourceErrors.map((error) => <li key={error}>{error}</li>)}</ul>}
+            <p className="source-message" role="status">{storageMessage}</p>
+          </section>
+
+          <section className={`local-ai-panel ${localAiConnected === null ? "ai-checking" : localAiConnected ? "ai-connected" : "ai-disconnected"}`} aria-labelledby="local-ai-title" aria-live="polite">
+            <div className="local-ai-heading"><div><span className="eyebrow">ON-DEVICE AI</span><h2 id="local-ai-title">Local AI status</h2><p>Ollama runs the model on this laptop. Profile and job text stay with the local app.</p></div><button type="button" className="secondary-button" onClick={() => void refreshLocalAiStatus()} disabled={checkingLocalAi}>{checkingLocalAi ? "Checking…" : "↻ Refresh status"}</button></div>
+            <div className="local-ai-facts">
+              <div><span>Connection</span><strong className="ai-connection"><i />{localAiConnected === null ? "Checking" : localAiConnected ? systemOneAvailable ? "Connected · decision API ready" : "Connected · decision API unavailable" : "Not connected"}</strong></div>
+              <div><span>Ollama version</span><strong>{localAiRuntimeVersion ? `v${localAiRuntimeVersion}` : localAiConnected ? "Version unavailable" : "—"}</strong></div>
+              <div><span>Detailed analysis and drafting model</span><select className="ai-model-picker" aria-label="Select local Ollama chat model" value={selectedAiModel} onChange={(event) => chooseLocalAiModel(event.target.value)} disabled={!localAiModels.length || aiDrafting || checkingLocalAi}><option value="">Choose an installed model</option>{localAiModels.map((model) => <option key={model} value={model}>{model}</option>)}</select><small>{selectedAiModel && localAiModelDetails[selectedAiModel]?.details ? [localAiModelDetails[selectedAiModel].details?.family, localAiModelDetails[selectedAiModel].details?.parameterSize, localAiModelDetails[selectedAiModel].details?.quantizationLevel].filter(Boolean).join(" · ") : selectedAiModel ? "Installed locally · model tag shown above" : "Install a model with Ollama, then refresh"}</small></div>
+              <div><span>Decision model for first-stage screening</span><select className="ai-model-picker" aria-label="Select local decision model" value={matchingSettings.decisionModel} onChange={(event) => chooseDecisionModel(event.target.value)} disabled={!localAiModels.length || checkingLocalAi}><option value="">Choose an installed decision model</option>{localAiModels.map((model) => <option key={model} value={model}>{model}</option>)}</select><small>{systemOneAvailable ? "Uses Ollama /v1/systemone. Select an installed decision model." : "Requires Ollama 0.35 or newer."}</small></div>
+            </div>
+            <details className="matching-settings"><summary>Screening weights and detailed-analysis thresholds</summary>
+              <p>Weighted estimate = skills × {matchingSettings.weights.skills}% + experience × {matchingSettings.weights.experience}% + domain × {matchingSettings.weights.domain}% + (1 − explicit disqualifier risk) × {matchingSettings.weights.disqualifier}%. Weights total 100%.</p>
+              <div className="matching-settings-grid">{(["skills", "experience", "domain", "disqualifier"] as const).map((key) => <label key={key}>{key === "disqualifier" ? "Explicit disqualifier penalty" : `${key[0].toUpperCase()}${key.slice(1)} evidence`}<input type="number" min="0" max="100" value={matchingSettings.weights[key]} onChange={(event) => updateMatchWeight(key, Number(event.target.value))} />%</label>)}
                 <label>Send to detailed analysis at or above score<input type="number" min="0" max="100" value={matchingSettings.detailedScoreThreshold} onChange={(event) => setMatchingSettings((current) => ({ ...current, detailedScoreThreshold: Math.round(Math.max(0, Math.min(100, Number(event.target.value)))) }))} />%</label>
                 <label>Send to detailed analysis below confidence<input type="number" min="0" max="100" value={matchingSettings.detailedConfidenceThreshold} onChange={(event) => setMatchingSettings((current) => ({ ...current, detailedConfidenceThreshold: Math.round(Math.max(0, Math.min(100, Number(event.target.value)))) }))} />%</label>
               </div><small>Low confidence and missing information always go to detailed analysis. These scores are estimates, not chances of getting hired.</small>
