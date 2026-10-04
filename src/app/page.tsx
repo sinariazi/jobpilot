@@ -68,6 +68,8 @@ export default function Home() {
   const [aiMatchProgress, setAiMatchProgress] = useState<{ completed: number; total: number } | null>(null);
   const [nextArbeitnowPage, setNextArbeitnowPage] = useState<number | null>(null);
   const [nextJobicyCursor, setNextJobicyCursor] = useState<string | null>(null);
+  const [nextAdzunaPage, setNextAdzunaPage] = useState<number | null>(null);
+  const [includeAdzuna, setIncludeAdzuna] = useState(false);
   const [stateLoaded, setStateLoaded] = useState(false);
   const [storageMessage, setStorageMessage] = useState("Loading saved data from this device…");
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
@@ -710,12 +712,13 @@ export default function Home() {
     setSourceErrors([]);
     let fetchedJobs: Job[] = [];
     try {
-      const response = await fetch("/api/jobs/search", { cache: "no-store" });
-      const result = await response.json() as { jobs?: Job[]; errors?: string[]; error?: string; nextArbeitnowPage?: number | null; nextJobicyCursor?: string | null };
+      const response = await fetch("/api/jobs/search", { method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store", body: JSON.stringify({ includeAdzuna, roles: profile.roles, locations: profile.locations }) });
+      const result = await response.json() as { jobs?: Job[]; errors?: string[]; error?: string; nextArbeitnowPage?: number | null; nextJobicyCursor?: string | null; nextAdzunaPage?: number | null };
       if (!response.ok) throw new Error(result.error ?? "Could not fetch jobs.");
       setSourceErrors(result.errors ?? []);
       setNextArbeitnowPage(result.nextArbeitnowPage ?? null);
       setNextJobicyCursor(result.nextJobicyCursor ?? null);
+      setNextAdzunaPage(result.nextAdzunaPage ?? null);
       fetchedJobs = result.jobs ?? [];
       const locationJobs = fetchedJobs.filter((job) => matchesPreferredLocation(job.location, profile.locations, job.mode, job.source));
       const assessWithCurrentContext = localCvAnalysisReady && searchGeneration === aiMatchGeneration.current;
@@ -770,21 +773,19 @@ export default function Home() {
   }
 
   async function fetchMoreJobs() {
-    if ((nextArbeitnowPage === null && nextJobicyCursor === null) || loadingMoreJobs || loadingJobs) return;
+    if ((nextArbeitnowPage === null && nextJobicyCursor === null && nextAdzunaPage === null) || loadingMoreJobs || loadingJobs) return;
     const searchGeneration = aiMatchGeneration.current;
     setLoadingMoreJobs(true);
     setSourceMessage("");
     let fetchedMore: Job[] = [];
     try {
-      const params = new URLSearchParams();
-      if (nextArbeitnowPage !== null) params.set("arbeitnowStartPage", String(nextArbeitnowPage));
-      if (nextJobicyCursor !== null) params.set("jobicyCursor", nextJobicyCursor);
-      const response = await fetch(`/api/jobs/search?${params}`, { cache: "no-store" });
-      const result = await response.json() as { jobs?: Job[]; errors?: string[]; error?: string; nextArbeitnowPage?: number | null; nextJobicyCursor?: string | null };
+      const response = await fetch("/api/jobs/search", { method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store", body: JSON.stringify({ includeAdzuna, roles: profile.roles, locations: profile.locations, ...(nextArbeitnowPage !== null ? { arbeitnowStartPage: nextArbeitnowPage } : {}), ...(nextJobicyCursor !== null ? { jobicyCursor: nextJobicyCursor } : {}), ...(nextAdzunaPage !== null ? { adzunaPage: nextAdzunaPage } : {}) }) });
+      const result = await response.json() as { jobs?: Job[]; errors?: string[]; error?: string; nextArbeitnowPage?: number | null; nextJobicyCursor?: string | null; nextAdzunaPage?: number | null };
       if (!response.ok) throw new Error(result.error ?? "Could not load more jobs.");
       fetchedMore = result.jobs ?? [];
       setNextArbeitnowPage(result.nextArbeitnowPage ?? null);
       setNextJobicyCursor(result.nextJobicyCursor ?? null);
+      setNextAdzunaPage(result.nextAdzunaPage ?? null);
       setSourceErrors((current) => [...current.filter((error) => !result.errors?.includes(error)), ...(result.errors ?? [])]);
       setLiveJobs((current) => {
         const seen = new Set(current.map((job) => job.sourceUrl ?? job.id));
@@ -792,7 +793,7 @@ export default function Home() {
       });
       const assessWithCurrentContext = localCvAnalysisReady && searchGeneration === aiMatchGeneration.current;
       if (!assessWithCurrentContext || !fetchedMore.length) {
-        const moreSources = [result.nextArbeitnowPage !== null && result.nextArbeitnowPage !== undefined ? "Arbeitnow" : "", result.nextJobicyCursor ? "Jobicy" : ""].filter(Boolean);
+        const moreSources = [result.nextArbeitnowPage !== null && result.nextArbeitnowPage !== undefined ? "Arbeitnow" : "", result.nextJobicyCursor ? "Jobicy" : "", result.nextAdzunaPage !== null && result.nextAdzunaPage !== undefined ? "Adzuna" : ""].filter(Boolean);
         setSourceMessage(`Loaded ${fetchedMore.length} more listings. ${moreSources.length ? `More pages are available from ${moreSources.join(" and ")}.` : "No further pages are available."} ${assessWithCurrentContext ? "" : "Local two-stage CV matching is unavailable; listings remain visible."}`);
         return;
       }
@@ -809,7 +810,7 @@ export default function Home() {
       }));
       setLiveJobs((current) => current.map((job) => analyzed.find((item) => item.id === job.id) ?? job));
       setCvAnalyzedModel(selectedAiModel);
-      const moreSources = [result.nextArbeitnowPage !== null && result.nextArbeitnowPage !== undefined ? "Arbeitnow" : "", result.nextJobicyCursor ? "Jobicy" : ""].filter(Boolean);
+      const moreSources = [result.nextArbeitnowPage !== null && result.nextArbeitnowPage !== undefined ? "Arbeitnow" : "", result.nextJobicyCursor ? "Jobicy" : "", result.nextAdzunaPage !== null && result.nextAdzunaPage !== undefined ? "Adzuna" : ""].filter(Boolean);
       setSourceMessage(`Loaded ${fetchedMore.length} more listings. Screened ${outcome.completed} of ${candidates.length}; detailed analysis ran for ${outcome.detailedCount}. ${outcome.error || (outcome.cancelled ? "Assessment cancelled." : "Scores are estimates, not hiring probabilities.")} ${moreSources.length ? `More pages are available from ${moreSources.join(" and ")}.` : "No further pages are available."}`);
     } catch (error) {
       if (fetchedMore.length) setSourceMessage(`Loaded ${fetchedMore.length} more listings, but local screening failed: ${error instanceof Error ? error.message : "unknown error"}.`);
@@ -863,7 +864,8 @@ export default function Home() {
               <button className="primary-button" disabled={loadingJobs || loadingMoreJobs} onClick={fetchLiveJobs}>{loadingJobs ? "Searching job feeds…" : loadingMoreJobs ? "Loading more jobs…" : liveJobs.length ? "↻ Search for new jobs" : "Search jobs now"}</button>
               <span className="feed-summary">Europe listings plus remote roles · Profile stays on this device</span>
             </div>
-            <p className="directory-credit">Sources: <a href="https://www.arbeitnow.com/" target="_blank" rel="noreferrer">Arbeitnow</a>, <a href="https://remotive.com/remote-jobs/api" target="_blank" rel="noreferrer">Remotive</a>, and <a href="https://jobicy.com/jobs-rss-feed" target="_blank" rel="noreferrer">Jobicy</a>. Feed coverage varies; it does not include every employer.</p>
+            <label className="adzuna-opt-in"><input type="checkbox" checked={includeAdzuna} onChange={(event) => { setIncludeAdzuna(event.target.checked); if (!event.target.checked) setNextAdzunaPage(null); }}/><span><strong>Also search Adzuna</strong><small>Optional API account required. When checked, your target job titles and preferred locations are sent to Adzuna as search terms; your CV and personal contact details are not sent.</small></span></label>
+            <p className="directory-credit">Sources: <a href="https://www.arbeitnow.com/" target="_blank" rel="noreferrer">Arbeitnow</a>, <a href="https://remotive.com/remote-jobs/api" target="_blank" rel="noreferrer">Remotive</a>, and <a href="https://jobicy.com/jobs-rss-feed" target="_blank" rel="noreferrer">Jobicy</a>. Adzuna is optional and requires your API credentials. Feed coverage varies; it does not include every employer.</p>
             {sourceMessage && <p className="source-message" role="status">{sourceMessage}</p>}
             {aiMatchProgress && aiMatchProgress.total > 0 && <div className="ai-assessment-progress" role="status" aria-live="polite">
               <div><span>Screening and analyzing locally: {aiMatchProgress.completed} of {aiMatchProgress.total}</span><button type="button" className="secondary-button" onClick={cancelAiAssessment}>Cancel assessment</button></div>
@@ -927,16 +929,16 @@ export default function Home() {
                 <span className="location-filter">Locations: {profile.locations || "Any"}</span>
               </div>
               {filteredRanked.length > 0 ? <>
-                <div className="job-list">{visibleJobs.map(({ job, score, confidence, matched, titleMatched, roleMatch }) => <article key={job.id} className={`job-card ${selected?.job.id === job.id ? "selected" : ""}`}><button type="button" className="job-card-main" aria-pressed={selected?.job.id === job.id} onClick={() => { selectJob(job.id); setStatus((current) => current[job.id] ? current : { ...current, [job.id]: "Needs review" }); }}><div className="job-card-top"><div className={`company-logo logo-${job.source.toLowerCase()}`}>{job.company.slice(0, 1)}</div><span className="match-tag">{job.screening?.model === matchingSettings.decisionModel ? `${score}% estimate · ${confidence === null ? "confidence unavailable" : `${confidence}% confidence`}` : roleMatch ? "Target role" : `${score}% skills overlap`}</span></div><div className="job-title">{job.role}</div><div className="company-name">{job.company} <span>·</span> {job.location}</div><div className="job-meta"><span>◷ {job.posted}</span><span>⌂ {job.mode}</span><span className="source-tag">{job.source} · feed</span></div></button><div className="job-card-bottom"><div className="skill-pills">{matched.slice(0, 3).map((skill) => <span className={titleMatched.includes(skill) ? "skill-in-title" : ""} key={skill}>{skill}{titleMatched.includes(skill) && <small>title</small>}</span>)}{matched.length > 3 && <span className="more-skills">+{matched.length - 3}</span>}</div><button type="button" className={`bookmark ${saved.includes(job.id) ? "bookmarked" : ""}`} onClick={() => setSaved((current) => current.includes(job.id) ? current.filter((id) => id !== job.id) : [...current, job.id])} aria-label={saved.includes(job.id) ? "Remove saved job" : "Save job"} aria-pressed={saved.includes(job.id)}>{saved.includes(job.id) ? "★" : "☆"}</button></div></article>)}</div>
+                <div className="job-list">{visibleJobs.map(({ job, score, confidence, matched, titleMatched, roleMatch }) => <article key={job.id} className={`job-card ${selected?.job.id === job.id ? "selected" : ""}`}><button type="button" className="job-card-main" aria-pressed={selected?.job.id === job.id} onClick={() => { selectJob(job.id); setStatus((current) => current[job.id] ? current : { ...current, [job.id]: "Needs review" }); }}><div className="job-card-top"><div className={`company-logo logo-${job.source.toLowerCase()}`}>{job.company.slice(0, 1)}</div><span className="match-tag">{job.screening?.model === matchingSettings.decisionModel ? `${score}% estimate · ${confidence === null ? "confidence unavailable" : `${confidence}% confidence`}` : roleMatch ? "Target role" : `${score}% skills overlap`}</span></div><div className="job-title">{job.role}</div><div className="company-name">{job.company} <span>·</span> {job.location}</div><div className="job-meta"><span>◷ {job.posted}</span><span>⌂ {job.mode}</span><span className="source-tag">{job.source} · feed</span></div></button><div className="job-card-bottom"><div className="skill-pills">{matched.slice(0, 3).map((skill) => <span className={titleMatched.includes(skill) ? "skill-in-title" : ""} key={skill}>{skill}{titleMatched.includes(skill) && <small>title</small>}</span>)}{matched.length > 3 && <span className="more-skills">+{matched.length - 3}</span>}</div>{job.source === "Adzuna" && <a className="adzuna-credit" href={job.sourceAttributionUrl} target="_blank" rel="noreferrer">The Adzuna API</a>}<button type="button" className={`bookmark ${saved.includes(job.id) ? "bookmarked" : ""}`} onClick={() => setSaved((current) => current.includes(job.id) ? current.filter((id) => id !== job.id) : [...current, job.id])} aria-label={saved.includes(job.id) ? "Remove saved job" : "Save job"} aria-pressed={saved.includes(job.id)}>{saved.includes(job.id) ? "★" : "☆"}</button></div></article>)}</div>
                 {visibleJobs.length < filteredRanked.length && <button className="load-more" onClick={() => setVisibleCount((count) => count + 25)}>Show more jobs <span>({filteredRanked.length - visibleJobs.length} remaining)</span></button>}
               </> : <div className="empty-state">{liveJobs.length === 0 ? "No jobs loaded yet. Select “Search jobs now” to check public job feeds." : ranked.length === 0 ? query ? "No live jobs match that search. Try another role or company." : emptyJobMessage : "No jobs match these filters. Try a different date, work mode, or department."}</div>}
-              {(nextArbeitnowPage !== null || nextJobicyCursor !== null) && <button className="load-more" onClick={() => void fetchMoreJobs()} disabled={loadingMoreJobs || loadingJobs}>{loadingMoreJobs ? "Loading more jobs…" : "Load more jobs"}</button>}
+              {(nextArbeitnowPage !== null || nextJobicyCursor !== null || nextAdzunaPage !== null) && <button className="load-more" onClick={() => void fetchMoreJobs()} disabled={loadingMoreJobs || loadingJobs}>{loadingMoreJobs ? "Loading more jobs…" : "Load more jobs"}</button>}
             </section>
 
             {selected ? (
               <aside className="detail-card">
                     <div className="detail-actions">
-                <span className="detail-source"><i /> {selected.job.source} listing · <a href={selected.job.sourceAttributionUrl ?? selected.job.sourceUrl} target="_blank" rel="noreferrer">source</a></span>
+                <span className="detail-source"><i /> {selected.job.source} listing · <a href={selected.job.sourceAttributionUrl ?? selected.job.sourceUrl} target="_blank" rel="noreferrer">{selected.job.source === "Adzuna" ? "The Adzuna API" : "source"}</a></span>
                   <button className="icon-button" onClick={() => setSaved((current) => current.includes(selected.job.id) ? current.filter((id) => id !== selected.job.id) : [...current, selected.job.id])} aria-label="Save selected job">{saved.includes(selected.job.id) ? "★" : "☆"}</button>
                 </div>
                 <div className="detail-company"><div className={`company-logo big-logo logo-${selected.job.source.toLowerCase()}`}>{selected.job.company.slice(0, 1)}</div><div><h3>{selected.job.company}</h3><span>{selected.job.location} · {selected.job.mode}</span>{selected.job.department && <span>{selected.job.department}</span>}</div></div>
@@ -952,7 +954,7 @@ export default function Home() {
                 <div className="evidence-pills">{selected.matched.map((skill) => <span key={skill}>✓ {skill}{selected.titleMatched.includes(skill) && <small> · title</small>}</span>)}</div>
                 {selected.missing.length > 0 && <><div className="evidence-label gap-label">PROFILE SKILLS NOT MENTIONED <span>{selected.missing.length}</span></div><div className="evidence-pills missing-pills">{selected.missing.map((skill) => <span key={skill}>! {skill}</span>)}</div><p className="match-caveat">A skill missing from the posting text is not proof that the job requires it.</p></>}
                 <div className="divider"/>
-                <div id="job-description" className="description"><h4>Job description</h4><p className="job-description-text">{selected.job.description ?? selected.job.summary}</p></div>
+                <div id="job-description" className="description"><h4>Job description</h4>{selected.job.source === "Adzuna" && <p className="job-description-note">Adzuna returns a description snippet here. Open the original advert to review the complete requirements.</p>}<p className="job-description-text">{selected.job.description ?? selected.job.summary}</p></div>
                 <section className="cover-letter-draft" key={selected.job.id}>
                   <div className="cover-letter-heading"><div><h4>Cover letter draft</h4><p>Build an editable first draft for this role.</p></div><button type="button" className="secondary-button" onClick={() => setCoverLetterOpen((open) => !open)}>{coverLetterOpen ? "Close" : "Create draft"}</button></div>
                   {coverLetterOpen && <>

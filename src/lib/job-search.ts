@@ -1,4 +1,6 @@
 import { descriptionText } from "./greenhouse";
+import { adzunaLocationForMarket, adzunaMarketsForLocations, mapAdzunaPosting } from "./adzuna";
+import type { AdzunaPage } from "./adzuna";
 import type { Job } from "./types";
 
 type ArbeitnowPosting = {
@@ -38,6 +40,7 @@ type JobicyPosting = {
   jobIndustry?: string[];
 };
 type JobicyPage = { jobs?: JobicyPosting[]; nextCursor?: string | null; hasMore?: boolean; success?: boolean; error?: string };
+type AdzunaSearch = { roles: string; locations: string };
 
 function validHttpUrl(value: unknown): value is string {
   if (typeof value !== "string") return false;
@@ -174,22 +177,57 @@ async function jobicyJobs(retrievedAt: string, cursor?: string) {
   };
 }
 
-export async function searchPublicJobs(options: { arbeitnowStartPage?: number; jobicyCursor?: string } = {}) {
+const ADZUNA_RESULTS_PER_PAGE = 50;
+
+async function adzunaJobs(retrievedAt: string, search: AdzunaSearch, pageNumber: number) {
+  const appId = process.env.ADZUNA_APP_ID?.trim();
+  const appKey = process.env.ADZUNA_APP_KEY?.trim();
+  if (!appId || !appKey) return { jobs: [] as Job[], errors: ["Adzuna is enabled but not configured. Add ADZUNA_APP_ID and ADZUNA_APP_KEY to .env.local, then restart Jobpilot."] };
+  const markets = adzunaMarketsForLocations(search.locations);
+  if (!search.roles.trim()) return { jobs: [] as Job[], errors: ["Add target job titles to your profile before using Adzuna search."] };
+  if (!markets.length) return { jobs: [] as Job[], errors: ["Adzuna supports selected markets only. Add a supported country name (for example Austria or Switzerland) to your preferred locations."] };
+  const results = await Promise.all(markets.map(async (market) => {
+    const params = new URLSearchParams({
+      app_id: appId,
+      app_key: appKey,
+      "content-type": "application/json",
+      results_per_page: String(ADZUNA_RESULTS_PER_PAGE),
+      what: search.roles.trim(),
+      where: adzunaLocationForMarket(search.locations, market),
+    });
+    const response = await getJson<AdzunaPage>(`https://api.adzuna.com/v1/api/jobs/${market.code}/search/${pageNumber}?${params}`);
+    const postings = response.results ?? [];
+    return {
+      jobs: postings.map((posting) => mapAdzunaPosting(posting, market, retrievedAt)).filter((job): job is Job => job !== null),
+      hasMore: postings.length === ADZUNA_RESULTS_PER_PAGE,
+    };
+  }));
+  return {
+    jobs: results.flatMap((result) => result.jobs),
+    errors: [],
+    nextAdzunaPage: pageNumber < 1000 && results.some((result) => result.hasMore) ? pageNumber + 1 : null,
+  };
+}
+
+export async function searchPublicJobs(options: { arbeitnowStartPage?: number; jobicyCursor?: string; adzunaPage?: number; adzunaSearch?: AdzunaSearch } = {}) {
   const retrievedAt = new Date().toISOString();
   const startPage = options.arbeitnowStartPage ?? 1;
-  const loadingMore = options.arbeitnowStartPage !== undefined || options.jobicyCursor !== undefined;
+  const loadingMore = options.arbeitnowStartPage !== undefined || options.jobicyCursor !== undefined || options.adzunaPage !== undefined;
   const requestArbeitnow = !loadingMore || options.arbeitnowStartPage !== undefined;
   const requestRemotive = !loadingMore;
   const requestJobicy = !loadingMore || options.jobicyCursor !== undefined;
-  const [arbeitnowResult, remotiveResult, jobicyResult] = await Promise.all([
+  const requestAdzuna = options.adzunaSearch !== undefined && (!loadingMore || options.adzunaPage !== undefined);
+  const [arbeitnowResult, remotiveResult, jobicyResult, adzunaResult] = await Promise.all([
     requestArbeitnow ? Promise.allSettled([arbeitnowJobs(retrievedAt, startPage)]).then(([result]) => result) : Promise.resolve(null),
     requestRemotive ? Promise.allSettled([remotiveJobs(retrievedAt)]).then(([result]) => result) : Promise.resolve(null),
     requestJobicy ? Promise.allSettled([jobicyJobs(retrievedAt, options.jobicyCursor)]).then(([result]) => result) : Promise.resolve(null),
+    requestAdzuna ? Promise.allSettled([adzunaJobs(retrievedAt, options.adzunaSearch!, options.adzunaPage ?? 1)]).then(([result]) => result) : Promise.resolve(null),
   ]);
   let jobs: Job[] = [];
   const errors: string[] = [];
   let nextArbeitnowPage: number | null = loadingMore ? options.arbeitnowStartPage ?? null : null;
   let nextJobicyCursor: string | null = loadingMore ? options.jobicyCursor ?? null : null;
+  let nextAdzunaPage: number | null = null;
   if (arbeitnowResult) {
     if (arbeitnowResult.status === "fulfilled") {
       jobs = [...jobs, ...arbeitnowResult.value.jobs];
@@ -207,7 +245,14 @@ export async function searchPublicJobs(options: { arbeitnowStartPage?: number; j
       if (jobicyResult.value.paginationError) errors.push(jobicyResult.value.paginationError);
     } else errors.push("Jobicy is temporarily unavailable.");
   }
+  if (adzunaResult) {
+    if (adzunaResult.status === "fulfilled") {
+      jobs = [...jobs, ...adzunaResult.value.jobs];
+      errors.push(...adzunaResult.value.errors);
+      nextAdzunaPage = "nextAdzunaPage" in adzunaResult.value ? adzunaResult.value.nextAdzunaPage ?? null : null;
+    } else errors.push("Adzuna is temporarily unavailable. Check your API credentials and provider quota.");
+  }
   const unique = new Map<string, Job>();
   jobs.forEach((job) => unique.set(job.sourceUrl ?? job.id, job));
-  return { jobs: [...unique.values()], errors, retrievedAt, nextArbeitnowPage, nextJobicyCursor };
+  return { jobs: [...unique.values()], errors, retrievedAt, nextArbeitnowPage, nextJobicyCursor, nextAdzunaPage };
 }
