@@ -29,6 +29,33 @@ describe("extractCvSuggestionsFromText", () => {
     expect(result.notes).toContain("No skills section was detected. You can still enter skills manually.");
   });
 
+  it("recognizes numbered German section headings and inline skill headings", () => {
+    const result = extractCvSuggestionsFromText(`
+      01 BERUFLICHER WERDEGANG
+      Senior Software Engineer
+      Example GmbH | Wien
+      2021–2024
+      02 FACHLICHE KOMPETENZEN
+      TypeScript
+      Cloud Engineering
+      IT-Kenntnisse: AWS, PostgreSQL, Docker
+      03 AUSBILDUNG
+      MSc Informatik
+    `);
+
+    expect(result.roles).toBe("Senior Software Engineer");
+    expect(result.skills).toBe("TypeScript, Cloud Engineering, AWS, PostgreSQL, Docker");
+  });
+
+  it("extracts the role segment from dated lines that also contain the employer", () => {
+    const result = extractCvSuggestionsFromText(`
+      Professional Experience
+      2021–2024 | Senior Product Engineer | Example GmbH
+      2018–2021 | Technical Project Manager | Sample AG
+    `);
+    expect(result.roles).toBe("Senior Product Engineer; Technical Project Manager");
+  });
+
   it("keeps extracted text available in memory for local model matching", async () => {
     const text = "Professional experience\nSenior Engineer at Example Company from 2021 to 2025. Built TypeScript applications for customers.\nTechnical skills\nTypeScript, React, AWS.";
     const parsed = await parseCvFile(new File([text], "candidate-cv.txt", { type: "text/plain" }));
@@ -62,5 +89,23 @@ describe("joinPdfTextItems", () => {
     const suggestions = extractCvSuggestionsFromText(text);
     expect(suggestions.skills).toBe("TypeScript, React, AWS");
     expect(suggestions.roles).toBe("Senior Engineer");
+  });
+
+  it("keeps a full-width page heading ahead of two columns and does not mix the columns", () => {
+    const text = joinPdfTextItems([
+      { str: "Sina Riazi — CV", transform: [1, 0, 0, 1, 30, 780], width: 520 },
+      { str: "Technical skills", transform: [1, 0, 0, 1, 20, 730], width: 120 },
+      { str: "Professional experience", transform: [1, 0, 0, 1, 350, 730], width: 170 },
+      { str: "TypeScript, React", transform: [1, 0, 0, 1, 20, 710], width: 130 },
+      { str: "Senior Software Engineer", transform: [1, 0, 0, 1, 350, 710], width: 180 },
+      { str: "AWS, PostgreSQL", transform: [1, 0, 0, 1, 20, 690], width: 130 },
+      { str: "2021–2024", transform: [1, 0, 0, 1, 350, 690], width: 80 },
+      { str: "Education", transform: [1, 0, 0, 1, 30, 650], width: 80 },
+    ], 600);
+
+    expect(text).toBe("Sina Riazi — CV\nTechnical skills\nTypeScript, React\nAWS, PostgreSQL\nProfessional experience\nSenior Software Engineer\n2021–2024\nEducation");
+    const suggestions = extractCvSuggestionsFromText(text);
+    expect(suggestions.skills).toBe("TypeScript, React, AWS, PostgreSQL");
+    expect(suggestions.roles).toBe("Senior Software Engineer");
   });
 });
