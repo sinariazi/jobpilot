@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { matchesTargetRole, scoreJob } from "./matcher";
+import { isRelevantToProfile, matchesTargetRole, scoreJob } from "./matcher";
 import type { Job } from "./types";
 
 const role: Job = {
@@ -34,5 +34,22 @@ describe("matchesTargetRole", () => {
 
   it("does not mark roles when no target roles are configured", () => {
     expect(matchesTargetRole(role, "  ")).toBe(false);
+  });
+});
+
+
+describe("profile relevance filter", () => {
+  it("keeps jobs that match an explicitly chosen target role", () => {
+    expect(isRelevantToProfile({ ...role, role: "Senior Product Manager" }, [], "Product Manager")).toBe(true);
+  });
+
+  it("requires a title skill or multiple skill matches for larger profiles", () => {
+    expect(isRelevantToProfile(role, ["TypeScript", "React", "AWS"], "")).toBe(true);
+    expect(isRelevantToProfile({ ...role, summary: "A role requiring AWS." }, ["TypeScript", "React", "AWS"], "")).toBe(false);
+    expect(isRelevantToProfile({ ...role, role: "React Engineer", summary: "General engineering role." }, ["TypeScript", "React", "AWS"], "")).toBe(true);
+  });
+
+  it("hides everything when no profile matching criteria are set", () => {
+    expect(isRelevantToProfile(role, [], "")).toBe(false);
   });
 });
