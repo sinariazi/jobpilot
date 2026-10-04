@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractCvSuggestionsFromText } from "./cv-parser";
+import { extractCvSuggestionsFromText, parseCvFile } from "./cv-parser";
 
 describe("extractCvSuggestionsFromText", () => {
   it("extracts skill-section items and dated experience lines for review", () => {
@@ -27,5 +27,12 @@ describe("extractCvSuggestionsFromText", () => {
     expect(result.skills).toBe("");
     expect(result.roles).toBe("");
     expect(result.notes).toContain("No skills section was detected. You can still enter skills manually.");
+  });
+
+  it("keeps extracted text available in memory for local model matching", async () => {
+    const text = "Professional experience\nSenior Engineer at Example Company from 2021 to 2025. Built TypeScript applications for customers.\nTechnical skills\nTypeScript, React, AWS.";
+    const parsed = await parseCvFile(new File([text], "candidate-cv.txt", { type: "text/plain" }));
+    expect(parsed.sourceText).toBe(text);
+    expect(parsed.skills).toContain("TypeScript");
   });
 });
