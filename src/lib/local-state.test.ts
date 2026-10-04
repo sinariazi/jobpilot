@@ -49,6 +49,8 @@ describe("local state storage", () => {
       applicationNotes: { [exampleJob.id]: "Follow up with the hiring manager" },
       applicationFollowUps: { [exampleJob.id]: "2026-10-14" },
       coverLetterDrafts: { [exampleJob.id]: { interest: "The product", evidence: "Shipped a feature", draft: "Dear team", updatedAt: "2026-10-02T12:00:00.000Z" } },
+      matchReviews: [{ jobId: exampleJob.id, company: exampleJob.company, role: exampleJob.role, model: "local-model:latest", cohortKey: "a".repeat(64), score: 84, predictedRelevant: true, reviewedRelevant: true, reviewedAt: "2026-10-02T12:00:00.000Z" }],
+      matchCohortKey: "a".repeat(64),
       liveJobs: [exampleJob],
     };
 
@@ -107,12 +109,17 @@ describe("local state storage", () => {
 
     expect(parsePersistedState({
       ...defaultState(),
+      matchReviews: [{ jobId: "job-1", company: "Example", role: "Engineer", model: "local:latest", cohortKey: "invalid", score: 80, predictedRelevant: true, reviewedRelevant: false, reviewedAt: "2026-10-02T12:00:00.000Z" }],
+    })).toBeNull();
+
+    expect(parsePersistedState({
+      ...defaultState(),
       liveJobs: [{ ...exampleJob, aiMatch: { model: "local-model:latest", relevant: true, score: 101, reason: "Invalid score", cvEvidence: "Evidence" } }],
     })).toBeNull();
   });
 
   it("accepts older saved states without optional tracker fields", () => {
     const olderState = { profile: defaultState().profile, saved: [], status: {}, liveJobs: [] };
-    expect(parsePersistedState(olderState)).toEqual({ ...olderState, applicationNotes: {}, applicationFollowUps: {}, coverLetterDrafts: {} });
+    expect(parsePersistedState(olderState)).toEqual({ ...olderState, applicationNotes: {}, applicationFollowUps: {}, coverLetterDrafts: {}, matchReviews: [], matchCohortKey: "" });
   });
 });
