@@ -9,6 +9,7 @@ export type CvSuggestions = {
   roles: string;
   skills: string;
   notes: string[];
+  sourceText?: string;
   pageCount?: number;
 };
 
@@ -99,5 +100,5 @@ export async function parseCvFile(file: File): Promise<CvSuggestions> {
     throw new Error("No readable text was found. Scanned or image-only PDFs need OCR, which is not implemented yet.");
   }
   const suggestions = extractCvSuggestionsFromText(normalized);
-  return { ...suggestions, ...(pageCount ? { pageCount } : {}) };
+  return { ...suggestions, sourceText: normalized, ...(pageCount ? { pageCount } : {}) };
 }
