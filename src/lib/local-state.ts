@@ -16,7 +16,7 @@ const allowedStatuses = new Set<ApplicationStatus>([
 export type LoadedState = PersistedState & { initialized: boolean };
 
 export function defaultState(): LoadedState {
-  return { profile: defaultProfile, saved: [], status: {}, applicationNotes: {}, coverLetterDrafts: {}, liveJobs: [], initialized: false };
+  return { profile: defaultProfile, saved: [], status: {}, applicationNotes: {}, applicationFollowUps: {}, coverLetterDrafts: {}, liveJobs: [], initialized: false };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -104,6 +104,12 @@ export function parsePersistedState(value: unknown): PersistedState | null {
   if (statusEntries.length > MAX_TRACKED_JOBS || statusEntries.some(([id, status]) => !id || id.length > 300 || typeof status !== "string" || !allowedStatuses.has(status as ApplicationStatus))) return null;
   const applicationNotes = value.applicationNotes === undefined ? {} : value.applicationNotes;
   if (!isRecord(applicationNotes) || Object.entries(applicationNotes).length > MAX_TRACKED_JOBS || Object.entries(applicationNotes).some(([id, note]) => !id || id.length > 300 || typeof note !== "string" || note.length > 2000)) return null;
+  const applicationFollowUps = value.applicationFollowUps === undefined ? {} : value.applicationFollowUps;
+  if (!isRecord(applicationFollowUps) || Object.entries(applicationFollowUps).length > MAX_TRACKED_JOBS || Object.entries(applicationFollowUps).some(([id, date]) => {
+    if (!id || id.length > 300 || typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return true;
+    const parsed = new Date(`${date}T00:00:00.000Z`);
+    return !Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date;
+  })) return null;
   const coverLetterDrafts = value.coverLetterDrafts === undefined ? {} : value.coverLetterDrafts;
   if (!isRecord(coverLetterDrafts) || Object.entries(coverLetterDrafts).length > MAX_TRACKED_JOBS) return null;
   const parsedDrafts: Record<string, CoverLetterDraftRecord> = {};
@@ -123,6 +129,7 @@ export function parsePersistedState(value: unknown): PersistedState | null {
     saved,
     status: Object.fromEntries(statusEntries) as Record<string, ApplicationStatus>,
     applicationNotes: Object.fromEntries(Object.entries(applicationNotes)) as Record<string, string>,
+    applicationFollowUps: Object.fromEntries(Object.entries(applicationFollowUps)) as Record<string, string>,
     coverLetterDrafts: parsedDrafts,
     liveJobs: liveJobs as Job[],
   };
