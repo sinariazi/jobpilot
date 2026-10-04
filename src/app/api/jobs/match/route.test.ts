@@ -45,6 +45,16 @@ describe("local CV-to-job matching API", () => {
     expect(await response.json()).toEqual({ error: "The local model did not assess every listing. Try another installed model." });
   });
 
+  it("surfaces a short local Ollama error when inference is rejected", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ models: [{ name: requestBody.model }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "model requires more system memory (4.2 GiB) than is available (3.8 GiB)" }), { status: 500 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await POST(new Request("http://localhost/api/jobs/match", { method: "POST", body: JSON.stringify(requestBody) }));
+    expect(response.status).toBe(502);
+    expect((await response.json()).error).toContain("more system memory");
+  });
+
   it("refuses a non-loopback Ollama destination", async () => {
     vi.stubEnv("OLLAMA_BASE_URL", "http://example.com");
     const fetchMock = vi.fn();
