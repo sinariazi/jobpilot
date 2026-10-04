@@ -128,9 +128,9 @@ Jobpilot is designed as a single-user, local-first application. The browser hand
 
 ```mermaid
 flowchart TB
-    person["Candidate"] --> browser["Browser UI<br/>CV extraction and review"]
-    browser --> app["Local Jobpilot server<br/>Next.js pages and API routes"]
-    app -->|"Public listing requests"| feeds["Job feed APIs<br/>Arbeitnow · Remotive · Jobicy"]
+    person["Candidate"] --> browser["Browser UI: CV extraction and review"]
+    browser --> app["Local Jobpilot server: Next.js UI and API"]
+    app -->|"Public listing requests"| feeds["Job feeds: Arbeitnow, Remotive, Jobicy"]
     feeds -->|"Listings"| app
     app -->|"Loopback only: CV text and job descriptions"| ollama["Ollama on this computer<br/>decision model and chat model"]
     ollama -->|"Scores and analysis"| app
@@ -144,17 +144,17 @@ The CV file is not stored. Extracted text stays in memory for analysis and match
 
 ```mermaid
 flowchart TB
-    start["Candidate uploads CV and sets location preferences"] --> extract["Extract CV text in browser<br/>Optional scanned-page OCR on this computer"]
-    extract --> cv["Analyze CV with local Ollama<br/>Review suggested roles and skills"]
-    cv --> search["Search public feeds and normalize listings"]
-    search --> filter["Apply configured location filters<br/>Keep eligible listings visible"]
-    filter --> screen["Local decision model scores skills,<br/>experience, domain, risk, and information quality"]
-    screen --> route{"Detailed review threshold met,<br/>low confidence, or information unclear?"}
-    route -->|"Yes"| detailed["Local chat model checks requirements,<br/>gaps, and source evidence"]
+    start["Upload CV and set location preferences"] --> extract["Extract text in browser; optional local OCR"]
+    extract --> cv["Analyze CV with Ollama; review suggestions"]
+    cv --> search["Fetch and normalize public listings"]
+    search --> filter["Apply location filters; retain eligible listings"]
+    filter --> screen["Decision model scores skills, experience, domain, risk, and missing information"]
+    screen --> route{"Score threshold, low confidence, or unclear information?"}
+    route -->|"Yes"| detailed["Local chat model checks requirements, gaps, and evidence"]
     route -->|"No"| estimate["Keep first-stage estimate"]
     detailed --> results["Show score, confidence, breakdown,<br/>analysis, and original posting"]
     estimate --> results
-    results --> human["Candidate reviews and decides<br/>whether to apply"]
+    results --> human["Candidate reviews and decides whether to apply"]
 ```
 
 Default screening weights are 40% skills, 30% experience, 20% domain fit, and 10% inverse explicit-disqualifier risk. The default detailed-analysis route is a score of 65 or higher, confidence below 60, or missing/unclear information. Users can change these values in the app. Scores are estimates, not hiring probabilities; the local model's accuracy has not been established on a human-reviewed benchmark.
@@ -163,19 +163,18 @@ Default screening weights are 40% skills, 30% experience, 20% domain fit, and 10
 
 ```mermaid
 sequenceDiagram
-    actor User as Candidate
     participant UI as Browser UI
     participant App as Local Jobpilot API
     participant Feed as Public job feeds
     participant AI as Ollama on localhost
     participant Disk as Local JSON state
 
-    User->>UI: Upload CV and review profile
+    Note over UI: Candidate uploads CV and reviews profile
     UI->>App: Send extracted text for analysis
     App->>AI: Analyze CV on this computer
     AI-->>App: Summary, roles, skills, evidence
     App->>Disk: Save accepted profile fields
-    User->>UI: Search jobs
+    Note over UI: Candidate starts a job search
     UI->>App: Search with location preferences
     App->>Feed: Request public listings
     Feed-->>App: Return job listings
