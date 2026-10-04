@@ -14,18 +14,16 @@ export function matchesPreferredLocation(jobLocation: string, preferences: strin
 
   const remoteListing = /remote/i.test(jobMode) || actual.has("remote");
   if (!remoteListing) return false;
-  return alternatives.some((words) => {
-    const remotePreference = words.includes("remote");
-    if (!remotePreference) return false;
-    if (["worldwide", "anywhere", "global"].some((word) => actual.has(word))) return true;
-    const europePreference = ["europe", "emea"].some((word) => words.includes(word));
-    if (!europePreference) return actual.size === 1 && actual.has("remote");
-    if (["europe", "emea"].some((word) => actual.has(word))) return true;
-    // These feeds are Europe-scoped; remote postings with a city or country
-    // in their location field remain eligible for a Europe-remote preference.
-    if (source === "Arbeitnow" || source === "Jobicy") return true;
-    // Remotive does not apply a region filter, so a location such as "USA"
-    // must not be treated as eligible for a Europe-only preference.
-    return actual.size === 1 && actual.has("remote");
-  });
+  if (["worldwide", "anywhere", "global"].some((word) => actual.has(word))) return true;
+
+  const asksForAnyRemote = alternatives.some((words) => words.length === 1 && words[0] === "remote");
+  if (asksForAnyRemote) return true;
+
+  const asksForEuropeRemote = alternatives.some((words) => words.includes("remote") && ["europe", "emea"].some((region) => words.includes(region)));
+  const listingIsEuropeScoped = source === "Jobicy";
+  if (asksForEuropeRemote && (["europe", "emea"].some((region) => actual.has(region)) || (listingIsEuropeScoped && actual.has("remote")))) return true;
+
+  // A plain "Remote" label carries no country eligibility. Do not assume it
+  // includes the user's location unless the user explicitly chose any remote.
+  return false;
 }
