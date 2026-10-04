@@ -7,6 +7,7 @@ const state: PersistedState = {
   saved: ["job-1"],
   status: { "job-1": "Applied" },
   applicationNotes: { "job-1": "Interview scheduled" },
+  applicationFollowUps: { "job-1": "2026-10-14" },
   coverLetterDrafts: { "job-1": { interest: "The mission", evidence: "Shipped a feature", draft: "Dear Hiring Team", updatedAt: "2026-10-02T12:00:00.000Z" } },
   liveJobs: [],
 };
