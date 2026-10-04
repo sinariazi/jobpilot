@@ -64,6 +64,7 @@ To use Jobpilot another day, open Ollama, open a terminal in the `jobpilot-main`
 ## What Jobpilot does
 
 - Searches public job feeds automatically; you do not need to enter company names or board slugs. Public feeds do not include every vacancy.
+- Loads further pages from Arbeitnow and Jobicy when their APIs return a next-page link or cursor. Remotive's [public API](https://github.com/remotive-io/remote-jobs-api) returns its active result set in one response and currently documents no page or cursor parameter, so Jobpilot fetches that feed once per cache period rather than inventing pagination.
 - Filters by locations in your profile. Leave preferred locations blank only if you want jobs from any location. A generic “Remote” listing is not assumed to be available in Austria unless the listing/feed indicates it.
 - Uses local Ollama `/v1/systemone` decision screening for a fast first estimate, then a local chat model for shortlisted, uncertain, or incomplete cases. You can adjust score weights and detailed-analysis thresholds in the app. Scores are estimates, not hiring probabilities. Low-scoring jobs remain visible.
 - The default score weights are skills 40%, experience 30%, domain fit 20%, and penalty for explicit disqualifiers 10%. Detailed analysis runs by default at scores of 65 or higher, confidence below 60, or whenever important information is missing/unclear. Change these settings in Jobpilot; the score is not a probability of being hired.
@@ -91,7 +92,6 @@ Restart Jobpilot and choose English, German, or both in the CV upload section. T
 
 - Broaden location/country normalization and cover more languages and inconsistent feed formats.
 - Add a licensed job provider with broader employer and geography coverage, after checking provider terms.
-- Add Remotive and Jobicy pagination where their public APIs allow it. Arbeitnow pagination is available through **Load more jobs**.
 - Encrypt local profile, tracker, and backup data.
 - Tailor and export a CV from verified source material; currently Jobpilot analyzes CVs but does not generate tailored CV files.
 - Add application-form preparation and employer-specific ATS support; Jobpilot currently opens original postings but does not fill external forms.

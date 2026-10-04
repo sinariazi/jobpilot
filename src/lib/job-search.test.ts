@@ -11,7 +11,7 @@ describe("searchPublicJobs", () => {
       requests.push({ url, options });
       if (url.includes("arbeitnow")) return Response.json({ data: [{ slug: "role-a", company_name: "Example A", title: "Product Manager", description: "<p>Build a product</p>", remote: false, url: "https://employer.example/jobs/a", location: "Vienna" }] });
       if (url.includes("remotive")) return Response.json({ jobs: [{ id: 22, url: "https://remotive.com/remote-jobs/role-b", title: "Product Designer", company_name: "Example B", candidate_required_location: "Worldwide", job_type: "full_time", publication_date: "2026-10-01", description: "<p>Design products</p>" }] });
-      return Response.json({ jobs: [{ id: 33, url: "https://jobicy.com/jobs/role-c", jobTitle: "Product Lead", companyName: "Example C", jobGeo: "Europe", jobType: ["full-time"], pubDate: "2026-10-01", jobDescription: "<p>Lead a team</p>", jobIndustry: ["Management"] }] });
+      return Response.json({ jobs: [{ id: 33, url: "https://jobicy.com/jobs/role-c", jobTitle: "Product Lead", companyName: "Example C", jobGeo: "Europe", jobType: ["full-time"], pubDate: "2026-10-01", jobDescription: "<p>Lead a team</p>", jobIndustry: ["Management"] }], nextCursor: "next-jobicy-page", hasMore: true });
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -25,6 +25,7 @@ describe("searchPublicJobs", () => {
     expect(result.jobs.find((job) => job.source === "Jobicy")?.department).toBe("Management");
     expect(result.jobs.find((job) => job.source === "Jobicy")?.description).toBe("Lead a team");
     expect(result.errors).toEqual([]);
+    expect(result.nextJobicyCursor).toBe("next-jobicy-page");
     expect(requests.filter(({ url }) => url.includes("arbeitnow")).every(({ options }) => options?.cache === "no-store" && !("next" in (options ?? {})))).toBe(true);
   });
 
@@ -48,7 +49,7 @@ describe("searchPublicJobs", () => {
       const page = Number(new URL(url).searchParams.get("page"));
       return Response.json({
         data: [{ slug: `role-${page}`, company_name: "Example", title: "Engineer", url: `https://employer.example/jobs/${page}` }],
-        links: page === 10 ? { next: null } : { next: `https://www.arbeitnow.com/api/job-board-api?page=${page + 1}` },
+        links: { next: `https://www.arbeitnow.com/api/job-board-api?page=${page + 1}` },
       });
     }));
 
@@ -57,5 +58,85 @@ describe("searchPublicJobs", () => {
     expect(requests.every((url) => url.includes("arbeitnow"))).toBe(true);
     expect(result.jobs).toHaveLength(5);
     expect(result.nextArbeitnowPage).toBe(11);
+    expect(result.nextJobicyCursor).toBeNull();
+  });
+
+  it("uses Jobicy's opaque cursor for later pages without re-fetching complete feeds", async () => {
+    const requests: string[] = [];
+    const token = "opaque+cursor/with=reserved&characters";
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      requests.push(url);
+      if (url.includes("arbeitnow")) return Response.json({ data: [], links: { next: null } });
+      if (url.includes("remotive")) return Response.json({ jobs: [] });
+      const cursor = new URL(url).searchParams.get("cursor");
+      return cursor === null
+        ? Response.json({ jobs: [{ id: 101, url: "https://jobicy.com/jobs/first", jobTitle: "First role", companyName: "Example" }], nextCursor: token, hasMore: true })
+        : Response.json({ jobs: [{ id: 102, url: "https://jobicy.com/jobs/second", jobTitle: "Second role", companyName: "Example" }], nextCursor: null, hasMore: false });
+    }));
+
+    const firstPage = await searchPublicJobs();
+    expect(firstPage.nextJobicyCursor).toBe(token);
+    const secondPage = await searchPublicJobs({ jobicyCursor: firstPage.nextJobicyCursor! });
+
+    expect(secondPage.jobs.map((job) => job.sourceUrl)).toEqual(["https://jobicy.com/jobs/second"]);
+    expect(secondPage.nextJobicyCursor).toBeNull();
+    const jobicyRequests = requests.filter((url) => url.includes("jobicy.com/api/v2/remote-jobs"));
+    expect(new URL(jobicyRequests[0]).searchParams.get("cursor")).toBeNull();
+    expect(new URL(jobicyRequests[1]).searchParams.get("cursor")).toBe(token);
+    expect(requests.filter((url) => url.includes("remotive.com"))).toHaveLength(1);
+    expect(requests.filter((url) => url.includes("arbeitnow.com"))).toHaveLength(5);
+  });
+
+  it("keeps Jobicy page listings when a continuation token is missing", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("arbeitnow")) return Response.json({ data: [] });
+      if (url.includes("remotive")) return Response.json({ jobs: [] });
+      return Response.json({ jobs: [{ id: 103, url: "https://jobicy.com/jobs/loaded", jobTitle: "Loaded role", companyName: "Example" }], hasMore: true, nextCursor: null });
+    }));
+
+    const result = await searchPublicJobs();
+
+    expect(result.jobs.map((job) => job.sourceUrl)).toContain("https://jobicy.com/jobs/loaded");
+    expect(result.nextJobicyCursor).toBeNull();
+    expect(result.errors).toContain("Jobicy reported more listings without a continuation cursor; this page loaded, but further pages cannot be requested.");
+  });
+
+  it("loads the next page from both pageable feeds in one request", async () => {
+    const requests: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      requests.push(url);
+      if (url.includes("arbeitnow")) {
+        const page = Number(new URL(url).searchParams.get("page"));
+        return Response.json({ data: [{ slug: `role-${page}`, company_name: "Example", title: "Engineer", url: `https://employer.example/jobs/${page}` }], links: { next: page === 10 ? null : `https://www.arbeitnow.com/api/job-board-api?page=${page + 1}` } });
+      }
+      if (url.includes("remotive")) return Response.json({ jobs: [] });
+      expect(new URL(url).searchParams.get("cursor")).toBe("jobicy-next");
+      return Response.json({ jobs: [{ id: 121, url: "https://jobicy.com/jobs/page", jobTitle: "Jobicy role", companyName: "Example" }], nextCursor: "jobicy-after", hasMore: true });
+    }));
+
+    const result = await searchPublicJobs({ arbeitnowStartPage: 6, jobicyCursor: "jobicy-next" });
+
+    expect(result.jobs).toHaveLength(6);
+    expect(result.nextArbeitnowPage).toBeNull();
+    expect(result.nextJobicyCursor).toBe("jobicy-after");
+    expect(requests.filter((url) => url.includes("arbeitnow"))).toHaveLength(5);
+    expect(requests.filter((url) => url.includes("jobicy.com/api/v2/remote-jobs"))).toHaveLength(1);
+    expect(requests.some((url) => url.includes("remotive.com"))).toBe(false);
+  });
+
+  it("stops Arbeitnow pagination when the provider explicitly returns no next link", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      const page = Number(new URL(url).searchParams.get("page"));
+      return Response.json({ data: [{ slug: `role-${page}`, company_name: "Example", title: "Engineer", url: `https://employer.example/jobs/${page}` }], links: { next: null } });
+    }));
+
+    const result = await searchPublicJobs({ arbeitnowStartPage: 6 });
+
+    expect(result.jobs).toHaveLength(5);
+    expect(result.nextArbeitnowPage).toBeNull();
   });
 });

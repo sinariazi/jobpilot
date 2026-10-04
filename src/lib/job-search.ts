@@ -37,7 +37,7 @@ type JobicyPosting = {
   jobExcerpt?: string;
   jobIndustry?: string[];
 };
-type JobicyPage = { jobs?: JobicyPosting[] };
+type JobicyPage = { jobs?: JobicyPosting[]; nextCursor?: string | null; hasMore?: boolean; success?: boolean; error?: string };
 
 function validHttpUrl(value: unknown): value is string {
   if (typeof value !== "string") return false;
@@ -144,8 +144,8 @@ async function arbeitnowJobs(retrievedAt: string, startPage: number) {
   const jobs = pages.flatMap((page) => (page.data ?? []).map((posting) => mapArbeitnow(posting, retrievedAt)).filter((job): job is Job => job !== null));
   const lastPage = pages.at(-1);
   const nextLink = lastPage?.links?.next;
-  const hasMore = typeof nextLink === "string"
-    ? (() => {
+  const hasMore = lastPage?.links && "next" in lastPage.links
+    ? typeof nextLink === "string" && (() => {
       try {
         const url = new URL(nextLink, "https://www.arbeitnow.com");
         return url.hostname === "www.arbeitnow.com" && url.pathname === "/api/job-board-api" && Number(url.searchParams.get("page")) === startPage + ARBEITNOW_PAGES_PER_BATCH;
@@ -160,28 +160,54 @@ async function remotiveJobs(retrievedAt: string) {
   return (page.jobs ?? []).map((posting) => mapRemotive(posting, retrievedAt)).filter((job): job is Job => job !== null);
 }
 
-async function jobicyJobs(retrievedAt: string) {
-  const page = await getJson<JobicyPage>("https://jobicy.com/api/v2/remote-jobs?count=100&geo=europe", 3600);
-  return (page.jobs ?? []).map((posting) => mapJobicy(posting, retrievedAt)).filter((job): job is Job => job !== null);
+async function jobicyJobs(retrievedAt: string, cursor?: string) {
+  const params = new URLSearchParams({ count: "100", geo: "europe" });
+  if (cursor !== undefined) params.set("cursor", cursor);
+  const page = await getJson<JobicyPage>(`https://jobicy.com/api/v2/remote-jobs?${params}`, 3600);
+  if (page.success === false) throw new Error(typeof page.error === "string" ? page.error : "Jobicy rejected the request.");
+  const hasCursor = typeof page.nextCursor === "string" && page.nextCursor.length > 0;
+  const paginationError = page.hasMore === true && !hasCursor ? "Jobicy reported more listings without a continuation cursor; this page loaded, but further pages cannot be requested." : undefined;
+  return {
+    jobs: (page.jobs ?? []).map((posting) => mapJobicy(posting, retrievedAt)).filter((job): job is Job => job !== null),
+    nextJobicyCursor: page.hasMore === false || !hasCursor ? null : page.nextCursor!,
+    ...(paginationError ? { paginationError } : {}),
+  };
 }
 
-export async function searchPublicJobs(options: { arbeitnowStartPage?: number } = {}) {
+export async function searchPublicJobs(options: { arbeitnowStartPage?: number; jobicyCursor?: string } = {}) {
   const retrievedAt = new Date().toISOString();
   const startPage = options.arbeitnowStartPage ?? 1;
-  const loadingMore = startPage > 1;
-  const arbeitnowResult = await Promise.allSettled([arbeitnowJobs(retrievedAt, startPage)]);
-  const arbeitnow = arbeitnowResult[0];
-  let jobs = arbeitnow.status === "fulfilled" ? arbeitnow.value.jobs : [];
-  const errors = arbeitnow.status === "rejected" ? ["Arbeitnow is temporarily unavailable."] : [];
-  const nextArbeitnowPage = arbeitnow.status === "fulfilled" ? arbeitnow.value.nextArbeitnowPage : null;
-  if (!loadingMore) {
-    const otherFeeds = await Promise.allSettled([remotiveJobs(retrievedAt), jobicyJobs(retrievedAt)]);
-    jobs = [...jobs, ...otherFeeds.flatMap((feed) => feed.status === "fulfilled" ? feed.value : [])];
-    errors.push(...otherFeeds.flatMap((feed, index) => feed.status === "rejected"
-      ? [`${["Remotive", "Jobicy"][index]} is temporarily unavailable.`]
-      : []));
+  const loadingMore = options.arbeitnowStartPage !== undefined || options.jobicyCursor !== undefined;
+  const requestArbeitnow = !loadingMore || options.arbeitnowStartPage !== undefined;
+  const requestRemotive = !loadingMore;
+  const requestJobicy = !loadingMore || options.jobicyCursor !== undefined;
+  const [arbeitnowResult, remotiveResult, jobicyResult] = await Promise.all([
+    requestArbeitnow ? Promise.allSettled([arbeitnowJobs(retrievedAt, startPage)]).then(([result]) => result) : Promise.resolve(null),
+    requestRemotive ? Promise.allSettled([remotiveJobs(retrievedAt)]).then(([result]) => result) : Promise.resolve(null),
+    requestJobicy ? Promise.allSettled([jobicyJobs(retrievedAt, options.jobicyCursor)]).then(([result]) => result) : Promise.resolve(null),
+  ]);
+  let jobs: Job[] = [];
+  const errors: string[] = [];
+  let nextArbeitnowPage: number | null = loadingMore ? options.arbeitnowStartPage ?? null : null;
+  let nextJobicyCursor: string | null = loadingMore ? options.jobicyCursor ?? null : null;
+  if (arbeitnowResult) {
+    if (arbeitnowResult.status === "fulfilled") {
+      jobs = [...jobs, ...arbeitnowResult.value.jobs];
+      nextArbeitnowPage = arbeitnowResult.value.nextArbeitnowPage;
+    } else errors.push("Arbeitnow is temporarily unavailable.");
+  }
+  if (remotiveResult) {
+    if (remotiveResult.status === "fulfilled") jobs = [...jobs, ...remotiveResult.value];
+    else errors.push("Remotive is temporarily unavailable.");
+  }
+  if (jobicyResult) {
+    if (jobicyResult.status === "fulfilled") {
+      jobs = [...jobs, ...jobicyResult.value.jobs];
+      nextJobicyCursor = jobicyResult.value.nextJobicyCursor;
+      if (jobicyResult.value.paginationError) errors.push(jobicyResult.value.paginationError);
+    } else errors.push("Jobicy is temporarily unavailable.");
   }
   const unique = new Map<string, Job>();
   jobs.forEach((job) => unique.set(job.sourceUrl ?? job.id, job));
-  return { jobs: [...unique.values()], errors, retrievedAt, nextArbeitnowPage };
+  return { jobs: [...unique.values()], errors, retrievedAt, nextArbeitnowPage, nextJobicyCursor };
 }
