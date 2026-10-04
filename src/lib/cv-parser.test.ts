@@ -48,4 +48,19 @@ describe("joinPdfTextItems", () => {
     const suggestions = extractCvSuggestionsFromText(text);
     expect(suggestions.skills).toBe("TypeScript, React");
   });
+
+  it("keeps two PDF columns in reading order so skill and experience sections do not interleave", () => {
+    const text = joinPdfTextItems([
+      { str: "Skills", transform: [1, 0, 0, 1, 20, 720], width: 60 },
+      { str: "TypeScript, React", transform: [1, 0, 0, 1, 20, 700], width: 110 },
+      { str: "AWS", transform: [1, 0, 0, 1, 20, 680], width: 30 },
+      { str: "Experience", transform: [1, 0, 0, 1, 350, 720], width: 90 },
+      { str: "Senior Engineer", transform: [1, 0, 0, 1, 350, 700], width: 130 },
+      { str: "2020–2024", transform: [1, 0, 0, 1, 350, 680], width: 70 },
+    ], 600);
+    expect(text).toBe("Skills\nTypeScript, React\nAWS\nExperience\nSenior Engineer\n2020–2024");
+    const suggestions = extractCvSuggestionsFromText(text);
+    expect(suggestions.skills).toBe("TypeScript, React, AWS");
+    expect(suggestions.roles).toBe("Senior Engineer");
+  });
 });
