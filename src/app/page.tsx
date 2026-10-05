@@ -405,7 +405,9 @@ export default function Home() {
     let error = "";
     let detailWarning = "";
     let cancelled = false;
-    let completed = 0;
+    let screenedCount = 0;
+    let detailedCount = 0;
+    let detailedStageUnavailable = false;
     const detailedCandidates: Job[] = [];
     setAiMatchProgress({ completed: 0, total: candidates.length });
     for (let offset = 0; offset < candidates.length; offset += AI_MATCH_BATCH_SIZE) {
@@ -426,49 +428,53 @@ export default function Home() {
           screeningById.set(job.id, screening);
           if (shouldRunDetailedAnalysis(screening, matchingSettings)) detailedCandidates.push(job);
         }
-        completed += screened.length;
-        setAiMatchProgress({ completed, total: candidates.length + detailedCandidates.length });
+        screenedCount += screened.length;
+        setAiMatchProgress({ completed: screenedCount + detailedCount, total: candidates.length + detailedCandidates.length });
         setLiveJobs((current) => current.map((item) => screeningById.has(item.id) ? { ...item, screening: screeningById.get(item.id), aiMatch: undefined, detailedAnalysis: undefined } : item));
       } catch (cause) {
         if (signal.aborted) cancelled = true;
         else error = cause instanceof Error ? cause.message : "Local screening failed.";
         break;
       }
-    }
-    if (!cancelled && !error && detailedCandidates.length) {
+      if (!detailedCandidates.length || cancelled || error || detailedStageUnavailable) continue;
       if (!localAiModels.includes(selectedAiModel)) {
-        detailWarning = `First-stage scores are ready. Install or select a local chat model to analyze ${detailedCandidates.length} high-scoring or uncertain jobs in detail.`;
+        detailedStageUnavailable = true;
+        continue;
       }
-    }
-    if (!cancelled && !error && !detailWarning && detailedCandidates.length) {
-      const total = candidates.length + detailedCandidates.length;
-      for (let offset = 0; offset < detailedCandidates.length; offset += AI_MATCH_BATCH_SIZE) {
-        if (signal.aborted) { cancelled = true; break; }
-        const batch = detailedCandidates.slice(offset, offset + AI_MATCH_BATCH_SIZE);
-        setSourceMessage(`Detailed local analysis for ${Math.min(offset + batch.length, detailedCandidates.length)} of ${detailedCandidates.length} shortlisted or uncertain jobs…`);
-        try {
-          const response = await fetch("/api/jobs/match", {
-            method: "POST", headers: { "Content-Type": "application/json" }, signal,
-            body: JSON.stringify({ model: selectedAiModel, cvText: cvText.slice(0, MAX_CV_MATCH_CHARS), candidatePreferences: { targetRoles: profile.roles, preferredLocations: profile.locations, profileSkills: profile.skills }, jobs: batch.map((job) => ({ id: job.id, company: job.company, role: job.role, location: job.location, mode: job.mode, description: (job.description ?? job.summary).slice(0, 2_500) })) }),
-          });
-          const result = await response.json() as { matches?: Array<{ id: string; relevant: boolean; score: number; reason: string; cvEvidence: string; detailedAnalysis: NonNullable<Job["detailedAnalysis"]> }>; error?: string };
-          if (!response.ok) throw new Error(result.error ?? "Detailed local analysis failed.");
-          for (const match of result.matches ?? []) {
-            if (!batch.some((job) => job.id === match.id)) continue;
-            detailedById.set(match.id, { model: selectedAiModel, relevant: match.relevant, score: Math.max(0, Math.min(100, Math.round(match.score))), reason: match.reason, cvEvidence: match.cvEvidence });
-            analysisById.set(match.id, match.detailedAnalysis);
-          }
-          completed += batch.length;
-          setAiMatchProgress({ completed, total });
-          setLiveJobs((current) => current.map((job) => detailedById.has(job.id) ? { ...job, aiMatch: detailedById.get(job.id), detailedAnalysis: analysisById.get(job.id) } : job));
-        } catch (cause) {
-          if (signal.aborted) cancelled = true;
-          else error = cause instanceof Error ? cause.message : "Detailed local analysis failed.";
-          break;
+      const analyzedCountBeforeBatch = detailedCount;
+      const detailBatch = detailedCandidates.slice(analyzedCountBeforeBatch, analyzedCountBeforeBatch + AI_MATCH_BATCH_SIZE);
+      if (!detailBatch.length) continue;
+      if (signal.aborted) { cancelled = true; break; }
+      setSourceMessage(`Detailed local analysis for ${detailedCount + detailBatch.length} of ${detailedCandidates.length} shortlisted or uncertain jobs…`);
+      try {
+        const response = await fetch("/api/jobs/match", {
+          method: "POST", headers: { "Content-Type": "application/json" }, signal,
+          body: JSON.stringify({ model: selectedAiModel, cvText: cvText.slice(0, MAX_CV_MATCH_CHARS), candidatePreferences: { targetRoles: profile.roles, preferredLocations: profile.locations, profileSkills: profile.skills }, jobs: detailBatch.map((job) => ({ id: job.id, company: job.company, role: job.role, location: job.location, mode: job.mode, description: (job.description ?? job.summary).slice(0, 2_500) })) }),
+        });
+        const result = await response.json() as { matches?: Array<{ id: string; relevant: boolean; score: number; reason: string; cvEvidence: string; detailedAnalysis: NonNullable<Job["detailedAnalysis"]> }>; error?: string };
+        if (!response.ok) throw new Error(result.error ?? "Detailed local analysis failed.");
+        for (const match of result.matches ?? []) {
+          if (!detailBatch.some((job) => job.id === match.id)) continue;
+          detailedById.set(match.id, { model: selectedAiModel, relevant: match.relevant, score: Math.max(0, Math.min(100, Math.round(match.score))), reason: match.reason, cvEvidence: match.cvEvidence });
+          analysisById.set(match.id, match.detailedAnalysis);
+        }
+        detailedCount += detailBatch.length;
+        setAiMatchProgress({ completed: screenedCount + detailedCount, total: candidates.length + detailedCandidates.length });
+        setLiveJobs((current) => current.map((job) => detailedById.has(job.id) ? { ...job, aiMatch: detailedById.get(job.id), detailedAnalysis: analysisById.get(job.id) } : job));
+      } catch (cause) {
+        if (signal.aborted) cancelled = true;
+        else {
+          detailedStageUnavailable = true;
+          detailWarning = `Detailed analysis paused: ${cause instanceof Error ? cause.message : "the local chat model failed"}. Decision scores remain available.`;
         }
       }
     }
-    return { screeningById, detailedById, analysisById, error, detailWarning, cancelled, completed, total: candidates.length + detailedCandidates.length, detailedCount: detailedCandidates.length };
+    if (detailedStageUnavailable && !detailWarning && detailedCandidates.length) {
+      detailWarning = `Decision scores are ready. Install or select a local chat model to analyze ${detailedCandidates.length} high-scoring or uncertain jobs in detail.`;
+    } else if (detailedCount < detailedCandidates.length && !detailWarning && !cancelled && !error) {
+      detailWarning = `${detailedCandidates.length - detailedCount} shortlisted or uncertain jobs still need detailed analysis.`;
+    }
+    return { screeningById, detailedById, analysisById, error, detailWarning, cancelled, screenedCount, completed: screenedCount + detailedCount, total: candidates.length + detailedCandidates.length, detailedCount };
   }
 
   async function screenCurrentJobs() {
@@ -492,7 +498,7 @@ export default function Home() {
       const outcome = await assessJobsLocally(pending, controller.signal);
       if (generation !== aiMatchGeneration.current) return;
       setCvAnalyzedModel(matchingSettings.decisionModel);
-      setSourceMessage(`Local decision screening assessed ${outcome.completed} of ${pending.length} jobs${outcome.detailedCount && !outcome.detailWarning ? `; ${outcome.detailedCount} also received detailed analysis` : ""}.${outcome.error ? ` Some scores are still missing: ${outcome.error}` : outcome.detailWarning ? ` ${outcome.detailWarning}` : outcome.cancelled ? " Assessment cancelled." : " Scores are estimates, not hiring probabilities."}`);
+      setSourceMessage(`Local decision screening assessed ${outcome.screenedCount} of ${pending.length} jobs${outcome.detailedCount && !outcome.detailWarning ? `; ${outcome.detailedCount} also received detailed analysis` : ""}.${outcome.error ? ` Some scores are still missing: ${outcome.error}` : outcome.detailWarning ? ` ${outcome.detailWarning}` : outcome.cancelled ? " Assessment cancelled." : " Scores are estimates, not hiring probabilities."}`);
     } catch (error) {
       if (generation === aiMatchGeneration.current) setSourceMessage(`Local screening failed: ${error instanceof Error ? error.message : "unknown error"}. The listings remain available.`);
     } finally {
@@ -911,7 +917,7 @@ export default function Home() {
         aiMatchAbortController.current = controller;
         const outcome = await assessJobsLocally(candidates, controller.signal);
         if (generation !== aiMatchGeneration.current) return;
-        completed = outcome.completed;
+        completed = outcome.screenedCount;
         cancelled = outcome.cancelled;
         matchingWarning = outcome.error;
         detailedWarning = outcome.detailWarning;
@@ -1007,7 +1013,7 @@ export default function Home() {
       setLiveJobs((current) => current.map((job) => analyzed.find((item) => item.id === job.id) ?? job));
       setCvAnalyzedModel(matchingSettings.decisionModel);
       const moreSources = [result.nextArbeitnowPage !== null && result.nextArbeitnowPage !== undefined ? "Arbeitnow" : "", result.nextJobicyCursor ? "Jobicy" : ""].filter(Boolean);
-      setSourceMessage(`Loaded ${fetchedMore.length} more listings. Screened ${outcome.completed} of ${candidates.length}; detailed analysis ran for ${outcome.detailedCount}. ${outcome.error || outcome.detailWarning || (outcome.cancelled ? "Assessment cancelled." : "Scores are estimates, not hiring probabilities.")} ${moreSources.length ? `More pages are available from ${moreSources.join(" and ")}.` : "No further pages are available."}`);
+      setSourceMessage(`Loaded ${fetchedMore.length} more listings. Screened ${outcome.screenedCount} of ${candidates.length}; detailed analysis ran for ${outcome.detailedCount}. ${outcome.error || outcome.detailWarning || (outcome.cancelled ? "Assessment cancelled." : "Scores are estimates, not hiring probabilities.")} ${moreSources.length ? `More pages are available from ${moreSources.join(" and ")}.` : "No further pages are available."}`);
     } catch (error) {
       if (fetchedMore.length) setSourceMessage(`Loaded ${fetchedMore.length} more listings, but local screening failed: ${error instanceof Error ? error.message : "unknown error"}.`);
       else setSourceMessage(error instanceof Error ? error.message : "Could not load more jobs.");
