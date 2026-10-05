@@ -184,7 +184,10 @@ async function arbeitnowJobs(retrievedAt: string, startPage: number) {
     ? linkedNextPage
     : (lastPage?.data?.length ?? 0) > 0;
   const nextPage = startPage + ARBEITNOW_PAGES_PER_BATCH;
-  return { jobs, nextArbeitnowPage: hasMore && nextPage <= ARBEITNOW_MAX_START_PAGE ? nextPage : null, pageErrors, state: pageErrors.length === requests.length ? "failed" as const : pageErrors.length ? "partial" as const : "success" as const };
+  // If an established continuation batch is entirely unavailable, move past
+  // it so the UI can try later pages instead of retrying the same outage forever.
+  const failedContinuation = pages.length === 0 && startPage > 1;
+  return { jobs, nextArbeitnowPage: (hasMore || failedContinuation) && nextPage <= ARBEITNOW_MAX_START_PAGE ? nextPage : null, pageErrors, state: pageErrors.length === requests.length ? "failed" as const : pageErrors.length ? "partial" as const : "success" as const };
 }
 
 async function remotiveJobs(retrievedAt: string) {
