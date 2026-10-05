@@ -15,6 +15,15 @@ describe("public job search pagination API", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("rejects optional web search requests from non-local Jobpilot hosts", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await GET(new Request("https://example.test/api/jobs/search?includeWebSearch=1"));
+    expect(response.status).toBe(403);
+    expect((await response.json()).error).toContain("only when Jobpilot is opened on this computer");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("requests only the supplied Jobicy continuation page", async () => {
     const cursor = "opaque+cursor/with=reserved&characters";
     const requests: string[] = [];

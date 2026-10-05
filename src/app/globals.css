@@ -134,4 +134,9 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .found-job-description{margin-top:12px;border-top:1px solid #edf0ed;padding-top:9px;color:#4f6154;font-size:12px}
 .found-job-description summary{cursor:pointer;font-weight:600}
 .found-job-description p{max-height:300px;overflow:auto;margin:8px 0 2px;font-size:13px}
+.optional-web-search{display:flex;align-items:flex-start;gap:9px;margin-top:12px;padding:11px 12px;border:1px solid #dce7df;border-radius:6px;background:#f7faf7;color:#35483a;cursor:pointer}
+.optional-web-search input{width:16px;height:16px;margin:2px 0 0;accent-color:#286c43;flex:none}
+.optional-web-search span{display:grid;gap:4px}
+.optional-web-search strong{font-size:12px}
+.optional-web-search small{color:#5d6c61;font-size:11px;line-height:1.5}
 @media(max-width:640px){.found-jobs-controls,.found-job-heading,.found-job-meta{align-items:flex-start;flex-direction:column}.found-jobs-controls .search-box{width:100%}.found-job-meta a{margin-left:0}.found-job-row{padding:13px}.found-job-status{white-space:normal}}

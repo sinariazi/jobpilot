@@ -8,7 +8,14 @@ export async function GET(request: Request) {
   const jobicyCursor = url.searchParams.get("jobicyCursor");
   const locations = url.searchParams.get("locations") ?? "";
   const roles = url.searchParams.get("roles") ?? "";
+  const includeWebSearch = url.searchParams.get("includeWebSearch") === "1";
   if (locations.length > 2000 || roles.length > 2000) return Response.json({ error: "Search locations and job titles must each be 2,000 characters or less." }, { status: 400 });
+  if (includeWebSearch) {
+    const hostname = new URL(request.url).hostname.replace(/^\[|\]$/g, "");
+    if (!["localhost", "127.0.0.1", "::1"].includes(hostname)) {
+      return Response.json({ error: "Optional web search is available only when Jobpilot is opened on this computer." }, { status: 403 });
+    }
+  }
   const startPage = rawPage === null ? undefined : Number(rawPage);
   if (startPage !== undefined && (!Number.isSafeInteger(startPage) || startPage < 1 || (startPage - 1) % ARBEITNOW_PAGES_PER_BATCH !== 0 || startPage > 1001)) {
     return Response.json({ error: "Invalid job-feed page request." }, { status: 400 });
@@ -21,6 +28,7 @@ export async function GET(request: Request) {
     ...(jobicyCursor !== null ? { jobicyCursor } : {}),
     locations,
     roles,
+    includeWebSearch,
   });
   // A healthy feed can return listings that do not match the user's local
   // filters. That is a successful search with zero matches, not an outage.

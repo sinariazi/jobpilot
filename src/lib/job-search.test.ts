@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { searchPublicJobs } from "./job-search";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 const locations = [{ geoName: "Austria", geoSlug: "austria" }, { geoName: "Europe", geoSlug: "europe" }, { geoName: "Anywhere", geoSlug: "anywhere" }];
 function emptySourceResponse(url: string) {
@@ -12,6 +12,27 @@ function emptySourceResponse(url: string) {
 }
 
 describe("searchPublicJobs", () => {
+  it("adds opt-in Ollama web snippets to the same searchable pool without sending CV data", async () => {
+    vi.stubEnv("OLLAMA_API_KEY", "web-test-key");
+    const webRequests: Array<{ url: string; body?: string }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, options?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("ollama.com/api/web_search")) {
+        webRequests.push({ url, body: String(options?.body ?? "") });
+        return Response.json({ results: [{ title: "Solution Architect", url: "https://careers.example/jobs/sa", content: "Vienna, Austria · Cloud architecture position. Apply." }] });
+      }
+      return emptySourceResponse(url);
+    }));
+    const result = await searchPublicJobs({ locations: "Vienna, Austria", roles: "Solution Architect", includeWebSearch: true });
+    expect(result.jobs.map((job) => job.source)).toContain("Ollama Web Search");
+    expect(result.jobs[0]).toMatchObject({ listingVerification: "search-result", descriptionKind: "search-snippet", location: "Vienna, Austria" });
+    expect(result.sourceStatuses.find((source) => source.source === "Ollama Web Search")).toMatchObject({ state: "success", count: 1, fetchedCount: 1 });
+    expect(webRequests).toHaveLength(1);
+    expect(webRequests[0].body).toContain("Solution Architect");
+    expect(webRequests[0].body).toContain("Vienna, Austria");
+    expect(webRequests[0].body).not.toMatch(/cv|skills|description/i);
+  });
+
   it("normalizes the public feeds with original source details and retrieval metadata", async () => {
     const requests: Array<{ url: string; options?: RequestInit }> = [];
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, options?: RequestInit) => {

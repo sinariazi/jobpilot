@@ -1,6 +1,7 @@
 import { descriptionText } from "./greenhouse";
 import { matchesTargetRole } from "./matcher";
 import { matchesPreferredLocation, resolveProviderGeographies, type ProviderGeography } from "./locations";
+import { searchWithOllamaWeb } from "./ollama-web-search";
 import type { Job } from "./types";
 
 type ArbeitnowPosting = {
@@ -47,6 +48,7 @@ export const PUBLIC_JOB_SOURCES = [
   { name: "Remotive", access: "Public JSON API; no key", geography: "Remote roles with candidate eligibility text; not a broad local Austria board", fields: "Title, company, required location, job type, category, HTML description, date, source link", freshness: "Listings are delayed 24 hours; cache and fetch no more than four times daily", restriction: "Link the Remotive listing and identify Remotive; not for reposting to third-party job boards" },
   { name: "Jobicy", access: "Public JSON API; no key or registration", geography: "Remote jobs; location and keyword filters; rolling seven-day feed", fields: "Title, company, geo eligibility, type, industry, description, date, Jobicy link", freshness: "Three-hour publication delay; only the last seven days; cursor is valid 24 hours", restriction: "Preserve canonical Jobicy link and source attribution; avoid excessive requests" },
 ] as const;
+const OPTIONAL_WEB_SOURCE = "Ollama Web Search";
 
 function validHttpUrl(value: unknown): value is string {
   if (typeof value !== "string") return false;
@@ -252,7 +254,11 @@ function normalizedIdentity(value: string) {
 }
 
 function mergeDuplicate(previous: Job, current: Job): Job {
-  const preferred = (current.description?.length ?? 0) > (previous.description?.length ?? 0) ? current : previous;
+  const previousIsSearchResult = previous.listingVerification === "search-result";
+  const currentIsSearchResult = current.listingVerification === "search-result";
+  const preferred = previousIsSearchResult !== currentIsSearchResult
+    ? previousIsSearchResult ? current : previous
+    : (current.description?.length ?? 0) > (previous.description?.length ?? 0) ? current : previous;
   return {
     ...preferred,
     ...(preferred.description ? {} : previous.description || current.description ? { description: previous.description || current.description } : {}),
@@ -261,19 +267,22 @@ function mergeDuplicate(previous: Job, current: Job): Job {
   };
 }
 
-export async function searchPublicJobs(options: { arbeitnowStartPage?: number; jobicyCursor?: string; locations?: string; roles?: string } = {}) {
+export async function searchPublicJobs(options: { arbeitnowStartPage?: number; jobicyCursor?: string; locations?: string; roles?: string; includeWebSearch?: boolean } = {}) {
   const retrievedAt = new Date().toISOString();
   const startPage = options.arbeitnowStartPage ?? 1;
   const loadingMore = options.arbeitnowStartPage !== undefined || options.jobicyCursor !== undefined;
   const requestArbeitnow = !loadingMore || options.arbeitnowStartPage !== undefined;
   const requestRemotive = !loadingMore;
   const requestJobicy = !loadingMore || options.jobicyCursor !== undefined;
-  const [geoOutcome, arbeitnowResult, remotiveResult] = await Promise.all([
+  const requestWebSearch = options.includeWebSearch === true && !loadingMore;
+  const [geoOutcome, arbeitnowResult, remotiveResult, webSearchResult] = await Promise.all([
     requestJobicy ? getJson<JobicyLocationsPage>("https://jobicy.com/api/v2/remote-jobs?get=locations", 86400)
       .then((data) => ({ state: "success" as const, value: resolveProviderGeographies(options.locations ?? "", (data.locations ?? []).flatMap((item) => item.geoName && item.geoSlug ? [{ name: item.geoName, slug: item.geoSlug }] : [])) }))
       .catch(() => ({ state: "failed" as const, error: "Jobicy's public location list is unavailable; its feed was skipped." })) : Promise.resolve(null),
     requestArbeitnow ? arbeitnowJobs(retrievedAt, startPage).then((result) => ({ status: "fulfilled" as const, value: result }), (reason) => ({ status: "rejected" as const, reason })) : Promise.resolve(null),
     requestRemotive ? remotiveJobs(retrievedAt).then((value) => ({ status: "fulfilled" as const, value }), (reason) => ({ status: "rejected" as const, reason })) : Promise.resolve(null),
+    requestWebSearch ? searchWithOllamaWeb({ roles: options.roles ?? "", locations: options.locations ?? "" })
+      .then((value) => ({ status: "fulfilled" as const, value }), (reason) => ({ status: "rejected" as const, reason })) : Promise.resolve(null),
   ]);
   const geoResult = geoOutcome?.state === "success" ? geoOutcome.value : null;
   const jobicyResult = requestJobicy && geoResult
@@ -308,6 +317,15 @@ export async function searchPublicJobs(options: { arbeitnowStartPage?: number; j
       nextJobicyCursor = jobicyResult.value.nextJobicyCursor;
     } else errors.push("Jobicy is temporarily unavailable.");
   }
+  if (webSearchResult) {
+    if (webSearchResult.status === "fulfilled") {
+      jobsBySource.set(OPTIONAL_WEB_SOURCE, webSearchResult.value.jobs);
+      if (webSearchResult.value.error) errors.push(webSearchResult.value.error);
+    } else {
+      const message = webSearchResult.reason instanceof Error ? webSearchResult.reason.message : "Ollama Web Search failed. Public feed results are still available.";
+      errors.push(message);
+    }
+  }
   const candidates = [...jobsBySource.values()].flat();
   const unique = new Map<string, Job>();
   for (const job of candidates) {
@@ -329,5 +347,19 @@ export async function searchPublicJobs(options: { arbeitnowStartPage?: number; j
         : errors.some((error) => error.startsWith(source.name) && !failed);
     return { source: source.name, state: skipped.has(source.name) ? "failed" : failed ? sourceJobs.length ? "partial" : "failed" : partial ? "partial" : "success", count: sourceJobs.length, fetchedCount: jobsBySource.get(source.name)?.length ?? 0, checkedAt: retrievedAt, ...(errors.find((error) => error.startsWith(source.name)) ? { message: errors.find((error) => error.startsWith(source.name)) } : geoResult?.warning && source.name === "Jobicy" ? { message: geoResult.warning } : {}) };
   });
+  if (requestWebSearch) {
+    const webJobs = jobs.filter((job) => job.sourceAliases?.includes(OPTIONAL_WEB_SOURCE) || job.source === OPTIONAL_WEB_SOURCE);
+    const webError = webSearchResult?.status === "rejected"
+      ? (webSearchResult.reason instanceof Error ? webSearchResult.reason.message : "Ollama Web Search failed.")
+      : webSearchResult?.value.error;
+    sourceStatuses.push({
+      source: OPTIONAL_WEB_SOURCE,
+      state: !webSearchResult || webSearchResult.status === "rejected" ? "failed" : webError ? "partial" : "success",
+      count: webJobs.length,
+      fetchedCount: jobsBySource.get(OPTIONAL_WEB_SOURCE)?.length ?? 0,
+      checkedAt: retrievedAt,
+      ...(webError ? { message: webError } : { message: "Web result snippets only; open the original result to verify employer, location, details, and availability." }),
+    });
+  }
   return { jobs, discoveredJobs, errors, retrievedAt, nextArbeitnowPage, nextJobicyCursor, sourceStatuses };
 }

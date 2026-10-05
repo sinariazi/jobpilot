@@ -11,6 +11,9 @@ export type Job = {
   sourceUrl?: string;
   sourceAttributionUrl?: string;
   sourceLocationScope?: string;
+  locationEvidence?: string;
+  listingVerification?: "search-result";
+  descriptionKind?: "search-snippet";
   sourceAliases?: string[];
   retrievedAt?: string;
   summary: string;
@@ -101,6 +104,7 @@ export type PersistedState = {
   matchReviews?: MatchReview[];
   matchCohortKey?: string;
   matchingSettings?: MatchingSettings;
+  webSearchEnabled?: boolean;
   /** A short extracted-text excerpt and analysis, stored locally for rescreening after reload. */
   cvText?: string;
   cvFileName?: string;
@@ -111,6 +115,6 @@ export type PersistedState = {
 export const defaultProfile: CandidateProfile = {
   name: "Candidate",
   roles: "",
-  locations: "",
+  locations: "Austria",
   skills: "",
 };

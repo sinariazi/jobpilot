@@ -19,7 +19,7 @@ const allowedStatuses = new Set<ApplicationStatus>([
 export type LoadedState = PersistedState & { initialized: boolean };
 
 export function defaultState(): LoadedState {
-  return { profile: defaultProfile, saved: [], status: {}, applicationNotes: {}, applicationFollowUps: {}, coverLetterDrafts: {}, matchReviews: [], matchCohortKey: "", matchingSettings: normalizeMatchingSettings(undefined), liveJobs: [], initialized: false };
+  return { profile: defaultProfile, saved: [], status: {}, applicationNotes: {}, applicationFollowUps: {}, coverLetterDrafts: {}, matchReviews: [], matchCohortKey: "", matchingSettings: normalizeMatchingSettings(undefined), webSearchEnabled: false, liveJobs: [], initialized: false };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -79,6 +79,9 @@ function parseJob(value: unknown): Job | null {
   if (value.postedAt !== undefined && (!boundedString(value.postedAt, 50) || !Number.isFinite(Date.parse(value.postedAt)))) return null;
   if (value.department !== undefined && !boundedString(value.department, 500)) return null;
   if (value.sourceLocationScope !== undefined && !boundedString(value.sourceLocationScope, 100)) return null;
+  if (value.locationEvidence !== undefined && !boundedString(value.locationEvidence, 100)) return null;
+  if (value.listingVerification !== undefined && value.listingVerification !== "search-result") return null;
+  if (value.descriptionKind !== undefined && value.descriptionKind !== "search-snippet") return null;
   const sourceAliases = value.sourceAliases === undefined ? undefined : parseStringArray(value.sourceAliases, 10, 100);
   if (value.sourceAliases !== undefined && !sourceAliases) return null;
   if (value.description !== undefined && (typeof value.description !== "string" || value.description.length > 8000)) return null;
@@ -125,6 +128,9 @@ function parseJob(value: unknown): Job | null {
     ...(typeof value.description === "string" ? { description: value.description.trim() } : {}),
     ...(typeof value.sourceUrl === "string" ? { sourceUrl: value.sourceUrl } : {}),
     ...(typeof value.sourceLocationScope === "string" ? { sourceLocationScope: value.sourceLocationScope } : {}),
+    ...(typeof value.locationEvidence === "string" ? { locationEvidence: value.locationEvidence } : {}),
+    ...(value.listingVerification === "search-result" ? { listingVerification: value.listingVerification } : {}),
+    ...(value.descriptionKind === "search-snippet" ? { descriptionKind: value.descriptionKind } : {}),
     ...(sourceAliases ? { sourceAliases } : {}),
     ...(typeof value.retrievedAt === "string" ? { retrievedAt: value.retrievedAt } : {}),
     ...(isRecord(value.aiMatch) ? { aiMatch: {
@@ -186,6 +192,7 @@ export function parsePersistedState(value: unknown): PersistedState | null {
   const matchCohortKey = value.matchCohortKey === undefined ? "" : value.matchCohortKey;
   if (typeof matchCohortKey !== "string" || (matchCohortKey !== "" && !/^[a-f0-9]{64}$/.test(matchCohortKey))) return null;
   if (value.cvText !== undefined && (typeof value.cvText !== "string" || value.cvText.length > 10_000)) return null;
+  if (value.webSearchEnabled !== undefined && typeof value.webSearchEnabled !== "boolean") return null;
   if (value.cvFileName !== undefined && (typeof value.cvFileName !== "string" || value.cvFileName.length > 200)) return null;
   let cvAnalysis: PersistedCvAnalysis | undefined;
   if (value.cvAnalysis !== undefined) {
@@ -218,6 +225,7 @@ export function parsePersistedState(value: unknown): PersistedState | null {
     matchReviews: parsedMatchReviews,
     matchCohortKey,
     matchingSettings,
+    webSearchEnabled: value.webSearchEnabled === true,
     ...(typeof value.cvText === "string" ? { cvText: value.cvText } : {}),
     ...(typeof value.cvFileName === "string" ? { cvFileName: value.cvFileName } : {}),
     ...(cvAnalysis ? { cvAnalysis } : {}),
