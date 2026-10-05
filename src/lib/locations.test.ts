@@ -27,15 +27,18 @@ describe("preferred job locations", () => {
     expect(matchesPreferredLocation("Genève, Switzerland", "Geneva")).toBe(true);
   });
 
-  it("matches remote Europe against a Europe-wide remote listing", () => {
+  it("matches regional remote listings only when the user chose that region", () => {
     expect(matchesPreferredLocation("Europe", "Vienna, Austria; Remote Europe", "Remote", "Jobicy")).toBe(true);
+    expect(matchesPreferredLocation("Europe", "Vienna, Austria", "Remote", "Remotive")).toBe(false);
+    expect(matchesPreferredLocation("Europe", "Wien", "Remote", "Remotive")).toBe(false);
     expect(matchesPreferredLocation("Vienna, Austria", "Vienna, Austria; Remote Europe", "Remote", "Arbeitnow")).toBe(true);
-    expect(matchesPreferredLocation("Europe", "Vienna, Austria", "Remote", "Remotive")).toBe(true);
     expect(matchesPreferredLocation("Remote", "Vienna, Austria; Remote Europe", "Remote", "Remotive")).toBe(false);
   });
 
-  it("accepts a Jobicy role eligible for the queried country when its displayed geo is broad", () => {
-    expect(matchesPreferredLocation("Remote", "Austria", "Remote", "Jobicy", "Austria")).toBe(true);
+  it("does not treat a provider query scope or broad EMEA label as job eligibility", () => {
+    expect(matchesPreferredLocation("Remote", "Austria", "Remote", "Jobicy", "Austria")).toBe(false);
+    expect(matchesPreferredLocation("EMEA", "Vienna, Austria", "Remote", "Jobicy", "Europe")).toBe(false);
+    expect(matchesPreferredLocation("Americas, Europe, Israel", "Vienna, Austria", "Remote", "Remotive")).toBe(false);
   });
 
   it("does not match a remote listing with an explicit conflicting region", () => {
@@ -51,6 +54,6 @@ describe("preferred job locations", () => {
     expect(matchesPreferredLocation("Worldwide", "Austria", "Remote", "Remotive")).toBe(true);
     expect(matchesPreferredLocation("Remote", "Austria; Remote", "Remote", "Remotive")).toBe(true);
     expect(matchesPreferredLocation("Remote", "Austria; Remote Europe", "Remote", "Remotive")).toBe(false);
-    expect(matchesPreferredLocation("Remote", "Austria; Remote Europe", "Remote", "Jobicy")).toBe(true);
+    expect(matchesPreferredLocation("Remote", "Austria; Remote Europe", "Remote", "Jobicy")).toBe(false);
   });
 });
