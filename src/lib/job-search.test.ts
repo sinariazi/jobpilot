@@ -81,6 +81,7 @@ describe("searchPublicJobs", () => {
     expect(second.nextJobicyCursor).toBeNull();
     const jobicyRequests = requests.filter((url) => url.includes("jobicy.com/api/v2/remote-jobs") && !url.includes("get=locations"));
     expect(new URL(jobicyRequests[0]).searchParams.get("cursor")).toBeNull();
+    expect(new URL(jobicyRequests[0]).searchParams.get("count")).toBe("200");
     expect(new URL(jobicyRequests[1]).searchParams.get("cursor")).toBe(token);
     expect(requests.filter((url) => url.includes("remotive.com"))).toHaveLength(1);
     expect(requests.filter((url) => url.includes("arbeitnow.com"))).toHaveLength(5);

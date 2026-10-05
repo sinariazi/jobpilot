@@ -191,7 +191,9 @@ function encodeJobicyCursor(cursors: JobicyCursorState) {
 async function jobicyJobs(retrievedAt: string, geographies: ProviderGeography[], cursor?: string) {
   const priorCursors = decodeJobicyCursor(cursor);
   const outcomes = await Promise.allSettled(geographies.map(async (geo) => {
-    const params = new URLSearchParams({ count: "100", geo: geo.slug });
+    const params = // Jobicy documents a maximum of 200 results per cursor page. Requesting
+    // that limit widens the local candidate pool without adding API calls.
+    const params = new URLSearchParams({ count: "200", geo: geo.slug });
     if (priorCursors[geo.slug]) params.set("cursor", priorCursors[geo.slug]);
     const page = await getJson<JobicyPage>(`https://jobicy.com/api/v2/remote-jobs?${params}`, 3600);
     if (page.success === false) throw new Error(typeof page.error === "string" ? page.error : "Jobicy rejected the request.");
