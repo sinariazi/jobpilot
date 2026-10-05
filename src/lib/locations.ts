@@ -82,7 +82,9 @@ export function resolveProviderGeographies(preferences: string, available: Provi
   return { geographies, ...(warnings.length ? { warning: warnings.join(" ") } : {}) };
 }
 
-export function matchesPreferredLocation(jobLocation: string, preferences: string, jobMode = "", source = "", sourceLocationScope = "") {
+export function matchesPreferredLocation(jobLocation: string, preferences: string, jobMode = "", _source = "", _sourceLocationScope = "") {
+  void _source;
+  void _sourceLocationScope;
   const actual = new Set(canonicalLocationWords(jobLocation));
   const alternatives: string[][] = preferences.split(/[;\n|]+/).map((part) => canonicalLocationWords(part)).filter((words) => words.length > 0);
   if (alternatives.length === 0) return true;
@@ -95,21 +97,8 @@ export function matchesPreferredLocation(jobLocation: string, preferences: strin
   const asksForAnyRemote = alternatives.some((words) => words.length === 1 && words[0] === "remote");
   if (asksForAnyRemote) return true;
 
-  if (source === "Jobicy" && sourceLocationScope) {
-    const queriedScope = canonicalLocationWords(sourceLocationScope);
-    if (alternatives.some((words) => words.some((word) => queriedScope.includes(word)))) return true;
-  }
-
   const asksForEuropeRemote = alternatives.some((words) => words.includes("remote") && ["europe", "emea"].some((region) => words.includes(region)));
-  // Europe/EMEA eligibility covers selected European cities and countries.
-  // Generic "Remote" still has no country eligibility evidence.
-  const listingIsEuropeScoped = actual.has("europe") || actual.has("emea");
-  const preferenceIncludesKnownEuropeanCountry = alternatives.some((words) =>
-    words.some((word) => Object.values(CITY_COUNTRIES).includes(word)));
-  if (listingIsEuropeScoped && preferenceIncludesKnownEuropeanCountry) return true;
-  const isJobicyScopedEurope = source === "Jobicy";
-  const searchScopeMatches = sourceLocationScope && alternatives.some((words) => words.some((word) => canonicalLocationWords(sourceLocationScope).includes(word)));
-  if ((asksForEuropeRemote || searchScopeMatches) && (["europe", "emea"].some((region) => actual.has(region)) || (isJobicyScopedEurope && (actual.has("remote") || sourceLocationScope === "europe")))) return true;
+  if (asksForEuropeRemote && ["europe", "emea"].some((region) => actual.has(region))) return true;
 
   // A plain "Remote" label carries no country eligibility. Do not assume it
   // includes the user's location unless the user explicitly chose any remote.
