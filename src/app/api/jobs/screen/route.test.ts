@@ -27,12 +27,16 @@ describe("local Ollama decision screening endpoint", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ screening: { model: body.model, score: 78, confidence: 80, breakdown: { skills: 90, experience: 70, domain: 60 }, disqualifierRisk: 10, informationStatus: "sufficient" } });
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["http://127.0.0.1:11434/api/version", "http://127.0.0.1:11434/api/tags", "http://127.0.0.1:11434/v1/systemone"]);
-    const payload = JSON.parse(String((fetchMock.mock.calls[2]?.[1] as RequestInit).body)) as { state: { cv: string; candidateLocationPreferences: string; targetRolePreferences: string; job: { description: string } }; questions: Record<string, unknown> };
+    const payload = JSON.parse(String((fetchMock.mock.calls[2]?.[1] as RequestInit).body)) as { state: { cv: string; candidateLocationPreferences: string; targetRolePreferences: string; job: { description: string } }; questions: Record<string, { type: string; criteria?: Record<string, string> }> };
     expect(payload.state.cv).toContain(body.cvText);
     expect(payload.state.candidateLocationPreferences).toBe("Austria");
     expect(payload.state.targetRolePreferences).toBe(body.preferences.targetRoles);
     expect(payload.state.job.description).toContain(body.job.description);
     expect(Object.keys(payload.questions)).toEqual(["skills", "experience", "domain", "disqualifier", "information"]);
+    expect(payload.questions.disqualifier).toMatchObject({
+      type: "noul",
+      criteria: { false: expect.any(String), true: expect.any(String) },
+    });
   });
 
   it("returns an actionable version error without calling an unsupported endpoint", async () => {
