@@ -146,7 +146,7 @@ describe("searchPublicJobs", () => {
     expect(result.jobs.some((job) => job.role === "Solution Architect")).toBe(true);
   });
 
-  it("keeps Europe-eligible Remotive roles for Austria and reports fetched versus matched counts", async () => {
+  it("does not treat Europe-only remote roles as Vienna matches and reports fetched versus matched counts", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
       if (url.includes("get=locations")) return Response.json({ locations });
@@ -155,12 +155,12 @@ describe("searchPublicJobs", () => {
       return Response.json({ jobs: [{ id: 88, url: "https://jobicy.com/jobs/role-88", jobTitle: "Finance Director", companyName: "Example J", jobGeo: "Austria", jobDescription: "Finance role" }] });
     }));
     const result = await searchPublicJobs({ locations: "Vienna, Austria;", roles: "solution architect" });
-    expect(result.jobs.map((job) => job.source)).toEqual(["Remotive"]);
+    expect(result.jobs).toEqual([]);
     expect(result.discoveredJobs.map((job) => job.source).sort()).toEqual(["Arbeitnow", "Jobicy", "Remotive"]);
     expect(result.discoveredJobs.find((job) => job.source === "Arbeitnow")?.location).toBe("Berlin");
     expect(result.discoveredJobs.find((job) => job.source === "Jobicy")?.role).toBe("Finance Director");
     expect(result.sourceStatuses.find((source) => source.source === "Arbeitnow")).toMatchObject({ fetchedCount: 5, count: 0, state: "success" });
-    expect(result.sourceStatuses.find((source) => source.source === "Remotive")).toMatchObject({ fetchedCount: 1, count: 1, state: "success" });
+    expect(result.sourceStatuses.find((source) => source.source === "Remotive")).toMatchObject({ fetchedCount: 1, count: 0, state: "success" });
     expect(result.sourceStatuses.find((source) => source.source === "Jobicy")).toMatchObject({ fetchedCount: 1, count: 0, state: "success" });
   });
 
