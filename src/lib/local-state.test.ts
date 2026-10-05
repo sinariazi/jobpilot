@@ -54,6 +54,9 @@ describe("local state storage", () => {
       matchReviews: [{ jobId: exampleJob.id, company: exampleJob.company, role: exampleJob.role, model: "local-model:latest", cohortKey: "a".repeat(64), score: 84, predictedRelevant: true, reviewedRelevant: true, reviewedAt: "2026-10-02T12:00:00.000Z" }],
       matchCohortKey: "a".repeat(64),
       matchingSettings: { decisionModel: "decision:latest", weights: { skills: 40, experience: 30, domain: 20, disqualifier: 10 }, detailedScoreThreshold: 65, detailedConfidenceThreshold: 60 },
+      cvText: "CV evidence used for matching",
+      cvFileName: "candidate-cv.pdf",
+      cvAnalysis: { summary: "Senior product engineer", seniority: "Senior", domains: ["SaaS"], highlights: ["Led a product team"], notes: ["Two-column layout"] },
       liveJobs: [exampleJob],
     };
 
@@ -124,6 +127,9 @@ describe("local state storage", () => {
       ...defaultState(),
       liveJobs: [{ ...exampleJob, aiMatch: { model: "local-model:latest", relevant: true, score: 101, reason: "Invalid score", cvEvidence: "Evidence" } }],
     })).toBeNull();
+
+    expect(parsePersistedState({ ...defaultState(), cvText: "x".repeat(10_001) })).toBeNull();
+    expect(parsePersistedState({ ...defaultState(), cvAnalysis: { highlights: ["x".repeat(501)] } })).toBeNull();
   });
 
   it("accepts older saved states without optional tracker fields", () => {
