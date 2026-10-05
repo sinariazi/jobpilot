@@ -7,40 +7,85 @@ function locationWords(value: string): string[] {
 }
 
 const LOCATION_ALIASES: Record<string, string> = {
-  austria: "austria",
-  osterreich: "austria",
-  vienna: "wien",
-  wien: "wien",
-  zurich: "zurich",
-  zürich: "zurich",
-  geneva: "geneve",
-  geneve: "geneve",
-  munich: "munchen",
-  munchen: "munchen",
-  cologne: "koln",
-  koln: "koln",
-  prague: "praha",
-  praha: "praha",
+  austria: "austria", osterreich: "austria", aut: "austria",
+  vienna: "wien", wien: "wien",
+  zurich: "zurich", zürich: "zurich", zuri: "zurich",
+  geneva: "geneve", geneve: "geneve", genf: "geneve",
+  munich: "munchen", munchen: "munchen",
+  cologne: "koln", koeln: "koln", koln: "koln",
+  prague: "praha", praha: "praha",
+  schweiz: "switzerland", suisse: "switzerland", schweizerisch: "switzerland",
+  deutschland: "germany", deutsch: "germany", alemania: "germany", allemagne: "germany",
+  nederland: "netherlands", holland: "netherlands", paysbas: "netherlands",
+  espana: "spain", espagne: "spain", italia: "italy", italie: "italy",
+  ireland: "ireland", eire: "ireland", irlande: "ireland",
+  sverige: "sweden", schweden: "sweden", suede: "sweden",
+  norge: "norway", norwegen: "norway", norvege: "norway",
+  danmark: "denmark", daenemark: "denmark", dänemark: "denmark",
+  suomi: "finland", finnland: "finland",
+  polska: "poland", polen: "poland", portugal: "portugal",
+  belgique: "belgium", belgie: "belgium", belgien: "belgium",
+  ellada: "greece", griechenland: "greece", grecia: "greece",
+  romania: "romania", rumania: "romania", rumänien: "romania",
+  bulgaria: "bulgaria", hungary: "hungary", ungarn: "hungary", magyarorszag: "hungary",
+  slovensko: "slovakia", slowakei: "slovakia",
+  slovenija: "slovenia", slowenien: "slovenia",
+  hrvatska: "croatia", kroatien: "croatia",
+  serbia: "serbia", srbija: "serbia", tschechien: "czechia",
+  turkiye: "turkey", türkiye: "turkey", turkei: "turkey", türkei: "turkey",
+  uk: "uk", britain: "uk", britania: "uk", england: "uk", scotland: "uk", wales: "uk",
+  usa: "usa", us: "usa", america: "usa", amerikanisch: "usa",
+  uae: "uae", emirates: "uae",
 };
 
+const LOCATION_PHRASE_ALIASES: Array<[string[], string]> = [
+  [["united", "states", "of", "america"], "usa"], [["united", "kingdom"], "uk"],
+  [["great", "britain"], "uk"], [["united", "states"], "usa"], [["czech", "republic"], "czechia"],
+  [["the", "netherlands"], "netherlands"],
+  [["south", "korea"], "southkorea"], [["north", "korea"], "northkorea"],
+  [["united", "arab", "emirates"], "uae"], [["new", "zealand"], "newzealand"],
+  [["south", "africa"], "southafrica"], [["saudi", "arabia"], "saudiarabia"],
+  [["st", "polten"], "stpolten"], [["san", "francisco"], "sanfrancisco"],
+  [["new", "york"], "newyork"], [["los", "angeles"], "losangeles"],
+  [["hong", "kong"], "hongkong"], [["kuala", "lumpur"], "kualalumpur"],
+];
+
+// City names add their country as an additional normalized token. This lets a
+// country preference include city-only provider labels without weakening
+// boundary matching (for example, Austria never matches Australia).
 const CITY_COUNTRIES: Record<string, string> = {
-  wien: "austria",
-  graz: "austria",
-  linz: "austria",
-  salzburg: "austria",
-  innsbruck: "austria",
-  klagenfurt: "austria",
-  bregenz: "austria",
-  stpolten: "austria",
-  munchen: "germany",
-  koln: "germany",
-  zurich: "switzerland",
-  geneve: "switzerland",
-  praha: "czechia",
+  wien: "austria", graz: "austria", linz: "austria", salzburg: "austria", innsbruck: "austria",
+  klagenfurt: "austria", bregenz: "austria", stpolten: "austria", eisenstadt: "austria", villach: "austria",
+  munchen: "germany", berlin: "germany", hamburg: "germany", frankfurt: "germany", stuttgart: "germany",
+  koln: "germany", dusseldorf: "germany", leipzig: "germany", dresden: "germany", hannover: "germany",
+  zurich: "switzerland", geneve: "switzerland", basel: "switzerland", bern: "switzerland", lausanne: "switzerland",
+  lugano: "switzerland", winterthur: "switzerland",
+  praha: "czechia", brno: "czechia", amsterdam: "netherlands", rotterdam: "netherlands", utrecht: "netherlands",
+  dublin: "ireland", cork: "ireland", paris: "france", lyon: "france", toulouse: "france", nantes: "france",
+  madrid: "spain", barcelona: "spain", valencia: "spain", lisbon: "portugal", porto: "portugal",
+  rome: "italy", roma: "italy", milan: "italy", milano: "italy", turin: "italy", torino: "italy",
+  stockholm: "sweden", gothenburg: "sweden", oslo: "norway", bergen: "norway", copenhagen: "denmark",
+  helsinki: "finland", warsaw: "poland", krakow: "poland", wroclaw: "poland", brussels: "belgium",
+  antwerp: "belgium", athens: "greece", bucharest: "romania", budapest: "hungary", bratislava: "slovakia",
+  ljubljana: "slovenia", zagreb: "croatia", belgrade: "serbia", istanbul: "turkey", ankara: "turkey",
+  london: "uk", manchester: "uk", edinburgh: "uk", birmingham: "uk", newyork: "usa", boston: "usa",
+  chicago: "usa", seattle: "usa", austin: "usa", sanfrancisco: "usa", losangeles: "usa", toronto: "canada",
+  vancouver: "canada", montreal: "canada", auckland: "newzealand", wellington: "newzealand",
 };
 
 function canonicalLocationWords(value: string): string[] {
-  const words = locationWords(value).map((word) => LOCATION_ALIASES[word] ?? word);
+  const input = locationWords(value);
+  const words: string[] = [];
+  for (let index = 0; index < input.length;) {
+    const phraseAlias = LOCATION_PHRASE_ALIASES.find(([phrase]) => phrase.every((word, offset) => input[index + offset] === word));
+    if (phraseAlias) {
+      words.push(phraseAlias[1]);
+      index += phraseAlias[0].length;
+      continue;
+    }
+    const word = input[index++];
+    words.push(LOCATION_ALIASES[word] ?? word);
+  }
   return [...new Set(words.flatMap((word) => [word, ...(CITY_COUNTRIES[word] ? [CITY_COUNTRIES[word]] : [])]))];
 }
 

@@ -27,6 +27,41 @@ describe("preferred job locations", () => {
     expect(matchesPreferredLocation("Genève, Switzerland", "Geneva")).toBe(true);
   });
 
+  it("normalizes country names across common European languages and abbreviations", () => {
+    expect(matchesPreferredLocation("Vienna", "Österreich")).toBe(true);
+    expect(matchesPreferredLocation("Zürich", "Schweiz")).toBe(true);
+    expect(matchesPreferredLocation("Berlin", "Deutschland")).toBe(true);
+    expect(matchesPreferredLocation("Amsterdam", "The Netherlands")).toBe(true);
+    expect(matchesPreferredLocation("Dublin", "Éire")).toBe(true);
+    expect(matchesPreferredLocation("London", "United Kingdom")).toBe(true);
+    expect(matchesPreferredLocation("London", "UK")).toBe(true);
+    expect(matchesPreferredLocation("New York", "United States of America")).toBe(true);
+    expect(matchesPreferredLocation("Vienna", "Australia")).toBe(false);
+  });
+
+  it("infers countries from more city-only labels without matching similar city names", () => {
+    expect(matchesPreferredLocation("St. Pölten", "Austria")).toBe(true);
+    expect(matchesPreferredLocation("Winterthur", "Switzerland")).toBe(true);
+    expect(matchesPreferredLocation("Barcelona", "Spain")).toBe(true);
+    expect(matchesPreferredLocation("Copenhagen", "Denmark")).toBe(true);
+    expect(matchesPreferredLocation("Manchester", "United Kingdom")).toBe(true);
+    expect(matchesPreferredLocation("Lyon", "Italy")).toBe(false);
+    expect(matchesPreferredLocation("Graz", "Germany")).toBe(false);
+  });
+
+  it("maps translated country preferences to provider geography names", () => {
+    const available = [
+      { name: "Austria", slug: "austria" },
+      { name: "Switzerland", slug: "switzerland" },
+      { name: "United Kingdom", slug: "united-kingdom" },
+      { name: "United States", slug: "united-states" },
+    ];
+    expect(resolveProviderGeographies("Österreich", available).geographies).toEqual([available[0]]);
+    expect(resolveProviderGeographies("Schweiz", available).geographies).toEqual([available[1]]);
+    expect(resolveProviderGeographies("UK", available).geographies).toEqual([available[2]]);
+    expect(resolveProviderGeographies("USA", available).geographies).toEqual([available[3]]);
+  });
+
   it("matches regional remote listings only when the user chose that region", () => {
     expect(matchesPreferredLocation("Europe", "Vienna, Austria; Remote Europe", "Remote", "Jobicy")).toBe(true);
     expect(matchesPreferredLocation("Europe", "Vienna, Austria", "Remote", "Remotive")).toBe(false);
