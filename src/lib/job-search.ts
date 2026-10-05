@@ -149,9 +149,22 @@ async function getJson<T>(url: string, revalidate?: number): Promise<T> {
 export const ARBEITNOW_PAGES_PER_BATCH = 5;
 const ARBEITNOW_MAX_START_PAGE = 1001;
 
+async function getArbeitnowPage(page: number) {
+  const url = `https://www.arbeitnow.com/api/job-board-api?page=${page}`;
+  try {
+    return await getJson<ArbeitnowPage>(url);
+  } catch (error) {
+    // Retry transient provider throttling/outages once. Network timeouts and
+    // malformed responses are reported directly instead of extending delays.
+    if (!(error instanceof Error) || !/HTTP (?:429|5\d\d)/.test(error.message)) throw error;
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    return getJson<ArbeitnowPage>(url);
+  }
+}
+
 async function arbeitnowJobs(retrievedAt: string, startPage: number) {
   const requests = await Promise.allSettled(Array.from({ length: ARBEITNOW_PAGES_PER_BATCH }, (_, index) =>
-    getJson<ArbeitnowPage>(`https://www.arbeitnow.com/api/job-board-api?page=${startPage + index}`)));
+    getArbeitnowPage(startPage + index)));
   const pages = requests.flatMap((result, index) => result.status === "fulfilled" ? [{ pageNumber: startPage + index, value: result.value }] : []);
   const pageErrors = requests.flatMap((result, index) => result.status === "rejected" ? [`Arbeitnow page ${startPage + index} failed; other feed results are still available.`] : []);
   const jobs = pages.flatMap(({ value }) => (value.data ?? []).map((posting) => mapArbeitnow(posting, retrievedAt)).filter((job): job is Job => job !== null));
