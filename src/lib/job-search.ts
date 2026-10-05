@@ -41,7 +41,7 @@ type JobicyPosting = {
 };
 type JobicyPage = { jobs?: JobicyPosting[]; nextCursor?: string | null; hasMore?: boolean; success?: boolean; error?: string };
 type JobicyLocationsPage = { locations?: Array<{ geoName?: string; geoSlug?: string }> };
-export type SearchSourceStatus = { source: string; state: "success" | "partial" | "failed"; count: number; checkedAt: string; message?: string };
+export type SearchSourceStatus = { source: string; state: "success" | "partial" | "failed"; count: number; fetchedCount: number; checkedAt: string; message?: string };
 export const PUBLIC_JOB_SOURCES = [
   { name: "Arbeitnow", access: "Public paginated JSON API; no key", geography: "Primarily Germany with some Europe-wide listings", fields: "Title, company, location, remote flag, employment type, description, posting date, link", freshness: "Provider-dependent; no freshness guarantee published", restriction: "Credit/link Arbeitnow; use is as-is and permission may be revoked" },
   { name: "Remotive", access: "Public JSON API; no key", geography: "Remote roles with candidate eligibility text; not a broad local Austria board", fields: "Title, company, required location, job type, category, HTML description, date, source link", freshness: "Listings are delayed 24 hours; cache and fetch no more than four times daily", restriction: "Link the Remotive listing and identify Remotive; not for reposting to third-party job boards" },
@@ -303,7 +303,7 @@ export async function searchPublicJobs(options: { arbeitnowStartPage?: number; j
     const partial = source.name === "Arbeitnow" && arbeitnowResult?.status === "fulfilled" ? arbeitnowResult.value.state === "partial"
       : source.name === "Jobicy" && jobicyResult?.status === "fulfilled" ? jobicyResult.value.state === "partial"
         : errors.some((error) => error.startsWith(source.name) && !failed);
-    return { source: source.name, state: skipped.has(source.name) ? "failed" : failed ? sourceJobs.length ? "partial" : "failed" : partial ? "partial" : "success", count: sourceJobs.length, checkedAt: retrievedAt, ...(errors.find((error) => error.startsWith(source.name)) ? { message: errors.find((error) => error.startsWith(source.name)) } : geoResult?.warning && source.name === "Jobicy" ? { message: geoResult.warning } : {}) };
+    return { source: source.name, state: skipped.has(source.name) ? "failed" : failed ? sourceJobs.length ? "partial" : "failed" : partial ? "partial" : "success", count: sourceJobs.length, fetchedCount: jobsBySource.get(source.name)?.length ?? 0, checkedAt: retrievedAt, ...(errors.find((error) => error.startsWith(source.name)) ? { message: errors.find((error) => error.startsWith(source.name)) } : geoResult?.warning && source.name === "Jobicy" ? { message: geoResult.warning } : {}) };
   });
   return { jobs, errors, retrievedAt, nextArbeitnowPage, nextJobicyCursor, sourceStatuses };
 }

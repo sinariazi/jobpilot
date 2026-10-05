@@ -5,6 +5,7 @@ import type { ApplicationStatus, CandidateProfile, CoverLetterDraftRecord, Job, 
 import { defaultProfile } from "@/lib/types";
 import { jobsForReview, matchesTargetRole, scoreJob } from "@/lib/matcher";
 import { matchesPreferredLocation } from "@/lib/locations";
+import type { SearchSourceStatus } from "@/lib/job-search";
 import { matchesDepartment, matchesPostedWithin, matchesWorkMode, type PostedWithin, type WorkMode } from "@/lib/job-filters";
 import type { CvSuggestions } from "@/lib/cv-parser";
 import { createBackup, parseBackup } from "@/lib/backup";
@@ -76,6 +77,7 @@ export default function Home() {
   const aiMatchGeneration = useRef(0);
   const fetchLiveJobsRef = useRef<() => Promise<void>>(async () => undefined);
   const handledSearchRequestId = useRef(0);
+  const moreJobsInFlight = useRef(false);
   const automaticScreeningLock = useRef(false);
   const automaticScreeningAttempt = useRef("");
   const screenCurrentJobsRef = useRef<() => Promise<void>>(async () => undefined);
@@ -84,7 +86,7 @@ export default function Home() {
   const backupInput = useRef<HTMLInputElement>(null);
   const [sourceMessage, setSourceMessage] = useState("");
   const [sourceErrors, setSourceErrors] = useState<string[]>([]);
-  const [sourceStatuses, setSourceStatuses] = useState<Array<{ source: string; state: "success" | "partial" | "failed"; count: number; checkedAt: string; message?: string }>>([]);
+  const [sourceStatuses, setSourceStatuses] = useState<SearchSourceStatus[]>([]);
   const [profileDraft, setProfileDraft] = useState<CandidateProfile>(defaultProfile);
   const [searchRolesDraft, setSearchRolesDraft] = useState(defaultProfile.roles);
   const [searchLocationsDraft, setSearchLocationsDraft] = useState(defaultProfile.locations);
@@ -887,7 +889,7 @@ export default function Home() {
     try {
       const searchParams = new URLSearchParams({ locations: profile.locations, roles: profile.roles });
       const response = await fetch(`/api/jobs/search?${searchParams}`, { cache: "no-store" });
-      const result = await response.json() as { jobs?: Job[]; errors?: string[]; error?: string; nextArbeitnowPage?: number | null; nextJobicyCursor?: string | null; sourceStatuses?: typeof sourceStatuses };
+      const result = await response.json() as { jobs?: Job[]; errors?: string[]; error?: string; nextArbeitnowPage?: number | null; nextJobicyCursor?: string | null; sourceStatuses?: SearchSourceStatus[] };
       setSourceStatuses(result.sourceStatuses ?? []);
       setSourceErrors(result.errors ?? []);
       if (!response.ok && !(result.jobs?.length)) throw new Error(result.error ?? "Could not fetch jobs.");
@@ -932,7 +934,7 @@ export default function Home() {
       }
       setLiveJobs(analyzedJobs);
       const locationCount = locationJobs.length;
-      const sourcesChecked = (result.sourceStatuses ?? []).map((source) => `${source.source}: ${source.count}`).join(" · ");
+      const sourcesChecked = (result.sourceStatuses ?? []).map((source) => `${source.source}: ${source.count} matching of ${source.fetchedCount} fetched`).join(" · ");
       setSourceMessage(result.jobs?.length
         ? assessWithCurrentContext
           ? `Local decision screening assessed ${completed} of ${locationCount} location-eligible jobs; ${detailedCount} received detailed analysis. ${cancelled ? "Assessment cancelled; fetched listings remain available." : matchingWarning ? `Some jobs remain unassessed: ${matchingWarning}` : detailedWarning ? detailedWarning : ""} Scores are estimates, not hiring probabilities. Review the evidence and original postings.`
@@ -968,7 +970,8 @@ export default function Home() {
   }, [searchRequestId, stateLoaded, loadingJobs, loadingMoreJobs]);
 
   async function fetchMoreJobs() {
-    if ((nextArbeitnowPage === null && nextJobicyCursor === null) || loadingMoreJobs || loadingJobs) return;
+    if ((nextArbeitnowPage === null && nextJobicyCursor === null) || loadingMoreJobs || loadingJobs || moreJobsInFlight.current) return;
+    moreJobsInFlight.current = true;
     const searchGeneration = aiMatchGeneration.current;
     setLoadingMoreJobs(true);
     setSourceMessage("Checking the next pages from enabled job feeds. Current results stay visible while new listings are added and assessed…");
@@ -979,15 +982,24 @@ export default function Home() {
       if (nextJobicyCursor !== null) params.set("jobicyCursor", nextJobicyCursor);
       const response = await fetch(`/api/jobs/search?${params}`, { cache: "no-store" });
       const result = await response.json() as { jobs?: Job[]; errors?: string[]; error?: string; nextArbeitnowPage?: number | null; nextJobicyCursor?: string | null; sourceStatuses?: typeof sourceStatuses };
+      setSourceStatuses((current) => {
+        const merged = new Map(current.map((source) => [source.source, source]));
+        for (const source of result.sourceStatuses ?? []) {
+          const previous = merged.get(source.source);
+          merged.set(source.source, previous ? {
+            ...source,
+            count: previous.count + source.count,
+            fetchedCount: previous.fetchedCount + source.fetchedCount,
+            state: source.state === "failed" && previous.count > 0 ? "partial" : source.state,
+          } : source);
+        }
+        return [...merged.values()];
+      });
+      setSourceErrors((current) => [...current.filter((error) => !result.errors?.includes(error)), ...(result.errors ?? [])]);
       if (!response.ok) throw new Error(result.error ?? "Could not load more jobs.");
-      setSourceStatuses((current) => (result.sourceStatuses ?? []).map((source) => {
-        const previous = current.find((item) => item.source === source.source);
-        return previous ? { ...source, count: previous.count + source.count } : source;
-      }));
       fetchedMore = result.jobs ?? [];
       setNextArbeitnowPage(result.nextArbeitnowPage ?? null);
       setNextJobicyCursor(result.nextJobicyCursor ?? null);
-      setSourceErrors((current) => [...current.filter((error) => !result.errors?.includes(error)), ...(result.errors ?? [])]);
       setLiveJobs((current) => {
         const seen = new Set(current.map((job) => job.sourceUrl ?? job.id));
         return [...current, ...fetchedMore.filter((job) => !seen.has(job.sourceUrl ?? job.id))];
@@ -1021,6 +1033,7 @@ export default function Home() {
       aiMatchAbortController.current = null;
       setAiMatchProgress(null);
       setLoadingMoreJobs(false);
+      moreJobsInFlight.current = false;
     }
   }
 
@@ -1081,7 +1094,7 @@ export default function Home() {
             {jobWorkflowBusy && <div className="job-workflow-status" role="status" aria-live="polite"><span className="job-workflow-spinner" aria-hidden="true"/><div><strong>{jobWorkflowHeading}</strong><p>{locationMatchedJobs.length} matching listings available · {decisionScoredCount} decision scores · {detailedAnalyzedCount} detailed reviews. {loadingMoreJobs ? "The next listings are being fetched and checked; high-scoring or uncertain matches go to the detailed model." : nextArbeitnowPage !== null || nextJobicyCursor !== null ? "More feed pages are queued for automatic search; high-scoring or uncertain matches go to the detailed model." : "The local models are still checking the available listings."}</p></div></div>}
             {liveJobs.length > 0 && <div className="match-jobs-action"><button type="button" className="secondary-button" onClick={() => void screenCurrentJobs()} disabled={!localDecisionScreeningReady || pendingMatchCount + pendingDetailedCount === 0 || Boolean(aiMatchProgress) || loadingJobs || loadingMoreJobs}>{aiMatchProgress ? "Matching locally…" : pendingMatchCount ? `Match CV to ${pendingMatchCount} jobs` : pendingDetailedCount ? `Retry detailed analysis for ${pendingDetailedCount} jobs` : "All jobs scored"}</button><span>{screeningReadinessMessage ?? (pendingMatchCount ? "Jobpilot scores new listings automatically on this laptop." : !localDetailedAnalysisReady && locationMatchedJobs.some((job) => job.screening?.model === matchingSettings.decisionModel && shouldRunDetailedAnalysis(job.screening, matchingSettings) && job.aiMatch?.model !== selectedAiModel) ? "First-stage scores are ready; choose a local chat model for shortlisted or uncertain jobs." : pendingDetailedCount ? "High-scoring and uncertain listings are ready for detailed local analysis." : "Every location-eligible listing has a score from the selected decision model.")}</span></div>}
             <p className="directory-credit">Public sources are free and need no account. Coverage is limited; no no-key provider gives complete Austria-wide vacancy coverage. <a href="https://www.arbeitnow.com/blog/job-board-api" target="_blank" rel="noreferrer">Arbeitnow</a> focuses on Germany and Europe, <a href="https://remotive.com/remote-jobs/api" target="_blank" rel="noreferrer">Remotive</a> is remote-only with a 24-hour publication delay, and <a href="https://jobicy.com/jobs-rss-feed" target="_blank" rel="noreferrer">Jobicy</a> is remote-only and covers a rolling seven-day window.</p>
-            {sourceStatuses.length > 0 && <ul className="feed-source-status" aria-label="Job source results">{sourceStatuses.map((source) => <li key={source.source} className={`feed-${source.state}`}><strong>{source.source}</strong><span>{source.state === "failed" ? "Unavailable" : `${source.count} matching`}</span><small>Checked {new Date(source.checkedAt).toLocaleTimeString()}</small></li>)}</ul>}
+            {sourceStatuses.length > 0 && <ul className="feed-source-status" aria-label="Job source results">{sourceStatuses.map((source) => <li key={source.source} className={`feed-${source.state}`}><strong>{source.source}</strong><span>{source.state === "failed" ? "Unavailable" : `${source.count} matching`}</span><small>{source.message ?? `${source.fetchedCount} listings received · checked ${new Date(source.checkedAt).toLocaleTimeString()}`}</small></li>)}</ul>}
             <details className="manual-job-panel"><summary>Can’t find a posting? Add it manually</summary><p>Paste the description below. Jobpilot does not fetch job URLs because external sites may block automated imports. A URL can be saved as the original posting link.</p><form onSubmit={(event) => void addManualJob(event)}>
               <div className="manual-job-fields"><label>Job title<input required value={manualJob.role} onChange={(event) => setManualJob((current) => ({ ...current, role: event.target.value }))} /></label><label>Company<input required value={manualJob.company} onChange={(event) => setManualJob((current) => ({ ...current, company: event.target.value }))} /></label><label>Location or remote eligibility<input required value={manualJob.location} onChange={(event) => setManualJob((current) => ({ ...current, location: event.target.value }))} /></label><label>Original posting URL (optional)<input type="url" placeholder="https://…" value={manualJob.url} onChange={(event) => setManualJob((current) => ({ ...current, url: event.target.value }))} /></label></div>
               <label className="manual-description">Paste job description<textarea required rows={6} maxLength={8000} value={manualJob.description} onChange={(event) => setManualJob((current) => ({ ...current, description: event.target.value }))} placeholder="Paste the available job description here." /></label><button className="secondary-button" type="submit">Add posting for review</button>

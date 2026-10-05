@@ -30,6 +30,7 @@ describe("preferred job locations", () => {
   it("matches remote Europe against a Europe-wide remote listing", () => {
     expect(matchesPreferredLocation("Europe", "Vienna, Austria; Remote Europe", "Remote", "Jobicy")).toBe(true);
     expect(matchesPreferredLocation("Vienna, Austria", "Vienna, Austria; Remote Europe", "Remote", "Arbeitnow")).toBe(true);
+    expect(matchesPreferredLocation("Europe", "Vienna, Austria", "Remote", "Remotive")).toBe(true);
     expect(matchesPreferredLocation("Remote", "Vienna, Austria; Remote Europe", "Remote", "Remotive")).toBe(false);
   });
 
