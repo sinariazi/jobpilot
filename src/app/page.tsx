@@ -78,6 +78,8 @@ export default function Home() {
   const automaticScreeningLock = useRef(false);
   const automaticScreeningAttempt = useRef("");
   const screenCurrentJobsRef = useRef<() => Promise<void>>(async () => undefined);
+  const fetchMoreJobsRef = useRef<() => Promise<void>>(async () => undefined);
+  const automaticPageBatchesRemaining = useRef(0);
   const backupInput = useRef<HTMLInputElement>(null);
   const [sourceMessage, setSourceMessage] = useState("");
   const [sourceErrors, setSourceErrors] = useState<string[]>([]);
@@ -323,9 +325,13 @@ export default function Home() {
     .sort((a, b) => {
       if (sortBy === "newest") return (Date.parse(b.job.postedAt ?? "") || 0) - (Date.parse(a.job.postedAt ?? "") || 0) || b.score - a.score;
       if (sortBy === "company") return a.job.company.localeCompare(b.job.company) || a.job.role.localeCompare(b.job.role);
-      return hasAnyScreenings && a.job.screening && b.job.screening
-        ? b.score - a.score
-        : Number(b.roleMatch) - Number(a.roleMatch) || b.titleMatched.length - a.titleMatched.length || b.score - a.score;
+      if (hasAnyScreenings) {
+        const aScored = a.job.screening?.model === matchingSettings.decisionModel;
+        const bScored = b.job.screening?.model === matchingSettings.decisionModel;
+        if (aScored !== bScored) return aScored ? -1 : 1;
+        if (aScored && bScored) return b.score - a.score;
+      }
+      return Number(b.roleMatch) - Number(a.roleMatch) || b.titleMatched.length - a.titleMatched.length || b.score - a.score;
     }), [query, candidateSkills, preferredJobs, profile.roles, hasAnyScreenings, matchingSettings.decisionModel, sortBy]);
   const filteredRanked = useMemo(() => ranked.filter(({ job, score }) => score >= minimumScore && matchesPostedWithin(job, postedWithin) && matchesWorkMode(job, workMode) && matchesDepartment(job, department)), [ranked, minimumScore, postedWithin, workMode, department]);
   const visibleJobs = filteredRanked.slice(0, visibleCount);
@@ -858,6 +864,7 @@ export default function Home() {
 
   async function fetchLiveJobs() {
     if (loadingJobs || loadingMoreJobs) return;
+    automaticPageBatchesRemaining.current = 1;
     const searchGeneration = aiMatchGeneration.current;
     setLoadingJobs(true);
     setCvAnalyzedModel("");
@@ -876,11 +883,16 @@ export default function Home() {
       fetchedJobs = result.jobs ?? [];
       const locationJobs = fetchedJobs.filter((job) => matchesPreferredLocation(job.location, profile.locations, job.mode, job.source, job.sourceLocationScope)
         && (!profile.roles.trim() || matchesTargetRole(job, profile.roles)));
+      // Show the normalized pool immediately. Screening updates these cards in
+      // small batches, so users can review early scores while later jobs run.
+      setLiveJobs(fetchedJobs);
+      selectJob(locationJobs[0]?.id ?? "");
       const assessWithCurrentContext = localDecisionScreeningReady && searchGeneration === aiMatchGeneration.current;
       let analyzedJobs = fetchedJobs;
       let completed = 0;
       let cancelled = false;
       let matchingWarning = "";
+      let detailedWarning = "";
       let detailedCount = 0;
       if (assessWithCurrentContext) {
         const candidates = jobsToAssess(locationJobs);
@@ -892,7 +904,7 @@ export default function Home() {
         completed = outcome.completed;
         cancelled = outcome.cancelled;
         matchingWarning = outcome.error;
-        if (outcome.detailWarning) matchingWarning = outcome.detailWarning;
+        detailedWarning = outcome.detailWarning;
         detailedCount = outcome.detailedCount;
         aiMatchAbortController.current = null;
         analyzedJobs = fetchedJobs.map((job) => ({
@@ -907,7 +919,7 @@ export default function Home() {
       const sourcesChecked = (result.sourceStatuses ?? []).map((source) => `${source.source}: ${source.count}`).join(" · ");
       setSourceMessage(result.jobs?.length
         ? assessWithCurrentContext
-          ? `Local decision screening assessed ${completed} of ${locationCount} location-eligible jobs; ${detailedCount} received detailed analysis. ${cancelled ? "Assessment cancelled; fetched listings remain available." : matchingWarning ? `Some jobs remain unassessed: ${matchingWarning}` : ""} Scores are estimates, not hiring probabilities. Review the evidence and original postings.`
+          ? `Local decision screening assessed ${completed} of ${locationCount} location-eligible jobs; ${detailedCount} received detailed analysis. ${cancelled ? "Assessment cancelled; fetched listings remain available." : matchingWarning ? `Some jobs remain unassessed: ${matchingWarning}` : detailedWarning ? detailedWarning : ""} Scores are estimates, not hiring probabilities. Review the evidence and original postings.`
           : cvText.trim() && !isLocalJobpilotPage()
             ? "CV analysis is blocked here for privacy. Open Jobpilot from localhost on this laptop; no CV text was sent. Showing profile matches."
             : cvText.trim()
@@ -985,7 +997,7 @@ export default function Home() {
       setLiveJobs((current) => current.map((job) => analyzed.find((item) => item.id === job.id) ?? job));
       setCvAnalyzedModel(matchingSettings.decisionModel);
       const moreSources = [result.nextArbeitnowPage !== null && result.nextArbeitnowPage !== undefined ? "Arbeitnow" : "", result.nextJobicyCursor ? "Jobicy" : ""].filter(Boolean);
-      setSourceMessage(`Loaded ${fetchedMore.length} more listings. Screened ${outcome.completed} of ${candidates.length}; detailed analysis ran for ${outcome.detailedCount}. ${outcome.error || (outcome.cancelled ? "Assessment cancelled." : "Scores are estimates, not hiring probabilities.")} ${moreSources.length ? `More pages are available from ${moreSources.join(" and ")}.` : "No further pages are available."}`);
+      setSourceMessage(`Loaded ${fetchedMore.length} more listings. Screened ${outcome.completed} of ${candidates.length}; detailed analysis ran for ${outcome.detailedCount}. ${outcome.error || outcome.detailWarning || (outcome.cancelled ? "Assessment cancelled." : "Scores are estimates, not hiring probabilities.")} ${moreSources.length ? `More pages are available from ${moreSources.join(" and ")}.` : "No further pages are available."}`);
     } catch (error) {
       if (fetchedMore.length) setSourceMessage(`Loaded ${fetchedMore.length} more listings, but local screening failed: ${error instanceof Error ? error.message : "unknown error"}.`);
       else setSourceMessage(error instanceof Error ? error.message : "Could not load more jobs.");
@@ -995,6 +1007,17 @@ export default function Home() {
       setLoadingMoreJobs(false);
     }
   }
+
+  useEffect(() => {
+    fetchMoreJobsRef.current = fetchMoreJobs;
+  });
+
+  useEffect(() => {
+    if (!stateLoaded || loadingJobs || loadingMoreJobs || aiMatchProgress || automaticPageBatchesRemaining.current <= 0
+      || (nextArbeitnowPage === null && nextJobicyCursor === null)) return;
+    automaticPageBatchesRemaining.current -= 1;
+    void fetchMoreJobsRef.current();
+  }, [stateLoaded, loadingJobs, loadingMoreJobs, aiMatchProgress, nextArbeitnowPage, nextJobicyCursor]);
 
   function cancelAiAssessment() {
     aiMatchAbortController.current?.abort();
