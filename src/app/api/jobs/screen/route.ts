@@ -68,7 +68,14 @@ export async function POST(request: Request) {
     skills: { type: "score", instructions: "How well does the candidate's CV support the job's required technical and professional skills? Assess evidence and importance, not keyword overlap.", criteria: ["No relevant evidence", "Limited or transferable evidence", "Some relevant evidence with important gaps", "Strong evidence for core requirements", "Very strong evidence across requirements"] },
     experience: { type: "score", instructions: "How well do the candidate's demonstrated experience level, responsibilities, and scope match the role and the user's target role preferences?", criteria: ["Major level or responsibility mismatch", "Limited relevant experience", "Partial responsibility and level match", "Strong level and responsibility match", "Very strong direct match"] },
     domain: { type: "score", instructions: "How well do the candidate's demonstrated domain, product, and delivery experience match this job and the user's target role preferences?", criteria: ["No evidence", "Weak or indirect evidence", "Some adjacent experience", "Strong related experience", "Very strong direct experience"] },
-    disqualifier: { type: "noul", instructions: "What is the probability that the available information explicitly shows a material disqualifier: the job location or work arrangement conflicts with candidateLocationPreferences, a required language conflicts with explicit CV evidence, work authorization conflicts with explicit CV evidence, or a mandatory qualification is absent from clear CV evidence? Missing information alone is not evidence of a mismatch; if unclear, treat as no explicit disqualifier." },
+    disqualifier: {
+      type: "noul",
+      instructions: "What is the probability that the available information explicitly shows a material disqualifier: the job location or work arrangement conflicts with candidateLocationPreferences, a required language conflicts with explicit CV evidence, work authorization conflicts with explicit CV evidence, or a mandatory qualification is absent from clear CV evidence? Missing information alone is not evidence of a mismatch; if unclear, treat as no explicit disqualifier.",
+      criteria: {
+        false: "No explicit material disqualifier is supported by the available CV and job information, or relevant information is missing or unclear.",
+        true: "The available CV and job information explicitly supports a material location, language, work authorization, or mandatory qualification conflict.",
+      },
+    },
     information: { type: "choice", instructions: "Which information is materially missing or too unclear to assess?", criteria: { sufficient: "CV and job requirements contain enough relevant information", cv_missing: "CV evidence is missing or too unclear", job_missing: "Job requirements are missing or too unclear", both_missing: "Both CV and job requirements are missing or too unclear" } },
   };
 
