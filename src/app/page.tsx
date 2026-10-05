@@ -17,6 +17,7 @@ import { createApplicationPacket, detectAtsPlatform } from "@/lib/application-pr
 const LEGACY_STORAGE_KEY = "jobpilot-local-v1";
 const MAX_BACKUP_BYTES = 23_000_000;
 const AI_MATCH_BATCH_SIZE = 2;
+const AUTOMATIC_PAGE_BATCH_LIMIT = 3;
 const MAX_CV_MATCH_CHARS = 10_000;
 
 function createCvMatchContext(cvText: string, suggestions: CvSuggestions | null, profile: CandidateProfile) {
@@ -506,6 +507,12 @@ export default function Home() {
   const pendingMatchCount = locationMatchedJobs.filter((job) => job.screening?.model !== matchingSettings.decisionModel).length;
   const pendingDetailedCount = localDetailedAnalysisReady ? locationMatchedJobs.filter((job) => job.screening?.model === matchingSettings.decisionModel
     && shouldRunDetailedAnalysis(job.screening, matchingSettings) && job.aiMatch?.model !== selectedAiModel).length : 0;
+  const decisionScoredCount = locationMatchedJobs.filter((job) => job.screening?.model === matchingSettings.decisionModel).length;
+  const detailedAnalyzedCount = locationMatchedJobs.filter((job) => job.aiMatch?.model === selectedAiModel).length;
+  const jobWorkflowBusy = loadingJobs || loadingMoreJobs || Boolean(aiMatchProgress);
+  const jobWorkflowHeading = loadingJobs
+    ? liveJobs.length ? "Refreshing listings; current jobs stay visible" : "Searching your selected roles and locations"
+    : loadingMoreJobs ? "Finding and checking more listings" : "Local two-stage matching in progress";
   useEffect(() => {
     screenCurrentJobsRef.current = screenCurrentJobs;
   });
@@ -864,11 +871,11 @@ export default function Home() {
 
   async function fetchLiveJobs() {
     if (loadingJobs || loadingMoreJobs) return;
-    automaticPageBatchesRemaining.current = 1;
+    automaticPageBatchesRemaining.current = AUTOMATIC_PAGE_BATCH_LIMIT;
     const searchGeneration = aiMatchGeneration.current;
     setLoadingJobs(true);
     setCvAnalyzedModel("");
-    setSourceMessage("");
+    setSourceMessage(`Searching enabled feeds for ${profile.roles || "all job titles"} in ${profile.locations || "your selected locations"}…`);
     setSourceErrors([]);
     let fetchedJobs: Job[] = [];
     try {
@@ -888,6 +895,9 @@ export default function Home() {
       setLiveJobs(fetchedJobs);
       selectJob(locationJobs[0]?.id ?? "");
       const assessWithCurrentContext = localDecisionScreeningReady && searchGeneration === aiMatchGeneration.current;
+      setSourceMessage(assessWithCurrentContext
+        ? `Found ${locationJobs.length} listings for your selected roles and locations. Showing them now while local matching runs…`
+        : `Found ${locationJobs.length} listings for your selected roles and locations. Showing them now; local matching will start when CV and Ollama models are ready.`);
       let analyzedJobs = fetchedJobs;
       let completed = 0;
       let cancelled = false;
@@ -955,7 +965,7 @@ export default function Home() {
     if ((nextArbeitnowPage === null && nextJobicyCursor === null) || loadingMoreJobs || loadingJobs) return;
     const searchGeneration = aiMatchGeneration.current;
     setLoadingMoreJobs(true);
-    setSourceMessage("");
+    setSourceMessage("Checking the next pages from enabled job feeds. Current results stay visible while new listings are added and assessed…");
     let fetchedMore: Job[] = [];
     try {
       const params = new URLSearchParams({ locations: profile.locations, roles: profile.roles });
@@ -1061,7 +1071,8 @@ export default function Home() {
               <label>Job titles<textarea rows={3} value={searchRolesDraft} onChange={(event) => setSearchRolesDraft(event.target.value)} placeholder="Suggested titles from your CV appear here. Add or remove titles; separate alternatives with commas or new lines." /></label>
               <label>Preferred locations<textarea rows={2} value={searchLocationsDraft} onChange={(event) => setSearchLocationsDraft(event.target.value)} placeholder="For example: Vienna, Austria; Remote Europe. Leave blank for broad feed results." /></label>
             </div>
-            <div className="source-controls"><button className="primary-button" disabled={!stateLoaded || loadingJobs || loadingMoreJobs} onClick={searchWithPreferences}>{loadingJobs ? "Searching job feeds…" : loadingMoreJobs ? "Loading more jobs…" : liveJobs.length ? "↻ Search jobs" : "Search jobs"}</button><span className="feed-summary">Search checks all enabled public feeds. Matching runs automatically when your CV and local decision model are ready.</span></div>
+            <div className="source-controls"><button className="primary-button" disabled={!stateLoaded || loadingJobs || loadingMoreJobs} onClick={searchWithPreferences}>{loadingJobs ? "Searching job feeds…" : loadingMoreJobs ? "Loading more jobs…" : liveJobs.length ? "↻ Search jobs" : "Search jobs"}</button><span className="feed-summary">Search checks all enabled public feeds, then scores listings in small local batches. It automatically checks up to three additional provider batches; use “Load more” to continue.</span></div>
+            {jobWorkflowBusy && <div className="job-workflow-status" role="status" aria-live="polite"><span className="job-workflow-spinner" aria-hidden="true"/><div><strong>{jobWorkflowHeading}</strong><p>{locationMatchedJobs.length} matching listings available · {decisionScoredCount} decision scores · {detailedAnalyzedCount} detailed reviews. {loadingMoreJobs || nextArbeitnowPage !== null || nextJobicyCursor !== null ? "More jobs are being fetched and checked; high-scoring or uncertain matches go to the detailed model." : "The local models are still checking the available listings."}</p></div></div>}
             {liveJobs.length > 0 && <div className="match-jobs-action"><button type="button" className="secondary-button" onClick={() => void screenCurrentJobs()} disabled={!localDecisionScreeningReady || pendingMatchCount + pendingDetailedCount === 0 || Boolean(aiMatchProgress) || loadingJobs || loadingMoreJobs}>{aiMatchProgress ? "Matching locally…" : pendingMatchCount ? `Match CV to ${pendingMatchCount} jobs` : pendingDetailedCount ? `Retry detailed analysis for ${pendingDetailedCount} jobs` : "All jobs scored"}</button><span>{screeningReadinessMessage ?? (pendingMatchCount ? "Jobpilot scores new listings automatically on this laptop." : !localDetailedAnalysisReady && locationMatchedJobs.some((job) => job.screening?.model === matchingSettings.decisionModel && shouldRunDetailedAnalysis(job.screening, matchingSettings) && job.aiMatch?.model !== selectedAiModel) ? "First-stage scores are ready; choose a local chat model for shortlisted or uncertain jobs." : pendingDetailedCount ? "High-scoring and uncertain listings are ready for detailed local analysis." : "Every location-eligible listing has a score from the selected decision model.")}</span></div>}
             <p className="directory-credit">Public sources are free and need no account. Coverage is limited; no no-key provider gives complete Austria-wide vacancy coverage. <a href="https://www.arbeitnow.com/blog/job-board-api" target="_blank" rel="noreferrer">Arbeitnow</a> focuses on Germany and Europe, <a href="https://remotive.com/remote-jobs/api" target="_blank" rel="noreferrer">Remotive</a> is remote-only with a 24-hour publication delay, and <a href="https://jobicy.com/jobs-rss-feed" target="_blank" rel="noreferrer">Jobicy</a> is remote-only and covers a rolling seven-day window.</p>
             {sourceStatuses.length > 0 && <ul className="feed-source-status" aria-label="Job source results">{sourceStatuses.map((source) => <li key={source.source} className={`feed-${source.state}`}><strong>{source.source}</strong><span>{source.state === "failed" ? "Unavailable" : `${source.count} matching`}</span><small>Checked {new Date(source.checkedAt).toLocaleTimeString()}</small></li>)}</ul>}
