@@ -201,6 +201,24 @@ describe("searchPublicJobs", () => {
     expect(result.nextArbeitnowPage).toBe(11);
   });
 
+  it("advances past an entirely unavailable continuation batch", async () => {
+    const requestedPages: number[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (!url.includes("arbeitnow")) throw new Error("Only the continuation feed should be requested");
+      const page = Number(new URL(url).searchParams.get("page"));
+      requestedPages.push(page);
+      return new Response("temporarily unavailable", { status: 503 });
+    }));
+
+    const result = await searchPublicJobs({ arbeitnowStartPage: 16, locations: "Vienna, Austria" });
+
+    expect(requestedPages.sort((a, b) => a - b)).toEqual([16, 16, 17, 17, 18, 18, 19, 19, 20, 20]);
+    expect(result.jobs).toEqual([]);
+    expect(result.sourceStatuses.find((source) => source.source === "Arbeitnow")?.state).toBe("failed");
+    expect(result.nextArbeitnowPage).toBe(21);
+  });
+
   it("retries a transient Arbeitnow server error once", async () => {
     const attempts = new Map<number, number>();
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
