@@ -147,24 +147,31 @@ async function getJson<T>(url: string, revalidate?: number): Promise<T> {
 }
 
 export const ARBEITNOW_PAGES_PER_BATCH = 5;
+const ARBEITNOW_MAX_START_PAGE = 1001;
 
 async function arbeitnowJobs(retrievedAt: string, startPage: number) {
   const requests = await Promise.allSettled(Array.from({ length: ARBEITNOW_PAGES_PER_BATCH }, (_, index) =>
     getJson<ArbeitnowPage>(`https://www.arbeitnow.com/api/job-board-api?page=${startPage + index}`)));
-  const pages = requests.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
+  const pages = requests.flatMap((result, index) => result.status === "fulfilled" ? [{ pageNumber: startPage + index, value: result.value }] : []);
   const pageErrors = requests.flatMap((result, index) => result.status === "rejected" ? [`Arbeitnow page ${startPage + index} failed; other feed results are still available.`] : []);
-  const jobs = pages.flatMap((page) => (page.data ?? []).map((posting) => mapArbeitnow(posting, retrievedAt)).filter((job): job is Job => job !== null));
-  const lastPage = pages.at(-1);
+  const jobs = pages.flatMap(({ value }) => (value.data ?? []).map((posting) => mapArbeitnow(posting, retrievedAt)).filter((job): job is Job => job !== null));
+  // A failed last request must not strand the feed: use the highest page that
+  // did arrive to determine whether more pages exist, then move past this batch.
+  const lastFetched = pages.at(-1);
+  const lastPage = lastFetched?.value;
   const nextLink = lastPage?.links?.next;
+  const linkedNextPage = typeof nextLink === "string" ? (() => {
+    try {
+      const url = new URL(nextLink, "https://www.arbeitnow.com");
+      const page = Number(url.searchParams.get("page"));
+      return url.hostname === "www.arbeitnow.com" && url.pathname === "/api/job-board-api" && Number.isSafeInteger(page) && page > lastFetched!.pageNumber;
+    } catch { return false; }
+  })() : false;
   const hasMore = lastPage?.links && "next" in lastPage.links
-    ? typeof nextLink === "string" && (() => {
-      try {
-        const url = new URL(nextLink, "https://www.arbeitnow.com");
-        return url.hostname === "www.arbeitnow.com" && url.pathname === "/api/job-board-api" && Number(url.searchParams.get("page")) === startPage + ARBEITNOW_PAGES_PER_BATCH;
-      } catch { return false; }
-    })()
+    ? linkedNextPage
     : (lastPage?.data?.length ?? 0) > 0;
-  return { jobs, nextArbeitnowPage: hasMore ? startPage + ARBEITNOW_PAGES_PER_BATCH : null, pageErrors, state: pageErrors.length === requests.length ? "failed" as const : pageErrors.length ? "partial" as const : "success" as const };
+  const nextPage = startPage + ARBEITNOW_PAGES_PER_BATCH;
+  return { jobs, nextArbeitnowPage: hasMore && nextPage <= ARBEITNOW_MAX_START_PAGE ? nextPage : null, pageErrors, state: pageErrors.length === requests.length ? "failed" as const : pageErrors.length ? "partial" as const : "success" as const };
 }
 
 async function remotiveJobs(retrievedAt: string) {

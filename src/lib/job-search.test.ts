@@ -185,4 +185,24 @@ describe("searchPublicJobs", () => {
     expect(result.jobs).toHaveLength(5);
     expect(result.nextArbeitnowPage).toBeNull();
   });
+
+  it("continues after a failed last page instead of requesting the same batch forever", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("get=locations")) return Response.json({ locations });
+      if (url.includes("remotive")) return Response.json({ jobs: [] });
+      if (url.includes("arbeitnow")) {
+        const page = Number(new URL(url).searchParams.get("page"));
+        if (page === 10) return new Response("temporarily unavailable", { status: 503 });
+        return Response.json({ data: [], links: { next: `https://www.arbeitnow.com/api/job-board-api?page=${page + 1}` } });
+      }
+      return Response.json({ jobs: [] });
+    }));
+
+    const result = await searchPublicJobs({ arbeitnowStartPage: 6, locations: "Vienna, Austria" });
+
+    expect(result.jobs).toHaveLength(0);
+    expect(result.sourceStatuses.find((source) => source.source === "Arbeitnow")?.state).toBe("partial");
+    expect(result.nextArbeitnowPage).toBe(11);
+  });
 });

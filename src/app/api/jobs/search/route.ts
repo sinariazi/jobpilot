@@ -22,7 +22,10 @@ export async function GET(request: Request) {
     locations,
     roles,
   });
-  if (result.jobs.length === 0 && result.errors.length > 0) {
+  // A healthy feed can return listings that do not match the user's local
+  // filters. That is a successful search with zero matches, not an outage.
+  const allSourcesFailed = result.sourceStatuses.length > 0 && result.sourceStatuses.every((source) => source.state === "failed");
+  if (result.jobs.length === 0 && result.errors.length > 0 && allSourcesFailed) {
     return Response.json({ ...result, error: "The public job feeds are temporarily unavailable. Try again shortly." }, { status: 503 });
   }
   return Response.json(result);

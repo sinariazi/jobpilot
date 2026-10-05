@@ -37,4 +37,26 @@ describe("public job search pagination API", () => {
     expect(new URL(feed).searchParams.get("geo")).toBe("europe");
   });
 
+
+  it("returns a partial zero-match search as success when a feed returned listings", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("get=locations")) return Response.json({ locations: [{ geoName: "Austria", geoSlug: "austria" }, { geoName: "Europe", geoSlug: "europe" }] });
+      if (url.includes("remotive")) return Response.json({ jobs: [] });
+      if (url.includes("arbeitnow")) {
+        const page = Number(new URL(url).searchParams.get("page"));
+        if (page === 2) return new Response("temporarily unavailable", { status: 503 });
+        return Response.json({ data: [{ slug: `role-${page}`, company_name: "Example", title: "Solution Architect", url: `https://employer.example/jobs/${page}`, location: "Berlin" }], links: { next: `https://www.arbeitnow.com/api/job-board-api?page=${page + 1}` } });
+      }
+      return Response.json({ jobs: [] });
+    }));
+
+    const response = await GET(new Request("http://localhost/api/jobs/search?locations=Vienna%2C%20Austria&roles=solution%20architect"));
+    const result = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(result.jobs).toHaveLength(0);
+    expect(result.sourceStatuses.find((source: { source: string }) => source.source === "Arbeitnow").fetchedCount).toBe(4);
+    expect(result.errors).toContain("Arbeitnow had partial page failures; successfully fetched pages remain available.");
+  });
 });
