@@ -37,7 +37,6 @@ describe("public job search pagination API", () => {
     expect(new URL(feed).searchParams.get("geo")).toBe("europe");
   });
 
-
   it("returns a partial zero-match search as success when a feed returned listings", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
@@ -59,4 +58,20 @@ describe("public job search pagination API", () => {
     expect(result.sourceStatuses.find((source: { source: string }) => source.source === "Arbeitnow").fetchedCount).toBe(4);
     expect(result.errors).toContain("Arbeitnow had partial page failures; successfully fetched pages remain available.");
   });
+
+  it("returns the next continuation cursor when every requested page is temporarily unavailable", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (!url.includes("arbeitnow")) throw new Error("Only Arbeitnow should be requested for a continuation batch");
+      return new Response("temporarily unavailable", { status: 503 });
+    }));
+
+    const response = await GET(new Request("http://localhost/api/jobs/search?locations=Vienna%2C%20Austria&arbeitnowStartPage=16"));
+    const result = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(result.nextArbeitnowPage).toBe(21);
+    expect(result.sourceStatuses.find((source: { source: string }) => source.source === "Arbeitnow").state).toBe("failed");
+  });
+
 });
