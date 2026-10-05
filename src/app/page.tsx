@@ -943,9 +943,9 @@ export default function Home() {
       const result = await response.json() as { jobs?: Job[]; discoveredJobs?: Job[]; errors?: string[]; error?: string; nextArbeitnowPage?: number | null; nextJobicyCursor?: string | null; sourceStatuses?: typeof sourceStatuses };
       setSourceStatuses(result.sourceStatuses ?? []);
       setSourceErrors(result.errors ?? []);
-      if (!response.ok && !(result.jobs?.length)) throw new Error(result.error ?? "Could not fetch jobs.");
       setNextArbeitnowPage(result.nextArbeitnowPage ?? null);
       setNextJobicyCursor(result.nextJobicyCursor ?? null);
+      if (!response.ok && !(result.jobs?.length)) throw new Error(result.error ?? "Could not fetch jobs.");
       fetchedJobs = result.jobs ?? [];
       allDiscoveredJobs = result.discoveredJobs ?? fetchedJobs;
       const locationJobs = fetchedJobs.filter((job) => matchesPreferredLocation(job.location, profile.locations, job.mode, job.source, job.sourceLocationScope)
@@ -1048,11 +1048,14 @@ export default function Home() {
         return [...merged.values()];
       });
       setSourceErrors((current) => [...current.filter((error) => !result.errors?.includes(error)), ...(result.errors ?? [])]);
+      // Keep the server's advanced cursor even for an all-failed batch (503).
+      // This preserves current listings and prevents repeatedly hitting the
+      // same unavailable page range.
+      setNextArbeitnowPage(result.nextArbeitnowPage ?? null);
+      setNextJobicyCursor(result.nextJobicyCursor ?? null);
       if (!response.ok) throw new Error(result.error ?? "Could not load more jobs.");
       fetchedMore = result.jobs ?? [];
       const discoveredMore = result.discoveredJobs ?? fetchedMore;
-      setNextArbeitnowPage(result.nextArbeitnowPage ?? null);
-      setNextJobicyCursor(result.nextJobicyCursor ?? null);
       setLiveJobs((current) => {
         const seen = new Set(current.map((job) => job.sourceUrl ?? job.id));
         return [...current, ...discoveredMore.filter((job) => !seen.has(job.sourceUrl ?? job.id))].slice(-MAX_LOCAL_JOB_POOL);
