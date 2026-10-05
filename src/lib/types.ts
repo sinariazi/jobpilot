@@ -83,6 +83,14 @@ export type MatchReview = {
   reviewedAt: string;
 };
 
+export type PersistedCvAnalysis = {
+  summary?: string;
+  seniority?: string;
+  domains?: string[];
+  highlights?: string[];
+  notes?: string[];
+};
+
 export type PersistedState = {
   profile: CandidateProfile;
   saved: string[];
@@ -93,6 +101,10 @@ export type PersistedState = {
   matchReviews?: MatchReview[];
   matchCohortKey?: string;
   matchingSettings?: MatchingSettings;
+  /** A short extracted-text excerpt and analysis, stored locally for rescreening after reload. */
+  cvText?: string;
+  cvFileName?: string;
+  cvAnalysis?: PersistedCvAnalysis;
   liveJobs: Job[];
 };
 
