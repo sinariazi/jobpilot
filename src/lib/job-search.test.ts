@@ -31,7 +31,8 @@ describe("searchPublicJobs", () => {
     expect(result.jobs.find((job) => job.source === "Jobicy")?.sourceLocationScope).toBe("europe");
     expect(result.nextJobicyCursor).toMatch(/^jp1\./);
     expect(result.sourceStatuses).toHaveLength(3);
-    expect(result.sourceStatuses.every((source) => source.fetchedCount === 1 && source.count === 1)).toBe(true);
+    expect(result.sourceStatuses.find((source) => source.source === "Arbeitnow")?.fetchedCount).toBe(5);
+    expect(result.sourceStatuses.filter((source) => source.source !== "Arbeitnow").every((source) => source.fetchedCount === 1 && source.count === 1)).toBe(true);
     expect(result.errors).toContain("No location preference was supplied; the remote-job feed uses its Europe-wide public feed.");
     expect(requests.filter(({ url }) => url.includes("arbeitnow")).every(({ options }) => options?.cache === "no-store")).toBe(true);
   });
@@ -81,8 +82,8 @@ describe("searchPublicJobs", () => {
     expect(second.jobs.map((job) => job.sourceUrl)).toEqual(["https://jobicy.com/jobs/second"]);
     expect(second.nextJobicyCursor).toBeNull();
     const jobicyRequests = requests.filter((url) => url.includes("jobicy.com/api/v2/remote-jobs") && !url.includes("get=locations"));
-    expect(new URL(jobicyRequests[0]).searchParams.get("cursor")).toBeNull();
     expect(new URL(jobicyRequests[0]).searchParams.get("count")).toBe("200");
+    expect(new URL(jobicyRequests[0]).searchParams.get("cursor")).toBeNull();
     expect(new URL(jobicyRequests[1]).searchParams.get("cursor")).toBe(token);
     expect(requests.filter((url) => url.includes("remotive.com"))).toHaveLength(1);
     expect(requests.filter((url) => url.includes("arbeitnow.com"))).toHaveLength(5);
@@ -145,6 +146,24 @@ describe("searchPublicJobs", () => {
     expect(result.jobs.some((job) => job.role === "Solution Architect")).toBe(true);
   });
 
+  it("keeps Europe-eligible Remotive roles for Austria and reports fetched versus matched counts", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("get=locations")) return Response.json({ locations });
+      if (url.includes("arbeitnow")) return Response.json({ data: [{ slug: "berlin-architect", company_name: "Example A", title: "Solution Architect", url: "https://arbeitnow.example/role", location: "Berlin", description: "Architecture" }] });
+      if (url.includes("remotive")) return Response.json({ jobs: [{ id: 77, url: "https://remotive.com/remote-jobs/role-77", title: "Solution Architect", company_name: "Example R", candidate_required_location: "Europe", job_type: "full_time", publication_date: "2026-10-01", description: "Architecture role" }] });
+      return Response.json({ jobs: [{ id: 88, url: "https://jobicy.com/jobs/role-88", jobTitle: "Finance Director", companyName: "Example J", jobGeo: "Austria", jobDescription: "Finance role" }] });
+    }));
+    const result = await searchPublicJobs({ locations: "Vienna, Austria;", roles: "solution architect" });
+    expect(result.jobs.map((job) => job.source)).toEqual(["Remotive"]);
+    expect(result.discoveredJobs.map((job) => job.source).sort()).toEqual(["Arbeitnow", "Jobicy", "Remotive"]);
+    expect(result.discoveredJobs.find((job) => job.source === "Arbeitnow")?.location).toBe("Berlin");
+    expect(result.discoveredJobs.find((job) => job.source === "Jobicy")?.role).toBe("Finance Director");
+    expect(result.sourceStatuses.find((source) => source.source === "Arbeitnow")).toMatchObject({ fetchedCount: 5, count: 0, state: "success" });
+    expect(result.sourceStatuses.find((source) => source.source === "Remotive")).toMatchObject({ fetchedCount: 1, count: 1, state: "success" });
+    expect(result.sourceStatuses.find((source) => source.source === "Jobicy")).toMatchObject({ fetchedCount: 1, count: 0, state: "success" });
+  });
+
   it("keeps successful pages when one public source page fails", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
@@ -160,30 +179,6 @@ describe("searchPublicJobs", () => {
     expect(result.jobs.map((job) => job.id)).toContain("arbeitnow-kept");
     expect(result.errors.some((error) => error.includes("partial page failures"))).toBe(true);
     expect(result.sourceStatuses.find((source) => source.source === "Arbeitnow")?.state).toBe("partial");
-  });
-
-  it("reports when Jobicy cannot provide its location taxonomy", async () => {
-    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
-      const url = String(input);
-      if (url.includes("get=locations")) throw new Error("offline");
-      if (url.includes("arbeitnow")) return Response.json({ data: [] });
-      if (url.includes("remotive")) return Response.json({ jobs: [] });
-      throw new Error("Jobicy feed should not be called without taxonomy");
-    }));
-    const result = await searchPublicJobs({ locations: "Austria" });
-    expect(result.errors).toContain("Jobicy's public location list is unavailable; its feed was skipped.");
-    expect(result.sourceStatuses.find((source) => source.source === "Jobicy")?.state).toBe("failed");
-  });
-
-  it("stops Arbeitnow pagination when the provider explicitly returns no next link", async () => {
-    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
-      const url = String(input);
-      const page = Number(new URL(url).searchParams.get("page"));
-      return Response.json({ data: [{ slug: `role-${page}`, company_name: "Example", title: "Engineer", url: `https://employer.example/jobs/${page}`, location: "Vienna" }], links: { next: null } });
-    }));
-    const result = await searchPublicJobs({ arbeitnowStartPage: 6, locations: "Austria" });
-    expect(result.jobs).toHaveLength(5);
-    expect(result.nextArbeitnowPage).toBeNull();
   });
 
   it("continues after a failed last page instead of requesting the same batch forever", async () => {
@@ -227,5 +222,29 @@ describe("searchPublicJobs", () => {
     expect(attempts.get(3)).toBe(2);
     expect(result.sourceStatuses.find((source) => source.source === "Arbeitnow")?.state).toBe("success");
     expect(result.errors).not.toContain("Arbeitnow had partial page failures; successfully fetched pages remain available.");
+  });
+
+  it("reports when Jobicy cannot provide its location taxonomy", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("get=locations")) throw new Error("offline");
+      if (url.includes("arbeitnow")) return Response.json({ data: [] });
+      if (url.includes("remotive")) return Response.json({ jobs: [] });
+      throw new Error("Jobicy feed should not be called without taxonomy");
+    }));
+    const result = await searchPublicJobs({ locations: "Austria" });
+    expect(result.errors).toContain("Jobicy's public location list is unavailable; its feed was skipped.");
+    expect(result.sourceStatuses.find((source) => source.source === "Jobicy")?.state).toBe("failed");
+  });
+
+  it("stops Arbeitnow pagination when the provider explicitly returns no next link", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      const page = Number(new URL(url).searchParams.get("page"));
+      return Response.json({ data: [{ slug: `role-${page}`, company_name: "Example", title: "Engineer", url: `https://employer.example/jobs/${page}`, location: "Vienna" }], links: { next: null } });
+    }));
+    const result = await searchPublicJobs({ arbeitnowStartPage: 6, locations: "Austria" });
+    expect(result.jobs).toHaveLength(5);
+    expect(result.nextArbeitnowPage).toBeNull();
   });
 });

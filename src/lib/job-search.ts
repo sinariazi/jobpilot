@@ -174,12 +174,12 @@ async function arbeitnowJobs(retrievedAt: string, startPage: number) {
   const lastPage = lastFetched?.value;
   const nextLink = lastPage?.links?.next;
   const linkedNextPage = typeof nextLink === "string" ? (() => {
-    try {
-      const url = new URL(nextLink, "https://www.arbeitnow.com");
-      const page = Number(url.searchParams.get("page"));
-      return url.hostname === "www.arbeitnow.com" && url.pathname === "/api/job-board-api" && Number.isSafeInteger(page) && page > lastFetched!.pageNumber;
-    } catch { return false; }
-  })() : false;
+      try {
+        const url = new URL(nextLink, "https://www.arbeitnow.com");
+        const page = Number(url.searchParams.get("page"));
+        return url.hostname === "www.arbeitnow.com" && url.pathname === "/api/job-board-api" && Number.isSafeInteger(page) && page > lastFetched!.pageNumber;
+      } catch { return false; }
+    })() : false;
   const hasMore = lastPage?.links && "next" in lastPage.links
     ? linkedNextPage
     : (lastPage?.data?.length ?? 0) > 0;
@@ -311,7 +311,8 @@ export async function searchPublicJobs(options: { arbeitnowStartPage?: number; j
     const key = canonicalUrl(job.sourceUrl) || [normalizedIdentity(job.role), normalizedIdentity(job.company), normalizedIdentity(job.location)].join("|");
     unique.set(key, unique.has(key) ? mergeDuplicate(unique.get(key)!, job) : { ...job, sourceAliases: [job.source] });
   }
-  const jobs = [...unique.values()].filter((job) =>
+  const discoveredJobs = [...unique.values()];
+  const jobs = discoveredJobs.filter((job) =>
     matchesPreferredLocation(job.location, options.locations ?? "", job.mode, job.source, job.sourceLocationScope)
     && (!(options.roles ?? "").trim() || matchesTargetRole(job, options.roles ?? "")));
   const sourceStatuses: SearchSourceStatus[] = PUBLIC_JOB_SOURCES.filter((source) => jobsBySource.has(source.name) || errors.some((error) => error.startsWith(source.name)) || skipped.has(source.name)).map((source) => {
@@ -325,5 +326,5 @@ export async function searchPublicJobs(options: { arbeitnowStartPage?: number; j
         : errors.some((error) => error.startsWith(source.name) && !failed);
     return { source: source.name, state: skipped.has(source.name) ? "failed" : failed ? sourceJobs.length ? "partial" : "failed" : partial ? "partial" : "success", count: sourceJobs.length, fetchedCount: jobsBySource.get(source.name)?.length ?? 0, checkedAt: retrievedAt, ...(errors.find((error) => error.startsWith(source.name)) ? { message: errors.find((error) => error.startsWith(source.name)) } : geoResult?.warning && source.name === "Jobicy" ? { message: geoResult.warning } : {}) };
   });
-  return { jobs, errors, retrievedAt, nextArbeitnowPage, nextJobicyCursor, sourceStatuses };
+  return { jobs, discoveredJobs, errors, retrievedAt, nextArbeitnowPage, nextJobicyCursor, sourceStatuses };
 }

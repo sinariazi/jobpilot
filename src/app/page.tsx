@@ -5,12 +5,12 @@ import type { ApplicationStatus, CandidateProfile, CoverLetterDraftRecord, Job, 
 import { defaultProfile } from "@/lib/types";
 import { jobsForReview, matchesTargetRole, scoreJob } from "@/lib/matcher";
 import { matchesPreferredLocation } from "@/lib/locations";
-import type { SearchSourceStatus } from "@/lib/job-search";
 import { matchesDepartment, matchesPostedWithin, matchesWorkMode, type PostedWithin, type WorkMode } from "@/lib/job-filters";
 import type { CvSuggestions } from "@/lib/cv-parser";
 import { createBackup, parseBackup } from "@/lib/backup";
 import { createCoverLetterDraft } from "@/lib/cover-letter";
 import { jobsToAssess } from "@/lib/job-assessment";
+import type { SearchSourceStatus } from "@/lib/job-search";
 import { createMatchCohortKey, MAX_MATCH_REVIEWS, summarizeMatchReviews } from "@/lib/match-calibration";
 import { DEFAULT_MATCHING_SETTINGS, localScreeningReadinessMessage, shouldRunDetailedAnalysis } from "@/lib/job-screening";
 import { createApplicationPacket, detectAtsPlatform } from "@/lib/application-preparation";
@@ -20,6 +20,7 @@ const MAX_BACKUP_BYTES = 23_000_000;
 const AI_MATCH_BATCH_SIZE = 2;
 const AUTOMATIC_PAGE_BATCH_LIMIT = 3;
 const MAX_CV_MATCH_CHARS = 10_000;
+const MAX_LOCAL_JOB_POOL = 2_000;
 
 function createCvMatchContext(cvText: string, suggestions: CvSuggestions | null, profile: CandidateProfile) {
   const analysis = suggestions?.analysis;
@@ -63,7 +64,9 @@ export default function Home() {
   const [matchingSettings, setMatchingSettings] = useState<MatchingSettings>(DEFAULT_MATCHING_SETTINGS);
   const [systemOneAvailable, setSystemOneAvailable] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
-  const [activeView, setActiveView] = useState<"overview" | "applications">("overview");
+  const [activeView, setActiveView] = useState<"overview" | "all-found" | "applications">("overview");
+  const [foundQuery, setFoundQuery] = useState("");
+  const [foundVisibleCount, setFoundVisibleCount] = useState(50);
   const [liveJobs, setLiveJobs] = useState<Job[]>([]);
   const [loadingJobs, setLoadingJobs] = useState(false);
   const [loadingMoreJobs, setLoadingMoreJobs] = useState(false);
@@ -77,8 +80,8 @@ export default function Home() {
   const aiMatchGeneration = useRef(0);
   const fetchLiveJobsRef = useRef<() => Promise<void>>(async () => undefined);
   const handledSearchRequestId = useRef(0);
-  const moreJobsInFlight = useRef(false);
   const automaticScreeningLock = useRef(false);
+  const moreJobsInFlight = useRef(false);
   const automaticScreeningAttempt = useRef("");
   const screenCurrentJobsRef = useRef<() => Promise<void>>(async () => undefined);
   const fetchMoreJobsRef = useRef<() => Promise<void>>(async () => undefined);
@@ -124,6 +127,13 @@ export default function Home() {
     liveJobs.forEach((job) => unique.set(job.sourceUrl ?? job.id, job));
     return [...unique.values()];
   }, [liveJobs]);
+  const allFoundJobs = useMemo(() => jobs.filter((job) => job.source !== "Manual"), [jobs]);
+  const filteredFoundJobs = useMemo(() => {
+    const normalizedQuery = foundQuery.trim().toLocaleLowerCase();
+    if (!normalizedQuery) return allFoundJobs;
+    return allFoundJobs.filter((job) => `${job.role} ${job.company} ${job.location} ${job.source}`.toLocaleLowerCase().includes(normalizedQuery));
+  }, [allFoundJobs, foundQuery]);
+  const visibleFoundJobs = filteredFoundJobs.slice(0, foundVisibleCount);
 
   function selectJob(jobId: string) {
     setSelectedId(jobId);
@@ -886,27 +896,29 @@ export default function Home() {
     setSourceMessage(`Searching enabled feeds for ${profile.roles || "all job titles"} in ${profile.locations || "your selected locations"}…`);
     setSourceErrors([]);
     let fetchedJobs: Job[] = [];
+    let allDiscoveredJobs: Job[] = [];
     try {
       const searchParams = new URLSearchParams({ locations: profile.locations, roles: profile.roles });
       const response = await fetch(`/api/jobs/search?${searchParams}`, { cache: "no-store" });
-      const result = await response.json() as { jobs?: Job[]; errors?: string[]; error?: string; nextArbeitnowPage?: number | null; nextJobicyCursor?: string | null; sourceStatuses?: SearchSourceStatus[] };
+      const result = await response.json() as { jobs?: Job[]; discoveredJobs?: Job[]; errors?: string[]; error?: string; nextArbeitnowPage?: number | null; nextJobicyCursor?: string | null; sourceStatuses?: typeof sourceStatuses };
       setSourceStatuses(result.sourceStatuses ?? []);
       setSourceErrors(result.errors ?? []);
       if (!response.ok && !(result.jobs?.length)) throw new Error(result.error ?? "Could not fetch jobs.");
       setNextArbeitnowPage(result.nextArbeitnowPage ?? null);
       setNextJobicyCursor(result.nextJobicyCursor ?? null);
       fetchedJobs = result.jobs ?? [];
+      allDiscoveredJobs = result.discoveredJobs ?? fetchedJobs;
       const locationJobs = fetchedJobs.filter((job) => matchesPreferredLocation(job.location, profile.locations, job.mode, job.source, job.sourceLocationScope)
         && (!profile.roles.trim() || matchesTargetRole(job, profile.roles)));
       // Show the normalized pool immediately. Screening updates these cards in
       // small batches, so users can review early scores while later jobs run.
-      setLiveJobs(fetchedJobs);
+      setLiveJobs(allDiscoveredJobs.slice(-MAX_LOCAL_JOB_POOL));
       selectJob(locationJobs[0]?.id ?? "");
       const assessWithCurrentContext = localDecisionScreeningReady && searchGeneration === aiMatchGeneration.current;
       setSourceMessage(assessWithCurrentContext
         ? `Found ${locationJobs.length} listings for your selected roles and locations. Showing them now while local matching runs…`
         : `Found ${locationJobs.length} listings for your selected roles and locations. Showing them now; local matching will start when CV and Ollama models are ready.`);
-      let analyzedJobs = fetchedJobs;
+      let analyzedJobs = allDiscoveredJobs.slice(-MAX_LOCAL_JOB_POOL);
       let completed = 0;
       let cancelled = false;
       let matchingWarning = "";
@@ -925,7 +937,7 @@ export default function Home() {
         detailedWarning = outcome.detailWarning;
         detailedCount = outcome.detailedCount;
         aiMatchAbortController.current = null;
-        analyzedJobs = fetchedJobs.map((job) => ({
+        analyzedJobs = allDiscoveredJobs.slice(-MAX_LOCAL_JOB_POOL).map((job) => ({
           ...job,
           ...(outcome.screeningById.has(job.id) ? { screening: outcome.screeningById.get(job.id) } : { screening: undefined }),
           ...(outcome.detailedById.has(job.id) ? { aiMatch: outcome.detailedById.get(job.id), detailedAnalysis: outcome.analysisById.get(job.id) } : { aiMatch: undefined, detailedAnalysis: undefined }),
@@ -948,7 +960,7 @@ export default function Home() {
     } catch (error) {
       if (fetchedJobs.length) {
         const fallback = fetchedJobs.filter((job) => matchesPreferredLocation(job.location, profile.locations, job.mode, job.source, job.sourceLocationScope));
-        setLiveJobs(fetchedJobs.map((job) => ({ ...job, screening: undefined, aiMatch: undefined, detailedAnalysis: undefined })));
+        setLiveJobs(allDiscoveredJobs.slice(-MAX_LOCAL_JOB_POOL).map((job) => ({ ...job, screening: undefined, aiMatch: undefined, detailedAnalysis: undefined })));
         selectJob(fallback[0]?.id ?? "");
         setSourceMessage(`Local job screening failed: ${error instanceof Error ? error.message : "unknown error"}. Jobs are still available to review; no hosted model fallback was used.`);
       } else setSourceMessage(error instanceof Error ? error.message : "Could not fetch job listings.");
@@ -981,7 +993,7 @@ export default function Home() {
       if (nextArbeitnowPage !== null) params.set("arbeitnowStartPage", String(nextArbeitnowPage));
       if (nextJobicyCursor !== null) params.set("jobicyCursor", nextJobicyCursor);
       const response = await fetch(`/api/jobs/search?${params}`, { cache: "no-store" });
-      const result = await response.json() as { jobs?: Job[]; errors?: string[]; error?: string; nextArbeitnowPage?: number | null; nextJobicyCursor?: string | null; sourceStatuses?: typeof sourceStatuses };
+      const result = await response.json() as { jobs?: Job[]; discoveredJobs?: Job[]; errors?: string[]; error?: string; nextArbeitnowPage?: number | null; nextJobicyCursor?: string | null; sourceStatuses?: SearchSourceStatus[] };
       setSourceStatuses((current) => {
         const merged = new Map(current.map((source) => [source.source, source]));
         for (const source of result.sourceStatuses ?? []) {
@@ -998,11 +1010,12 @@ export default function Home() {
       setSourceErrors((current) => [...current.filter((error) => !result.errors?.includes(error)), ...(result.errors ?? [])]);
       if (!response.ok) throw new Error(result.error ?? "Could not load more jobs.");
       fetchedMore = result.jobs ?? [];
+      const discoveredMore = result.discoveredJobs ?? fetchedMore;
       setNextArbeitnowPage(result.nextArbeitnowPage ?? null);
       setNextJobicyCursor(result.nextJobicyCursor ?? null);
       setLiveJobs((current) => {
         const seen = new Set(current.map((job) => job.sourceUrl ?? job.id));
-        return [...current, ...fetchedMore.filter((job) => !seen.has(job.sourceUrl ?? job.id))];
+        return [...current, ...discoveredMore.filter((job) => !seen.has(job.sourceUrl ?? job.id))].slice(-MAX_LOCAL_JOB_POOL);
       });
       const assessWithCurrentContext = localDecisionScreeningReady && searchGeneration === aiMatchGeneration.current;
       if (!assessWithCurrentContext || !fetchedMore.length) {
@@ -1059,6 +1072,7 @@ export default function Home() {
         <div className="sidebar-label">WORKSPACE</div>
         <button className={`nav-item ${activeView === "overview" ? "active" : ""}`} onClick={() => setActiveView("overview")}><span>▦</span> Overview</button>
         <button className="nav-item" onClick={() => setActiveView("overview")}><span>⌕</span> Job matches <b className="nav-count">{ranked.length}</b></button>
+        <button className={`nav-item ${activeView === "all-found" ? "active" : ""}`} onClick={() => setActiveView("all-found")}><span>◎</span> All found jobs <b className="nav-count">{allFoundJobs.length}</b></button>
         <button className={`nav-item ${activeView === "applications" ? "active" : ""}`} onClick={() => setActiveView("applications")}><span>▤</span> Applications <b className="nav-count">{applicationJobs.length}</b></button>
         <button className="nav-item" onClick={openProfile}><span>♧</span> Candidate profile</button>
         <div className="sidebar-bottom">
@@ -1068,7 +1082,7 @@ export default function Home() {
       </aside>
 
       <section className="main-panel">
-        <header className="topbar"><div className="breadcrumb">Workspace <span>/</span> {activeView === "applications" ? "Applications" : "Overview"}</div><div className="topbar-right"><span className="privacy-pill"><i /> LOCAL ONLY</span><button className="icon-button" aria-label="Edit candidate profile" onClick={openProfile}>⚙</button><div className="avatar small">{profile.name.split(/\s+/).map((part) => part[0]).slice(0, 2).join("").toUpperCase()}</div></div></header>
+        <header className="topbar"><div className="breadcrumb">Workspace <span>/</span> {activeView === "applications" ? "Applications" : activeView === "all-found" ? "All found jobs" : "Overview"}</div><div className="topbar-right"><span className="privacy-pill"><i /> LOCAL ONLY</span><button className="icon-button" aria-label="Edit candidate profile" onClick={openProfile}>⚙</button><div className="avatar small">{profile.name.split(/\s+/).map((part) => part[0]).slice(0, 2).join("").toUpperCase()}</div></div></header>
         <div className="content">
           {activeView === "applications" ? (
             <>
@@ -1077,7 +1091,27 @@ export default function Home() {
               <div className="application-board">{applicationGroups.map((group) => <section className="application-column" key={group.title}><div className="application-column-heading"><h2>{group.title}</h2><span>{group.items.length}</span></div>{group.items.length ? group.items.map((job) => <article className="application-card" key={job.id}><div className="application-company"><div className={`company-logo logo-${job.source.toLowerCase()}`}>{job.company.slice(0, 1)}</div><div><strong>{job.company}</strong><span>{job.location}</span></div></div><h3>{job.role}</h3><div className="follow-up-row"><label>Follow-up date<input type="date" aria-label={`Set follow-up date for ${job.company} — ${job.role}`} value={applicationFollowUps[job.id] ?? ""} onChange={(event) => updateFollowUp(job.id, event.target.value)}/></label>{applicationFollowUps[job.id] && <span className={`follow-up-badge ${applicationFollowUps[job.id] < todayKey ? "overdue" : applicationFollowUps[job.id] === todayKey ? "today" : "upcoming"}`}>{followUpLabel(applicationFollowUps[job.id])}</span>}</div><details className="application-notes"><summary>{applicationNotes[job.id]?.trim() ? "Edit notes" : "Add a note"}</summary><label><span className="visually-hidden">Notes for {job.role} at {job.company}</span><textarea maxLength={2000} rows={3} value={applicationNotes[job.id] ?? ""} onChange={(event) => setApplicationNotes((current) => ({ ...current, [job.id]: event.target.value }))} placeholder="Interview details, next steps, or why you saved this role…"/></label></details><div className="application-card-footer"><span>{job.source}</span><select aria-label={`Update ${job.company} application status`} value={status[job.id] ?? "Needs review"} onChange={(event) => setStatus((current) => ({ ...current, [job.id]: event.target.value as ApplicationStatus }))}><option>Needs review</option><option>Approved to prepare</option><option>Applied</option><option>Rejected</option></select></div></article>) : <p className="application-empty">No roles here yet.</p>}</section>)}</div>
               <p className="application-footnote">Status changes, notes, and follow-up dates are saved on this device. Follow-up dates appear here as reminders; no notification is sent. “Applied” is a manual record; Jobpilot never submits applications.</p>
             </>
-          ) : <>
+          ) : activeView === "all-found" ? <>
+            <div className="greeting-row"><div><div className="eyebrow">PUBLIC FEED DISCOVERIES</div><h1>All found <span>jobs.</span></h1><p className="subheading">{allFoundJobs.length} normalized listings received before your title and location filters.</p></div><button className="primary-button" onClick={searchWithPreferences} disabled={!stateLoaded || loadingJobs || loadingMoreJobs}><span>＋</span> {loadingJobs ? "Searching feeds…" : loadingMoreJobs ? "Loading more…" : "Search jobs"}</button></div>
+            <div className="found-jobs-notice"><strong>This view shows every listing returned by enabled feeds.</strong><span>Jobs are only scored and shown in Job matches when they fit your selected titles and locations. Use the status on each listing to see which preference excluded it.</span></div>
+            {(loadingJobs || loadingMoreJobs) && <p className="source-message" role="status">{loadingMoreJobs ? "Loading another provider batch; current discoveries stay visible…" : "Searching enabled public feeds…"}</p>}
+            {sourceErrors.length > 0 && <ul className="source-errors" role="status">{sourceErrors.map((error) => <li key={error}>{error}</li>)}</ul>}
+            <div className="found-jobs-controls"><label className="search-box"><span>⌕</span><input aria-label="Search all found jobs" placeholder="Search all found titles, companies, or locations…" value={foundQuery} onChange={(event) => { setFoundQuery(event.target.value); setFoundVisibleCount(50); }} /></label><span>Showing {visibleFoundJobs.length} of {filteredFoundJobs.length}</span></div>
+            {visibleFoundJobs.length > 0 ? <div className="found-jobs-list">{visibleFoundJobs.map((job) => {
+              const locationMatches = matchesPreferredLocation(job.location, profile.locations, job.mode, job.source, job.sourceLocationScope);
+              const roleMatches = !profile.roles.trim() || matchesTargetRole(job, profile.roles);
+              const matchesPreferences = locationMatches && roleMatches;
+              const excludedBy = [!roleMatches ? "title" : "", !locationMatches ? "location" : ""].filter(Boolean).join(" and ");
+              return <article className="found-job-row" key={job.id}>
+                <div className="found-job-heading"><div><h2>{job.role}</h2><p>{job.company} <span>·</span> {job.location}</p></div><span className={`found-job-status ${matchesPreferences ? "included" : "excluded"}`}>{matchesPreferences ? "Included in Job matches" : `Filtered by ${excludedBy}`}</span></div>
+                <div className="found-job-meta"><span>{job.source}</span><span>{job.posted}</span><span>{job.mode}</span><a href={job.sourceUrl} target="_blank" rel="noreferrer">Open original posting ↗</a></div>
+                <details className="found-job-description"><summary>View available description</summary><p className="job-description-text">{job.description ?? job.summary}</p></details>
+              </article>;
+            })}</div> : <div className="empty-state">{allFoundJobs.length ? "No found jobs match this text search." : "No provider listings have been fetched yet. Search jobs to fill this view."}</div>}
+            {visibleFoundJobs.length < filteredFoundJobs.length && <button className="load-more" onClick={() => setFoundVisibleCount((count) => count + 50)}>Show more found jobs ({filteredFoundJobs.length - visibleFoundJobs.length} remaining)</button>}
+            {(nextArbeitnowPage !== null || nextJobicyCursor !== null) && <button className="load-more" onClick={() => void fetchMoreJobs()} disabled={loadingMoreJobs || loadingJobs}>{loadingMoreJobs ? "Loading more jobs…" : "Load more from public feeds"}</button>}
+            <footer className="page-footer"><span>JOBPILOT <b>·</b> PUBLIC FEED DISCOVERIES</span><span>Source descriptions are shown as provided; verify on the original posting.</span></footer>
+          </> : <>
           <div className="greeting-row"><div><div className="eyebrow">{new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric" }).format(new Date()).toUpperCase()}</div><h1>Your next opportunity <span>starts here.</span></h1><p className="subheading">A focused view of live roles that match your preferences.</p></div><button className="primary-button" onClick={searchWithPreferences} disabled={!stateLoaded || loadingJobs || loadingMoreJobs}><span>＋</span> {loadingJobs ? "Searching feeds…" : "Search jobs"}</button></div>
 
           <section className="source-panel search-panel">
