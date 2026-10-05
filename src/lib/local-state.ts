@@ -1,7 +1,7 @@
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import type { ApplicationStatus, CandidateProfile, CoverLetterDraftRecord, Job, MatchReview, PersistedState } from "./types";
+import type { ApplicationStatus, CandidateProfile, CoverLetterDraftRecord, Job, MatchReview, PersistedCvAnalysis, PersistedState } from "./types";
 import { defaultProfile } from "./types";
 import { MAX_MATCH_REVIEWS } from "./match-calibration";
 import { normalizeMatchingSettings } from "./job-screening";
@@ -185,6 +185,25 @@ export function parsePersistedState(value: unknown): PersistedState | null {
   }
   const matchCohortKey = value.matchCohortKey === undefined ? "" : value.matchCohortKey;
   if (typeof matchCohortKey !== "string" || (matchCohortKey !== "" && !/^[a-f0-9]{64}$/.test(matchCohortKey))) return null;
+  if (value.cvText !== undefined && (typeof value.cvText !== "string" || value.cvText.length > 10_000)) return null;
+  if (value.cvFileName !== undefined && (typeof value.cvFileName !== "string" || value.cvFileName.length > 200)) return null;
+  let cvAnalysis: PersistedCvAnalysis | undefined;
+  if (value.cvAnalysis !== undefined) {
+    const item = value.cvAnalysis;
+    if (!isRecord(item)
+      || (item.summary !== undefined && (typeof item.summary !== "string" || item.summary.length > 4000))
+      || (item.seniority !== undefined && (typeof item.seniority !== "string" || item.seniority.length > 200))
+      || (item.domains !== undefined && !parseStringArray(item.domains, 30, 200))
+      || (item.highlights !== undefined && !parseStringArray(item.highlights, 30, 500))
+      || (item.notes !== undefined && !parseStringArray(item.notes, 30, 500))) return null;
+    cvAnalysis = {
+      ...(typeof item.summary === "string" ? { summary: item.summary } : {}),
+      ...(typeof item.seniority === "string" ? { seniority: item.seniority } : {}),
+      ...(Array.isArray(item.domains) ? { domains: parseStringArray(item.domains, 30, 200)! } : {}),
+      ...(Array.isArray(item.highlights) ? { highlights: parseStringArray(item.highlights, 30, 500)! } : {}),
+      ...(Array.isArray(item.notes) ? { notes: parseStringArray(item.notes, 30, 500)! } : {}),
+    };
+  }
   if (value.liveJobs !== undefined && (!Array.isArray(value.liveJobs) || value.liveJobs.length > MAX_TRACKED_JOBS)) return null;
   const liveJobs = value.liveJobs === undefined ? [] : value.liveJobs.map(parseJob);
   if (liveJobs.some((job) => job === null)) return null;
@@ -199,6 +218,9 @@ export function parsePersistedState(value: unknown): PersistedState | null {
     matchReviews: parsedMatchReviews,
     matchCohortKey,
     matchingSettings,
+    ...(typeof value.cvText === "string" ? { cvText: value.cvText } : {}),
+    ...(typeof value.cvFileName === "string" ? { cvFileName: value.cvFileName } : {}),
+    ...(cvAnalysis ? { cvAnalysis } : {}),
     liveJobs: liveJobs as Job[],
   };
 }
