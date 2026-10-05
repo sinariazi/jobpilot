@@ -93,7 +93,7 @@ To use Jobpilot another day, open Ollama, open a terminal in the `jobpilot-main`
 - **Jobicy:** Public JSON API and location taxonomy, no key or registration. Remote roles with geo eligibility; the public feed covers a rolling seven-day window with a three-hour publication delay and cursor continuation. Provides title, employer, geography, type, industry, description, date, and Jobicy URL. Jobpilot caches location taxonomy for 24 hours and job results for one hour, and queries at most five selected provider regions per request. Preserve source attribution and avoid excessive requests. [API](https://jobicy.com/jobs-rss-feed) · [terms](https://jobicy.com/terms).
 - Search requests enabled feeds concurrently and keeps both the deduplicated provider pool and the filtered job-match pool. The **All found jobs** workspace tab shows every listing returned by the providers before Jobpilot applies title/location filters, including whether each listing passes those preferences; some providers still apply their own search scope, such as Jobicy's selected-region query. **Job matches** stays filtered and is the only pool sent to local screening. Results become visible before scoring is complete; local scores and detailed shortlists update in batches. Jobpilot automatically fetches up to three continuation batches; later pages remain user-loadable to limit unnecessary requests. Up to 2,000 most recently held listings are retained in local state. Austria-wide discovery cannot be comprehensive under the free, public-feed constraint: the enabled sources are mainly remote or Germany/Europe focused, and many Austrian employer ATS endpoints are not searchable as a universal public feed. Search the public feeds and use the optional pasted-description fallback for known listings that are missing.
 - Loads further pages from Arbeitnow and Jobicy when their APIs return a next-page link or cursor. Remotive's [public API](https://github.com/remotive-io/remote-jobs-api) returns its active result set in one response and currently documents no page or cursor parameter, so Jobpilot fetches that feed once per cache period rather than inventing pagination.
-- Filters by the editable locations in your profile (Austria is the suggested default where applicable). Leave locations blank only if you want any location. Generic “Remote” does not imply Austria eligibility unless the feed provides evidence or you explicitly choose Remote. Jobicy's Europe feed is checked against the selected Europe scope.
+- Filters by the editable locations in your profile (Austria is the suggested default where applicable). Leave locations blank only if you want any location. A listing marked only “Europe” or “EMEA” does not count as a Vienna/Austria match; add “Remote Europe” if you want those broad remote listings. A Jobicy provider query scope alone is not treated as proof that an individual job accepts applicants in Austria.
 - Uses local Ollama `/v1/systemone` decision screening (default setup suggestion: `tev1:0.8b`) for a fast first estimate, then a local chat model (default setup suggestion: `qwen3.5:4b`) for shortlisted, uncertain, or incomplete cases. Both model names can be changed in the UI. You can adjust score weights and detailed-analysis thresholds in the app. Scores are estimates, not hiring probabilities. All location-eligible jobs remain visible, including low-scoring jobs; load additional provider pages when available.
 - The default score weights are skills 40%, experience 30%, domain fit 20%, and penalty for explicit disqualifiers 10%. Detailed analysis runs by default at scores of 65 or higher, confidence below 60, or whenever important information is missing/unclear. Change these settings in Jobpilot; the score is not a probability of being hired.
 - Shows score breakdowns, confidence when the model provides it, missing information, and detailed matched requirements/gaps with source evidence when available. Verify every result against the original listing.
@@ -102,7 +102,7 @@ To use Jobpilot another day, open Ollama, open a terminal in the `jobpilot-main`
 
 ## CV privacy and local AI
 
-The CV file is read in your browser and is not saved by Jobpilot. Extracted CV text is held in memory and sent to Ollama on this same computer for CV analysis and job matching. Job descriptions used for matching are also sent only to local Ollama. Jobpilot has no hosted AI fallback. Public feeds do not receive candidate profile data. Extracted role and skill suggestions, AI scores/explanations, review labels, profile fields, and tracker data are stored locally; the stored data is not encrypted. Cover-letter generation sends the job details, profile name and skills, and notes you enter to local Ollama, but not the full CV text. Keep Jobpilot bound to `localhost`; do not expose it to your network.
+The original CV file is read in your browser and is not saved. To let scores resume after a restart, Jobpilot saves an excerpt of up to 10,000 extracted characters, its CV analysis, and profile suggestions in the unencrypted local state file. You can review this excerpt or remove it from **Candidate profile → Analyze CV**; removing it keeps your editable role and skill fields. The excerpt and job descriptions are sent only to Ollama on this same computer. Jobpilot has no hosted AI fallback, and public feeds do not receive candidate profile data. Cover-letter generation sends job details, profile name and skills, and your notes to local Ollama, but not the CV excerpt. Keep Jobpilot bound to `localhost`; do not expose it to your network.
 
 Job discovery needs an internet connection. AI matching needs Ollama and installed models. The model's speed and quality depend on the model and your computer. User-reviewed match feedback is a selected sample and does not establish general accuracy or calibration.
 
@@ -168,7 +168,7 @@ flowchart TB
     app --> browser
 ```
 
-The CV file is not stored. Extracted text stays in memory for analysis and matching; only accepted profile fields and job results are persisted. Scanned-page OCR uses local Tesseract through the localhost app. The local state file and backups are currently unencrypted, as listed in TODO.
+The original CV file is not stored. A matching excerpt of up to 10,000 characters and its analysis are persisted locally so local scoring can resume after a restart. Scanned-page OCR uses local Tesseract through the localhost app. The local state file and backups are unencrypted.
 
 ### Job-search and two-stage matching flow
 
@@ -214,7 +214,7 @@ sequenceDiagram
         App->>AI: Detailed comparison using local chat model
         AI-->>App: Matches, gaps, and evidence
     end
-    App->>Disk: Save listings and assessments, not raw CV text
+    App->>Disk: Save listings, assessments, and the CV matching excerpt
     App-->>UI: Return all eligible jobs and their analysis
     UI-->>User: Display results for human review
 ```
