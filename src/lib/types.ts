@@ -33,8 +33,7 @@ export type MatchWeights = { skills: number; experience: number; domain: number;
 export type MatchingSettings = {
   decisionModel: string;
   weights: MatchWeights;
-  detailedScoreThreshold: number;
-  detailedConfidenceThreshold: number;
+  relevanceScoreThreshold: number;
 };
 export type JobScreening = {
   model: string;

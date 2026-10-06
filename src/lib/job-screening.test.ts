@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_MATCHING_SETTINGS, localScreeningReadinessMessage, normalizeMatchingSettings, normalizeSystemOneScreenResult, shouldRunDetailedAnalysis } from "./job-screening";
+import { localScreeningReadinessMessage, normalizeMatchingSettings, normalizeSystemOneScreenResult } from "./job-screening";
 
 const weights = { skills: 40, experience: 30, domain: 20, disqualifier: 10 };
 const valid = { answers: {
@@ -32,9 +32,10 @@ describe("local job screening", () => {
     expect(result?.score).toBe(61);
     expect(result?.confidence).toBe(66);
   });
-  it("uses documented defaults and keeps valid configured weights and thresholds", () => {
-    expect(normalizeMatchingSettings(undefined)).toEqual({ decisionModel: "", weights: weights, detailedScoreThreshold: 65, detailedConfidenceThreshold: 60 });
-    expect(normalizeMatchingSettings({ decisionModel: "tag", weights: { skills: 50, experience: 20, domain: 20, disqualifier: 10 }, detailedScoreThreshold: 72, detailedConfidenceThreshold: 48 })).toEqual({ decisionModel: "tag", weights: { skills: 50, experience: 20, domain: 20, disqualifier: 10 }, detailedScoreThreshold: 72, detailedConfidenceThreshold: 48 });
+  it("uses documented defaults, keeps the review relevance cutoff, and migrates the former detail threshold", () => {
+    expect(normalizeMatchingSettings(undefined)).toEqual({ decisionModel: "", weights: weights, relevanceScoreThreshold: 65 });
+    expect(normalizeMatchingSettings({ decisionModel: "tag", weights: { skills: 50, experience: 20, domain: 20, disqualifier: 10 }, relevanceScoreThreshold: 72 })).toEqual({ decisionModel: "tag", weights: { skills: 50, experience: 20, domain: 20, disqualifier: 10 }, relevanceScoreThreshold: 72 });
+    expect(normalizeMatchingSettings({ detailedScoreThreshold: 74, detailedConfidenceThreshold: 40 }).relevanceScoreThreshold).toBe(74);
     expect(normalizeMatchingSettings({ weights: { skills: 50, experience: 20, domain: 20, disqualifier: 20 } }).weights).toEqual(weights);
   });
   it("rejects missing and out-of-range model answers instead of silently scoring them", () => {
@@ -45,13 +46,5 @@ describe("local job screening", () => {
     const result = normalizeSystemOneScreenResult({ answers: { ...valid.answers, information: { choice: "cv_missing" } } }, "decision:tag", weights);
     expect(result?.informationStatus).toBe("cv_missing");
     expect(result?.confidence).toBe(80);
-  });
-  it("routes threshold, low-confidence and missing-information cases to detailed analysis", () => {
-    const screening = normalizeSystemOneScreenResult(valid, "decision:tag", weights)!;
-    expect(shouldRunDetailedAnalysis(screening, { ...DEFAULT_MATCHING_SETTINGS, detailedScoreThreshold: 70, detailedConfidenceThreshold: 60 })).toBe(false);
-    expect(shouldRunDetailedAnalysis({ ...screening, score: 65 }, DEFAULT_MATCHING_SETTINGS)).toBe(true);
-    expect(shouldRunDetailedAnalysis({ ...screening, confidence: 40 }, DEFAULT_MATCHING_SETTINGS)).toBe(true);
-    expect(shouldRunDetailedAnalysis({ ...screening, informationStatus: "job_missing" }, DEFAULT_MATCHING_SETTINGS)).toBe(true);
-    expect(shouldRunDetailedAnalysis(undefined, DEFAULT_MATCHING_SETTINGS)).toBe(true);
   });
 });

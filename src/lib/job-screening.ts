@@ -4,8 +4,7 @@ export const DEFAULT_MATCH_WEIGHTS: MatchWeights = { skills: 40, experience: 30,
 export const DEFAULT_MATCHING_SETTINGS: MatchingSettings = {
   decisionModel: "",
   weights: DEFAULT_MATCH_WEIGHTS,
-  detailedScoreThreshold: 65,
-  detailedConfidenceThreshold: 60,
+  relevanceScoreThreshold: 65,
 };
 
 export type LocalScreeningReadiness = {
@@ -38,9 +37,14 @@ export function normalizeMatchingSettings(value: unknown): MatchingSettings {
   return {
     decisionModel: typeof raw.decisionModel === "string" && raw.decisionModel.length <= 200 ? raw.decisionModel.trim() : "",
     weights: isValidWeights ? { ...weights } : DEFAULT_MATCH_WEIGHTS,
-    detailedScoreThreshold: Number.isInteger(raw.detailedScoreThreshold) && raw.detailedScoreThreshold! >= 0 && raw.detailedScoreThreshold! <= 100 ? raw.detailedScoreThreshold! : DEFAULT_MATCHING_SETTINGS.detailedScoreThreshold,
-    detailedConfidenceThreshold: Number.isInteger(raw.detailedConfidenceThreshold) && raw.detailedConfidenceThreshold! >= 0 && raw.detailedConfidenceThreshold! <= 100 ? raw.detailedConfidenceThreshold! : DEFAULT_MATCHING_SETTINGS.detailedConfidenceThreshold,
+    relevanceScoreThreshold: readScoreThreshold(raw.relevanceScoreThreshold ?? (value as { detailedScoreThreshold?: unknown }).detailedScoreThreshold),
   };
+}
+
+function readScoreThreshold(value: unknown) {
+  return Number.isInteger(value) && Number(value) >= 0 && Number(value) <= 100
+    ? Number(value)
+    : DEFAULT_MATCHING_SETTINGS.relevanceScoreThreshold;
 }
 
 type Answer = { type?: unknown; score?: unknown; confidence?: unknown; noul?: unknown; choice?: unknown };
@@ -77,10 +81,4 @@ export function normalizeSystemOneScreenResult(payload: unknown, model: string, 
     disqualifierRisk: Math.round(disqualifierRisk * 100),
     informationStatus: information as JobScreening["informationStatus"],
   };
-}
-
-export function shouldRunDetailedAnalysis(screening: JobScreening | undefined, settings: MatchingSettings) {
-  if (!screening || screening.confidence === null || screening.confidence < settings.detailedConfidenceThreshold) return true;
-  if (screening.informationStatus !== "sufficient") return true;
-  return screening.score >= settings.detailedScoreThreshold;
 }

@@ -61,7 +61,7 @@ describe("local state storage", () => {
       } },
       matchReviews: [{ jobId: exampleJob.id, company: exampleJob.company, role: exampleJob.role, model: "local-model:latest", cohortKey: "a".repeat(64), score: 84, predictedRelevant: true, reviewedRelevant: true, reviewedAt: "2026-10-02T12:00:00.000Z" }],
       matchCohortKey: "a".repeat(64),
-      matchingSettings: { decisionModel: "decision:latest", weights: { skills: 40, experience: 30, domain: 20, disqualifier: 10 }, detailedScoreThreshold: 65, detailedConfidenceThreshold: 60 },
+      matchingSettings: { decisionModel: "decision:latest", weights: { skills: 40, experience: 30, domain: 20, disqualifier: 10 }, relevanceScoreThreshold: 65 },
       webSearchEnabled: true,
       cvText: "CV evidence used for matching",
       cvFileName: "candidate-cv.pdf",
