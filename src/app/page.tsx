@@ -497,10 +497,17 @@ export default function Home() {
       setDetailedAnalysisError({ jobId: job.id, message: "Install and select a local chat model in Local AI status, then try again." });
       return;
     }
-    if (detailedAnalysisAbortController.current) return;
+    if (detailedAnalysisAbortController.current) {
+      detailedAnalysisAbortController.current.abort();
+      detailedAnalysisAbortController.current = null;
+      setDetailedAnalysisJobId("");
+    }
     const controller = new AbortController();
     detailedAnalysisAbortController.current = controller;
     setDetailedAnalysisJobId(job.id);
+    const timeout = window.setTimeout(() => {
+      controller.abort(new DOMException("The local model took too long to respond.", "TimeoutError"));
+    }, 45_000);
     try {
       const response = await fetch("/api/jobs/match", {
         method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
@@ -513,8 +520,15 @@ export default function Home() {
       const aiMatch = { model: selectedAiModel, relevant: match.relevant, score: Math.max(0, Math.min(100, Math.round(match.score))), reason: match.reason, cvEvidence: match.cvEvidence };
       setLiveJobs((current) => current.map((item) => item.id === job.id ? { ...item, aiMatch, detailedAnalysis: match.detailedAnalysis } : item));
     } catch (error) {
-      if (!controller.signal.aborted) setDetailedAnalysisError({ jobId: job.id, message: error instanceof Error ? error.message : "Detailed local analysis failed." });
+      if (controller.signal.aborted) {
+        if (controller.signal.reason instanceof DOMException && controller.signal.reason.name === "TimeoutError") {
+          setDetailedAnalysisError({ jobId: job.id, message: "The local model took longer than 45 seconds and the request was stopped. Check Local AI status, select a smaller chat model, or try again." });
+        }
+      } else {
+        setDetailedAnalysisError({ jobId: job.id, message: error instanceof Error ? error.message : "Detailed local analysis failed." });
+      }
     } finally {
+      window.clearTimeout(timeout);
       if (detailedAnalysisAbortController.current === controller) detailedAnalysisAbortController.current = null;
       setDetailedAnalysisJobId((current) => current === job.id ? "" : current);
     }
@@ -1265,10 +1279,11 @@ export default function Home() {
                 {selected.job.screening?.model !== matchingSettings.decisionModel && <p className="fit-explanation">{candidateSkills.length ? `${selected.matched.length} exact keyword ${selected.matched.length === 1 ? "mention" : "mentions"} found among ${candidateSkills.length} profile skills. This is a text count, not a fit score. ` : "No profile skills have been extracted yet. "}{cvText.trim() ? "The local decision-model score appears when screening completes." : "Upload a CV once; its local matching excerpt will be saved so screening can run again after restart."}{selected.job.listingVerification === "search-result" ? " This is only a web-search snippet, not a verified vacancy or complete job description." : ""}</p>}
                 {selected.job.screening?.model === matchingSettings.decisionModel && <section className="ai-match-explanation" aria-label="Local decision-model match estimate"><div className="ai-match-title"><h4>Local screening estimate</h4><strong>{selected.job.screening.score}% · {selected.job.screening.confidence === null ? "confidence unavailable" : `${selected.job.screening.confidence}% model confidence`} · {selected.job.screening.model}</strong></div><p>Estimated role fit, not probability of getting hired. Screening confidence controls second-stage review and is not the same as the fit score.</p><div className="screening-breakdown">{Object.entries(selected.job.screening.breakdown).map(([key, value]) => <span key={key}>{key}: {value === null ? "missing" : `${value}%`}</span>)}<span>Explicit disqualifier risk: {selected.job.screening.disqualifierRisk === null ? "missing" : `${selected.job.screening.disqualifierRisk}%`}</span><span>Information: {selected.job.screening.informationStatus.replaceAll("_", " ")}</span></div><small>Score weights: skills {matchingSettings.weights.skills}%, experience {matchingSettings.weights.experience}%, domain {matchingSettings.weights.domain}%, disqualifier penalty {matchingSettings.weights.disqualifier}%.</small><small>AI estimates can be wrong. Verify the original posting and every requirement.</small>{hasCurrentCvAssessment && <div className="match-review-controls"><span>Your review: {selectedMatchReview ? selectedMatchReview.reviewedRelevant ? "Relevant" : "Not relevant" : "Not reviewed"}</span><div><button type="button" className={selectedMatchReview?.reviewedRelevant === true ? "selected-review" : ""} aria-pressed={selectedMatchReview?.reviewedRelevant === true} onClick={() => reviewSelectedMatch(true)}>Relevant</button><button type="button" className={selectedMatchReview?.reviewedRelevant === false ? "selected-review" : ""} aria-pressed={selectedMatchReview?.reviewedRelevant === false} onClick={() => reviewSelectedMatch(false)}>Not relevant</button></div></div>}</section>}
                 <section className="detailed-analysis-action" aria-label="Detailed local analysis controls">
-                  <button type="button" className="secondary-button" onClick={() => void analyzeJobInDetail(selected.job)} disabled={Boolean(detailedAnalysisJobId)}>{detailedAnalysisJobId === selected.job.id ? "Analyzing this job on this laptop…" : selected.job.detailedAnalysis ? "Run detailed analysis again" : "Analyze this job in detail"}</button>
+                  <button type="button" className="secondary-button" onClick={() => void analyzeJobInDetail(selected.job)} disabled={detailedAnalysisJobId === selected.job.id}>{detailedAnalysisJobId === selected.job.id ? "Analyzing this job on this laptop…" : selected.job.detailedAnalysis ? "Run detailed analysis again" : "Analyze this job in detail"}</button>
+                  {detailedAnalysisJobId === selected.job.id && <button type="button" className="secondary-button" onClick={() => detailedAnalysisAbortController.current?.abort()}>Cancel analysis</button>}
                   <p>Uses the selected local chat model only for this job when requested. The first-stage score stays separate.</p>
                   {detailedAnalysisError?.jobId === selected.job.id && <p className="source-error-message" role="alert">{detailedAnalysisError.message}</p>}
-                  {detailedAnalysisJobId && detailedAnalysisJobId !== selected.job.id && <p role="status">A detailed review for another job is still running.</p>}
+                  {detailedAnalysisJobId && detailedAnalysisJobId !== selected.job.id && <p role="status">A different job is being analyzed. Starting a review here will stop that request.</p>}
                 </section>
                 {selected.job.detailedAnalysis && <section className="ai-match-explanation detailed-analysis" aria-label="Detailed local CV and job evidence"><div className="ai-match-title"><h4>Detailed local analysis</h4><strong>{selected.job.aiMatch?.score !== undefined ? `${selected.job.aiMatch.score}% detailed estimate · ` : ""}{selected.job.aiMatch?.model ?? selected.job.detailedAnalysis.model}</strong></div><p>{selected.job.aiMatch?.reason ?? selected.job.detailedAnalysis.summary}</p>{selected.job.detailedAnalysis.matchedRequirements.length > 0 && <><h5>Matched requirements</h5><ul>{selected.job.detailedAnalysis.matchedRequirements.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</ul></>}{selected.job.detailedAnalysis.gaps.length > 0 && <><h5>Gaps or unclear requirements</h5><ul>{selected.job.detailedAnalysis.gaps.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</ul></>}{selected.job.detailedAnalysis.evidence.map((item, index) => <blockquote key={`${index}-${item.requirement}`}><strong>{item.requirement}</strong><br/><b>CV:</b> “{item.cvQuote}”<br/><b>Job:</b> “{item.jobQuote}”</blockquote>)}</section>}
                 <div className="evidence-label">PROFILE SKILLS MENTIONED IN POSTING <span>{selected.matched.length} found</span></div>

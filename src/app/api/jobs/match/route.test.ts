@@ -85,6 +85,16 @@ describe("local CV-to-job matching API", () => {
     expect((await response.json()).error).toContain("more system memory");
   });
 
+  it("returns an actionable message when local inference times out", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ models: [{ name: requestBody.model }] }), { status: 200 }))
+      .mockRejectedValueOnce(new DOMException("The operation timed out.", "TimeoutError"));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await POST(new Request("http://localhost/api/jobs/match", { method: "POST", body: JSON.stringify(requestBody) }));
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "Local job matching took too long. Try a smaller Ollama model or fewer jobs." });
+  });
+
   it("refuses a non-loopback Ollama destination", async () => {
     vi.stubEnv("OLLAMA_BASE_URL", "http://example.com");
     const fetchMock = vi.fn();
