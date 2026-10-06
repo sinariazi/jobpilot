@@ -598,6 +598,10 @@ export default function Home() {
       setLiveJobs((current) => current.map((job) => ({ ...job, screening: undefined, aiMatch: undefined, detailedAnalysis: undefined })));
       setSourceMessage("Search preferences changed. Search again to rescreen jobs against the new preferences.");
     }
+    if (nextProfile.skills !== profile.skills || nextProfile.name !== profile.name) {
+      setCoverLetterDrafts((current) => Object.fromEntries(Object.entries(current).map(([id, draft]) => [id, { ...draft, claimAudit: undefined }])));
+      setCoverLetterMessage("Candidate name or profile skills changed. Existing cover-letter source checks were cleared; regenerate or review the drafts.");
+    }
     setProfile(nextProfile);
     setSearchRolesDraft(nextProfile.roles);
     setSearchLocationsDraft(nextProfile.locations);
@@ -794,10 +798,11 @@ export default function Home() {
       return { ...current, [selected.job.id]: {
         ...prior,
         draft: createCoverLetterDraft({ candidateName: profile.name, role: selected.job.role, company: selected.job.company, matchedSkills: selected.matched, reason: prior.interest, evidence: prior.evidence }),
+        claimAudit: undefined,
         updatedAt: new Date().toISOString(),
       } };
     });
-    setCoverLetterMessage("Draft created. Review every statement and replace any placeholders before use.");
+    setCoverLetterMessage("Basic English template created. AI tone, language, and length settings do not apply to this template.");
   }
 
   async function generateAiCoverLetter() {
@@ -819,12 +824,14 @@ export default function Home() {
           candidate: { name: profile.name, skills: profile.skills },
           interest: selectedCoverLetter?.interest ?? "",
           evidence: selectedCoverLetter?.evidence ?? "",
+          preferences: selectedCoverLetter?.preferences ?? { tone: "professional", language: "English", length: "concise" },
         }),
       });
-      const result = await response.json() as { draft?: string; error?: string };
+      const result = await response.json() as { draft?: string; claimAudit?: CoverLetterDraftRecord["claimAudit"]; error?: string };
       if (!response.ok || !result.draft) throw new Error(result.error ?? "The AI provider returned no draft.");
-      updateSelectedCoverLetter({ draft: result.draft });
-      setCoverLetterMessage("AI draft created and saved locally. Verify every claim before use.");
+      updateSelectedCoverLetter({ draft: result.draft, claimAudit: result.claimAudit });
+      const flagged = result.claimAudit?.unverifiedClaims.length ?? 0;
+      setCoverLetterMessage(`AI draft created. ${result.claimAudit?.verifiedClaims.length ?? 0} claim quotes matched your supplied fields; ${flagged} claims could not be matched. This checks for source text only, not truth. Review the full letter before use.`);
     } catch (error) {
       setCoverLetterMessage(error instanceof Error ? error.message : "Could not create the AI draft.");
     } finally {
@@ -839,6 +846,8 @@ export default function Home() {
       [selected.job.id]: {
         ...(current[selected.job.id] ?? { interest: "", evidence: "", draft: "", updatedAt: "" }),
         ...patch,
+        ...((patch.draft !== undefined || patch.interest !== undefined || patch.evidence !== undefined)
+          && !Object.prototype.hasOwnProperty.call(patch, "claimAudit") ? { claimAudit: undefined } : {}),
         updatedAt: new Date().toISOString(),
       },
     }));
@@ -1283,10 +1292,11 @@ export default function Home() {
                     <label>Why are you interested in this role or company?<textarea rows={2} maxLength={2000} value={selectedCoverLetter?.interest ?? ""} onChange={(event) => updateSelectedCoverLetter({ interest: event.target.value })} placeholder="Add a specific reason…" /></label>
                     <label>Relevant example and outcome from your experience<textarea rows={2} maxLength={4000} value={selectedCoverLetter?.evidence ?? ""} onChange={(event) => updateSelectedCoverLetter({ evidence: event.target.value })} placeholder="Describe your contribution and the result…" /></label>
                     <label className="local-model-select">Local AI model<select value={selectedAiModel} onChange={(event) => chooseLocalAiModel(event.target.value)} disabled={!localAiModels.length || aiDrafting}><option value="">Choose an installed model</option>{localAiModels.map((model) => <option key={model} value={model}>{model}</option>)}</select></label>
+                    <div className="cover-letter-preferences"><label>AI draft tone<select value={selectedCoverLetter?.preferences?.tone ?? "professional"} onChange={(event) => updateSelectedCoverLetter({ preferences: { ...(selectedCoverLetter?.preferences ?? { tone: "professional", language: "English", length: "concise" }), tone: event.target.value as "professional" | "warm" | "direct" } })}><option value="professional">Professional</option><option value="warm">Warm</option><option value="direct">Direct</option></select></label><label>AI draft language<select value={selectedCoverLetter?.preferences?.language ?? "English"} onChange={(event) => updateSelectedCoverLetter({ preferences: { ...(selectedCoverLetter?.preferences ?? { tone: "professional", language: "English", length: "concise" }), language: event.target.value as "English" | "German" } })}><option>English</option><option>German</option></select></label><label>AI draft length<select value={selectedCoverLetter?.preferences?.length ?? "concise"} onChange={(event) => updateSelectedCoverLetter({ preferences: { ...(selectedCoverLetter?.preferences ?? { tone: "professional", language: "English", length: "concise" }), length: event.target.value as "concise" | "standard" } })}><option value="concise">Concise</option><option value="standard">Standard</option></select></label></div>
                     <p className="cover-letter-help">Cover-letter drafting uses your profile and notes. CV text is used only for local job matching, not sent with a cover-letter request.</p>
                     {localAiStatus && <p className="cover-letter-message" role="status">{localAiStatus}</p>}
                     <div className="cover-letter-actions"><button type="button" className="primary-button cover-letter-generate" onClick={() => void generateAiCoverLetter()} disabled={!localAiModels.includes(selectedAiModel) || aiDrafting}>{aiDrafting ? "Generating locally…" : "Generate on this laptop"}</button><button type="button" className="secondary-button cover-letter-generate" onClick={buildCoverLetter}>Use simple template</button></div>
-                    {selectedCoverLetter?.draft && <><label>Draft text<textarea rows={11} maxLength={20000} value={selectedCoverLetter.draft} onChange={(event) => updateSelectedCoverLetter({ draft: event.target.value })} /></label><div className="cover-letter-actions"><button type="button" className="secondary-button" onClick={() => void copyCoverLetter()}>Copy</button><button type="button" className="secondary-button" onClick={downloadCoverLetter}>Download .txt</button></div><p className="cover-letter-help">Saved on this device · Updated {new Date(selectedCoverLetter.updatedAt).toLocaleString()}</p></>}
+                    {selectedCoverLetter?.draft && <><label>Draft text<textarea rows={11} maxLength={20000} value={selectedCoverLetter.draft} onChange={(event) => updateSelectedCoverLetter({ draft: event.target.value })} /></label>{selectedCoverLetter.claimAudit ? <div className="claim-audit" aria-label="Cover letter source check"><strong>Source-text check · manual review still required</strong><p>{selectedCoverLetter.claimAudit.verifiedClaims.length} quoted claims matched your supplied profile or notes. This confirms the text exists; it does not prove the claim is accurate.</p>{selectedCoverLetter.claimAudit.verifiedClaims.map((item, index) => <blockquote key={`${index}-${item.claim}`}><b>{item.claim}</b><br/>Source ({item.source.replaceAll("-", " ")}): “{item.sourceQuote}”</blockquote>)}{selectedCoverLetter.claimAudit.unverifiedClaims.length > 0 && <><p>Claims without a matching source quote:</p><ul>{selectedCoverLetter.claimAudit.unverifiedClaims.map((claim, index) => <li key={`${index}-${claim}`}>{claim}</li>)}</ul></>}</div> : <p className="cover-letter-help">No source check is attached to this edited or template draft. Review all statements against your experience.</p>}<div className="cover-letter-actions"><button type="button" className="secondary-button" onClick={() => void copyCoverLetter()}>Copy</button><button type="button" className="secondary-button" onClick={downloadCoverLetter}>Download .txt</button></div><p className="cover-letter-help">Saved on this device · Updated {new Date(selectedCoverLetter.updatedAt).toLocaleString()}</p></>}
                     {coverLetterMessage && <p className="cover-letter-message" role="status">{coverLetterMessage}</p>}
                   </>}
                 </section>

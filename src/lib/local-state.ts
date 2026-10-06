@@ -169,7 +169,34 @@ export function parsePersistedState(value: unknown): PersistedState | null {
       || typeof entry.evidence !== "string" || entry.evidence.length > 4000
       || typeof entry.draft !== "string" || entry.draft.length > 20_000
       || typeof entry.updatedAt !== "string" || !Number.isFinite(Date.parse(entry.updatedAt))) return null;
-    parsedDrafts[id] = { interest: entry.interest, evidence: entry.evidence, draft: entry.draft, updatedAt: entry.updatedAt };
+    let preferences: CoverLetterDraftRecord["preferences"];
+    if (entry.preferences !== undefined) {
+      if (!isRecord(entry.preferences)
+        || !["professional", "warm", "direct"].includes(String(entry.preferences.tone))
+        || !["English", "German"].includes(String(entry.preferences.language))
+        || !["concise", "standard"].includes(String(entry.preferences.length))) return null;
+      preferences = {
+        tone: entry.preferences.tone as "professional" | "warm" | "direct",
+        language: entry.preferences.language as "English" | "German",
+        length: entry.preferences.length as "concise" | "standard",
+      };
+    }
+    let claimAudit: CoverLetterDraftRecord["claimAudit"];
+    if (entry.claimAudit !== undefined) {
+      const audit = entry.claimAudit;
+      if (!isRecord(audit) || !Array.isArray(audit.verifiedClaims) || audit.verifiedClaims.length > 30
+        || !Array.isArray(audit.unverifiedClaims) || audit.unverifiedClaims.length > 30
+        || typeof audit.checkedAt !== "string" || !Number.isFinite(Date.parse(audit.checkedAt))) return null;
+      const verifiedClaims: NonNullable<CoverLetterDraftRecord["claimAudit"]>["verifiedClaims"] = [];
+      for (const claim of audit.verifiedClaims) {
+        if (!isRecord(claim) || !boundedString(claim.claim, 600) || !boundedString(claim.sourceQuote, 600)
+          || !["profile-name", "profile-skills", "candidate-interest", "candidate-experience"].includes(String(claim.source))) return null;
+        verifiedClaims.push({ claim: claim.claim.trim(), source: claim.source as "profile-name" | "profile-skills" | "candidate-interest" | "candidate-experience", sourceQuote: claim.sourceQuote.trim() });
+      }
+      if (!audit.unverifiedClaims.every((claim) => boundedString(claim, 600))) return null;
+      claimAudit = { verifiedClaims, unverifiedClaims: audit.unverifiedClaims.map((claim: string) => claim.trim()), checkedAt: audit.checkedAt };
+    }
+    parsedDrafts[id] = { interest: entry.interest, evidence: entry.evidence, draft: entry.draft, ...(preferences ? { preferences } : {}), ...(claimAudit ? { claimAudit } : {}), updatedAt: entry.updatedAt };
   }
   const matchReviews = value.matchReviews === undefined ? [] : value.matchReviews;
   if (!Array.isArray(matchReviews) || matchReviews.length > MAX_MATCH_REVIEWS) return null;

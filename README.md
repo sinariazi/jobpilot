@@ -110,7 +110,7 @@ To use Jobpilot another day, open Ollama, open a terminal in the `jobpilot-main`
 - Uses local Ollama `/v1/systemone` decision screening (default setup suggestion: `tev1:0.8b`) for a fast first estimate, then a local chat model (default setup suggestion: `qwen3.5:4b`) for shortlisted, uncertain, or incomplete cases. Both model names can be changed in the UI. You can adjust score weights and detailed-analysis thresholds in the app. Scores are estimates, not hiring probabilities. All location-eligible jobs remain visible, including low-scoring jobs; load additional provider pages when available.
 - The default score weights are skills 40%, experience 30%, domain fit 20%, and penalty for explicit disqualifiers 10%. Detailed analysis runs by default at scores of 65 or higher, confidence below 60, or whenever important information is missing/unclear. Change these settings in Jobpilot; the score is not a probability of being hired.
 - Shows score breakdowns, confidence when the model provides it, missing information, and detailed matched requirements/gaps with source evidence when available. Verify every result against the original listing.
-- Lets you save jobs, track application status, add private notes and follow-up dates, and create editable cover-letter drafts. A local Chrome/Edge extension can fill recognized empty contact fields and a matching saved cover-letter draft on Greenhouse, Lever, Ashby, Workday, SmartRecruiters, and Workable forms. Add contact details in **Candidate profile**. You review all fields and submit applications yourself; the extension does not upload CVs or answer employer screening questions.
+- Lets you save jobs, track application status, add private notes and follow-up dates, and create editable cover-letter drafts. Local AI drafts support selectable tone, language (English or German), and length, and include a structured claim ledger: exact quotes are checked against the candidate name, profile skills, interest, or experience notes, and unsupported claims are flagged. This verifies that source text exists, not that a claim is true; editing the draft or changing its source skills clears the check. The basic English template does not use the AI writing preferences. A local Chrome/Edge extension can fill recognized empty contact fields and a matching saved cover-letter draft on Greenhouse, Lever, Ashby, Workday, SmartRecruiters, and Workable forms. Add contact details in **Candidate profile**. You review all fields and submit applications yourself; the extension does not upload CVs or answer employer screening questions.
 - Stores profile and job-tracker data on this device in `~/.jobpilot/state.json` (or the folder set by `JOBPILOT_DATA_DIR`). The file is not encrypted. Use **Candidate profile → Data backup** to save or restore a local backup.
 
 ## CV privacy and local AI
@@ -137,7 +137,6 @@ Restart Jobpilot and choose English, German, or both in the CV upload section. T
 - Improve free Austria-wide discovery if a public, no-key, no-registration job source with permitted access becomes available; the current sources cannot provide comprehensive local coverage.
 - Encrypt local profile, tracker, and backup data.
 - Tailor and export a CV from verified source material; currently Jobpilot analyzes CVs but does not generate tailored CV files.
-- Improve cover-letter drafting preferences, structured output, and source-to-claim checks.
 - Review accessibility and responsive layouts across supported browsers and screen sizes.
 - Add end-to-end tests for job search, job details, profile, tracking, and extension prefill on live ATS pages. Automated extension tests currently cover supported hosts, field mapping, and local access controls only.
 - Evaluate local decision scores against a real human-reviewed set of strong, borderline, and poor matches. No such reviewed dataset is currently available, so false-positive/false-negative rates and model calibration have not been established.
@@ -223,14 +222,17 @@ flowchart LR
     extract --> analyze["Local Ollama CV analysis"]
     analyze --> profile["Candidate reviews and edits profile suggestions"]
     profile --> search["Search, score, and inspect job evidence"]
-    search --> draft["Prepare editable cover letter and application notes"]
+    search --> context["Role details, skills, and user-provided interest and experience"]
+    context --> draft["Local model applies tone, language, length; returns letter and claim ledger"]
+    draft --> sourcecheck["Check exact quotes against supplied source fields"]
+    sourcecheck --> review["Show source quotes and unsupported claims for review"]
     search --> tracker["Save job and manually track application status"]
-    draft --> user["Candidate reviews, copies, and submits"]
+    review --> user["Candidate verifies, edits, copies, and submits"]
     tracker --> user
     user -->|"Optional click-to-fill supported blank fields"| ext["Local Chromium extension"]
 ```
 
-Jobpilot prepares application material but never applies automatically. The extension supports selected Chromium-based browsers and ATS pages; it only fills recognized empty contact fields and a matching saved cover-letter field, and it does not upload a CV, answer screening questions, overwrite existing values, or submit forms. Manual job entry is available when a public source misses a listing; URL import is not fetched.
+Jobpilot prepares application material but never applies automatically. The source check confirms only that the AI-provided quote appears in the candidate name, skills, interest, or experience field; it does not validate the claim's truth, and omitted or paraphrased claims can escape that check. Every letter still requires human review. Editing the letter or changing the source skills, interest, or experience clears its saved source check. The extension supports selected Chromium-based browsers and ATS pages; it only fills recognized empty contact fields and a matching saved cover-letter field, and it does not upload a CV, answer screening questions, overwrite existing values, or submit forms. Manual job entry is available when a public source misses a listing; URL import is not fetched.
 
 ### Runtime and failure handling
 
@@ -262,6 +264,11 @@ sequenceDiagram
         end
         App-->>UI: Update visible scores and progress
     end
+    UI->>App: Request an application draft with job and profile fields
+    App->>AI: Generate local letter and structured claim ledger; CV excerpt excluded
+    AI-->>App: Letter plus candidate claims and source quotes
+    App->>App: Check each quote against supplied skills, interest, and experience notes
+    App-->>UI: Return editable draft and verified/unverified source references
     App->>State: Persist local profile, results, and tracker
     App-->>UI: Preserve successful results if another source/model fails
 ```
@@ -277,6 +284,7 @@ The server reports provider and model failures instead of silently switching to 
 | Keep all-found and preference-filtered pools separate | Users can inspect source results that local title/location preferences exclude. | Broad or noisy source results remain visible in All found jobs and need user review. |
 | Stream work through two local matching stages | Fast estimates appear as batches finish; detailed evidence analysis is reserved for shortlisted or uncertain jobs. | Model compatibility, latency, and quality depend on local Ollama and hardware. |
 | Make hosted web search optional and minimize its query | It can broaden discovery without sending candidate data to the search service. | Requires an Ollama Web Search API key; limited free starter use; snippets are not verified postings. |
+| Keep cover-letter claims linked to user-provided evidence | Structured output and exact quote checks expose unsupported claims for review. | Quote presence does not prove truth; the model can omit or paraphrase claims, so human review remains necessary. |
 | Preserve user control and provenance | Scores remain estimates, source links are retained, and applications are never submitted automatically. | Users must verify listings and complete employer forms themselves. |
 
 This showcase demonstrates local-first data boundaries, extensible multi-source integration, progressive asynchronous processing, explicit model routing, failure-aware orchestration, and human-controlled application preparation. Current product limits and unfinished work remain listed in [Current limitations](#current-limitations-todo).

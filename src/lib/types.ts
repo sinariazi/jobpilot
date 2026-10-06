@@ -66,10 +66,24 @@ export type CandidateProfile = {
 
 export type ApplicationStatus = "Needs review" | "Approved to prepare" | "Applied" | "Rejected";
 
+export type CoverLetterClaimAudit = {
+  verifiedClaims: Array<{ claim: string; source: "profile-name" | "profile-skills" | "candidate-interest" | "candidate-experience"; sourceQuote: string }>;
+  unverifiedClaims: string[];
+  checkedAt: string;
+};
+
+export type CoverLetterDraftPreferences = {
+  tone: "professional" | "warm" | "direct";
+  language: "English" | "German";
+  length: "concise" | "standard";
+};
+
 export type CoverLetterDraftRecord = {
   interest: string;
   evidence: string;
   draft: string;
+  preferences?: CoverLetterDraftPreferences;
+  claimAudit?: CoverLetterClaimAudit;
   updatedAt: string;
 };
 

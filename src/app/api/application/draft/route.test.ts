@@ -12,6 +12,7 @@ const input = {
   candidate: { name: "Candidate", skills: "TypeScript, React" },
   interest: "I want to work on the product.",
   evidence: "I shipped a verified feature.",
+  preferences: { tone: "warm", language: "German", length: "standard" },
 };
 
 describe("local application draft API", () => {
@@ -61,20 +62,51 @@ describe("local application draft API", () => {
     const response = await POST(new Request("http://localhost/api/application/draft", { method: "POST", body: JSON.stringify(invalid) }));
     expect(response.status).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
+    const invalidPreferences = { ...input, preferences: { ...input.preferences, language: "French" } };
+    const preferencesResponse = await POST(new Request("http://localhost/api/application/draft", { method: "POST", body: JSON.stringify(invalidPreferences) }));
+    expect(preferencesResponse.status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("sends drafting only to local Ollama and returns the editable letter", async () => {
+    const generated = {
+      letter: "Dear Hiring Team,\n\nI have built with TypeScript and React.",
+      claims: [
+        { claim: "I have built with TypeScript and React.", source: "profile-skills", sourceQuote: "TypeScript" },
+        { claim: "I led a team of 40 engineers.", source: "none", sourceQuote: "" },
+      ],
+    };
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ models: [{ name: input.model }] }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: "Dear Hiring Team,\n\nI am applying." } }), { status: 200 }));
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify(generated) } }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     const response = await POST(new Request("http://localhost/api/application/draft", { method: "POST", body: JSON.stringify(input) }));
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ draft: "Dear Hiring Team,\n\nI am applying." });
+    const result = await response.json();
+    expect(result).toMatchObject({
+      draft: generated.letter,
+      claimAudit: {
+        verifiedClaims: [{ claim: generated.claims[0].claim, source: "profile-skills", sourceQuote: "TypeScript" }],
+        unverifiedClaims: ["I led a team of 40 engineers."],
+      },
+    });
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
       "http://127.0.0.1:11434/api/tags",
       "http://127.0.0.1:11434/api/chat",
     ]);
-    expect(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body)).toContain("Do not invent");
+    const ollamaRequest = JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body)) as { format: string; messages: Array<{ content: string }> };
+    expect(ollamaRequest.messages[0].content).toContain("Do not invent");
+    expect(ollamaRequest.format).toBe("json");
+    expect(ollamaRequest.messages[1].content).toContain('"language":"German"');
+  });
+
+  it("rejects malformed structured output instead of silently accepting a plain-text letter", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ models: [{ name: input.model }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: "Dear Hiring Team, I am applying." } }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await POST(new Request("http://localhost/api/application/draft", { method: "POST", body: JSON.stringify(input) }));
+    expect(response.status).toBe(502);
+    expect(await response.json()).toMatchObject({ error: expect.stringContaining("invalid structured draft") });
   });
 });

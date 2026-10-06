@@ -50,7 +50,15 @@ describe("local state storage", () => {
       status: { [exampleJob.id]: "Approved to prepare" },
       applicationNotes: { [exampleJob.id]: "Follow up with the hiring manager" },
       applicationFollowUps: { [exampleJob.id]: "2026-10-14" },
-      coverLetterDrafts: { [exampleJob.id]: { interest: "The product", evidence: "Shipped a feature", draft: "Dear team", updatedAt: "2026-10-02T12:00:00.000Z" } },
+      coverLetterDrafts: { [exampleJob.id]: {
+        interest: "The product", evidence: "Shipped a feature", draft: "Dear team",
+        preferences: { tone: "warm", language: "German", length: "standard" },
+        claimAudit: {
+          verifiedClaims: [{ claim: "I shipped a feature", source: "candidate-experience", sourceQuote: "Shipped a feature" }],
+          unverifiedClaims: ["I managed a 20-person team"], checkedAt: "2026-10-02T12:00:00.000Z",
+        },
+        updatedAt: "2026-10-02T12:00:00.000Z",
+      } },
       matchReviews: [{ jobId: exampleJob.id, company: exampleJob.company, role: exampleJob.role, model: "local-model:latest", cohortKey: "a".repeat(64), score: 84, predictedRelevant: true, reviewedRelevant: true, reviewedAt: "2026-10-02T12:00:00.000Z" }],
       matchCohortKey: "a".repeat(64),
       matchingSettings: { decisionModel: "decision:latest", weights: { skills: 40, experience: 30, domain: 20, disqualifier: 10 }, detailedScoreThreshold: 65, detailedConfidenceThreshold: 60 },
@@ -101,6 +109,11 @@ describe("local state storage", () => {
 
     expect(parsePersistedState({
       ...defaultState(),
+      coverLetterDrafts: { "gh-example-1": { interest: "", evidence: "", draft: "Draft", updatedAt: "2026-10-02T12:00:00.000Z", preferences: { tone: "invented", language: "English", length: "concise" } } },
+    })).toBeNull();
+
+    expect(parsePersistedState({
+      ...defaultState(),
       applicationNotes: { "gh-example-1": "x".repeat(2001) },
     })).toBeNull();
 
@@ -117,6 +130,14 @@ describe("local state storage", () => {
     expect(parsePersistedState({
       ...defaultState(),
       coverLetterDrafts: { "gh-example-1": { interest: "", evidence: "", draft: "x".repeat(20_001), updatedAt: "2026-10-02T12:00:00.000Z" } },
+    })).toBeNull();
+
+    expect(parsePersistedState({
+      ...defaultState(),
+      coverLetterDrafts: { "gh-example-1": {
+        interest: "", evidence: "", draft: "Dear team", updatedAt: "2026-10-02T12:00:00.000Z",
+        claimAudit: { verifiedClaims: [{ claim: "Invalid source", source: "job-description", sourceQuote: "Example" }], unverifiedClaims: [], checkedAt: "2026-10-02T12:00:00.000Z" },
+      } },
     })).toBeNull();
 
     expect(parsePersistedState({
