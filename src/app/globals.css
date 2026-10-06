@@ -143,3 +143,17 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .claim-audit{margin:10px 0;padding:12px;border:1px solid #d7e5da;border-radius:7px;background:#f6faf6;color:#35483a}.claim-audit>strong{font-size:12px}.claim-audit p,.claim-audit li{font-size:12px;line-height:1.5}.claim-audit blockquote{margin:8px 0;padding:8px 10px;border-left:3px solid #87ad91;background:#fff;font-size:12px;line-height:1.5}.claim-audit ul{margin:6px 0;padding-left:20px}
 .cover-letter-preferences{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin:10px 0}.cover-letter-preferences label{display:grid;gap:5px;color:#526257;font-size:11px}.cover-letter-preferences select{width:100%;min-width:0;padding:8px;border:1px solid #dce5dd;border-radius:5px;background:#fff;color:#344239;font-size:12px}@media(max-width:640px){.cover-letter-preferences{grid-template-columns:1fr}}
 .detailed-analysis-action{display:grid;grid-template-columns:minmax(0,auto) minmax(0,1fr);align-items:center;gap:6px 11px;margin:12px 0;padding:11px;border:1px solid #dce7df;border-radius:6px;background:#f7faf7}.detailed-analysis-action p{grid-column:1/-1;margin:0;color:#56665b;font-size:11px;line-height:1.5}.detailed-analysis-action .source-error-message{color:#a33628}.detailed-analysis-action button:disabled{opacity:.65;cursor:progress}@media(max-width:600px){.detailed-analysis-action{grid-template-columns:1fr}.detailed-analysis-action button{width:100%}}
+
+/* Keep workspace navigation visible and readable on narrow screens. */
+.workspace-nav{display:contents}
+@media(max-width:640px){
+  .app-shell{display:block}
+  .sidebar{display:grid;grid-template-columns:minmax(0,1fr);gap:7px;width:100%;padding:9px 12px 10px;border-right:0;border-bottom:1px solid var(--line)}
+  .brand{height:32px;padding:0 4px}
+  .sidebar-label,.sidebar-bottom{display:none}
+  .workspace-nav{display:flex;flex-wrap:wrap;gap:4px}
+  .workspace-nav .nav-item{flex:1 1 auto;width:auto;min-width:max-content;min-height:44px;height:44px;justify-content:center;margin:0;padding:0 9px;font-size:12px;white-space:nowrap}
+  .workspace-nav .nav-item>span:first-child{font-size:15px}
+  .workspace-nav .nav-count{display:inline-block}
+  .main-panel{width:100%;min-width:0}
+}

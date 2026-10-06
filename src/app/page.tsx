@@ -1115,11 +1115,13 @@ export default function Home() {
       <aside className="sidebar">
         <div className="brand"><span className="brand-mark">J</span><span>jobpilot<span className="brand-dot">.</span></span></div>
         <div className="sidebar-label">WORKSPACE</div>
-        <button className={`nav-item ${activeView === "overview" ? "active" : ""}`} onClick={() => setActiveView("overview")}><span>▦</span> Overview</button>
-        <button className="nav-item" onClick={() => setActiveView("overview")}><span>⌕</span> Job matches <b className="nav-count">{ranked.length}</b></button>
-        <button className={`nav-item ${activeView === "all-found" ? "active" : ""}`} onClick={() => setActiveView("all-found")}><span>◎</span> All found jobs <b className="nav-count">{allFoundJobs.length}</b></button>
-        <button className={`nav-item ${activeView === "applications" ? "active" : ""}`} onClick={() => setActiveView("applications")}><span>▤</span> Applications <b className="nav-count">{applicationJobs.length}</b></button>
-        <button className="nav-item" onClick={openProfile}><span>♧</span> Candidate profile</button>
+        <nav className="workspace-nav" aria-label="Workspace navigation">
+          <button className={`nav-item ${activeView === "overview" ? "active" : ""}`} aria-current={activeView === "overview" ? "page" : undefined} onClick={() => setActiveView("overview")}><span aria-hidden="true">▦</span> Overview</button>
+          <button className="nav-item" onClick={() => setActiveView("overview")}><span aria-hidden="true">⌕</span> Job matches <b className="nav-count">{ranked.length}</b></button>
+          <button className={`nav-item ${activeView === "all-found" ? "active" : ""}`} aria-current={activeView === "all-found" ? "page" : undefined} onClick={() => setActiveView("all-found")}><span aria-hidden="true">◎</span> All found jobs <b className="nav-count">{allFoundJobs.length}</b></button>
+          <button className={`nav-item ${activeView === "applications" ? "active" : ""}`} aria-current={activeView === "applications" ? "page" : undefined} onClick={() => setActiveView("applications")}><span aria-hidden="true">▤</span> Applications <b className="nav-count">{applicationJobs.length}</b></button>
+          <button className="nav-item" onClick={openProfile} aria-haspopup="dialog"><span aria-hidden="true">♧</span> Candidate profile</button>
+        </nav>
         <div className="sidebar-bottom">
           <div className="local-status"><i /> Local workspace <span>●</span></div>
           <button className="profile-chip profile-chip-button" onClick={openProfile}><div className="avatar">{profile.name.split(/\s+/).map((part) => part[0]).slice(0, 2).join("").toUpperCase()}</div><div><strong>{profile.name}</strong><small>Private to this device</small></div><span className="more">···</span></button>
