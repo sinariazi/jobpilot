@@ -265,7 +265,7 @@ sequenceDiagram
     AI-->>App: Separate score, evidence, matched requirements, and gaps
     App-->>UI: Show detailed result without changing decision score
     UI->>App: Request an application draft with job and profile fields
-    App->>AI: Generate local letter and structured claim ledger; CV excerpt excluded
+    App->>AI: Generate a local letter and claim ledger without the CV excerpt
     AI-->>App: Letter plus candidate claims and source quotes
     App->>App: Check each quote against supplied skills, interest, and experience notes
     App-->>UI: Return editable draft and verified/unverified source references
