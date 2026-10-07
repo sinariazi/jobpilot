@@ -9,6 +9,9 @@ const LOCAL_OLLAMA_DEFAULT = "http://127.0.0.1:11434";
 const MAX_BODY_CHARS = 100_000;
 const MAX_CV_CHARS = 15_000;
 const MAX_JOB_CHARS = 12_000;
+// System One rejects prompts above 2,050 tokens instead of truncating them.
+const MAX_SYSTEM_ONE_EVIDENCE_CHARS = 1_600;
+const MAX_SYSTEM_ONE_PREFERENCE_CHARS = 250;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -24,6 +27,19 @@ function compatibleVersion(value: unknown) {
   if (typeof value !== "string") return false;
   const match = value.match(/^(\d+)\.(\d+)\.(\d+)/);
   return Boolean(match && (Number(match[1]) > 0 || Number(match[2]) >= 35));
+}
+
+function compactEvidence(value: string, limit: number) {
+  const text = value.trim();
+  if (text.length <= limit) return { text, truncated: false };
+  const marker = "\n[…middle omitted to fit local decision model…]\n";
+  const available = Math.max(0, limit - marker.length);
+  const headLength = Math.ceil(available * 0.6);
+  const tailLength = available - headLength;
+  return {
+    text: `${text.slice(0, headLength)}${marker}${tailLength ? text.slice(-tailLength) : ""}`,
+    truncated: true,
+  };
 }
 
 export async function POST(request: Request) {
@@ -51,7 +67,7 @@ export async function POST(request: Request) {
   const sum = Object.values(weights).reduce((total, value) => total + (typeof value === "number" ? value : Number.NaN), 0);
   if (!Object.values(weights).every((value) => Number.isInteger(value) && value >= 0 && value <= 100) || sum !== 100) return Response.json({ error: "Match weights must be whole percentages that add up to 100." }, { status: 400 });
 
-  const cvText = body.cvText.trim();
+  const cvEvidence = compactEvidence(body.cvText as string, MAX_SYSTEM_ONE_EVIDENCE_CHARS);
   const job = {
     company: body.job.company as string,
     role: body.job.role as string,
@@ -59,11 +75,24 @@ export async function POST(request: Request) {
     mode: body.job.mode as string,
     description: body.job.description as string,
   };
-  const description = job.description.trim();
+  const description = compactEvidence(job.description, MAX_SYSTEM_ONE_EVIDENCE_CHARS);
   const preferences = isRecord(body.preferences) ? body.preferences : {};
-  const locationPreferences = typeof preferences.locations === "string" ? preferences.locations.slice(0, 2_000) : "";
-  const targetRolePreferences = typeof preferences.targetRoles === "string" ? preferences.targetRoles.slice(0, 2_000) : "";
-  const state = { cv: cvText || "", candidateLocationPreferences: locationPreferences, targetRolePreferences, job: { company: job.company, role: job.role, location: job.location, mode: job.mode, description: description || "" } };
+  const locationPreferences = typeof preferences.locations === "string" ? preferences.locations.slice(0, MAX_SYSTEM_ONE_PREFERENCE_CHARS) : "";
+  const targetRolePreferences = typeof preferences.targetRoles === "string" ? preferences.targetRoles.slice(0, MAX_SYSTEM_ONE_PREFERENCE_CHARS) : "";
+  const state = {
+    cv: cvEvidence.text,
+    cvEvidenceTruncated: cvEvidence.truncated,
+    candidateLocationPreferences: locationPreferences,
+    targetRolePreferences,
+    job: {
+      company: job.company.slice(0, 120),
+      role: job.role.slice(0, 180),
+      location: job.location.slice(0, 120),
+      mode: job.mode.slice(0, 80),
+      description: description.text,
+      descriptionTruncated: description.truncated,
+    },
+  };
   const questions = {
     skills: { type: "score", instructions: "How well does the candidate's CV support the job's required technical and professional skills? Assess evidence and importance, not keyword overlap.", criteria: ["No relevant evidence", "Limited or transferable evidence", "Some relevant evidence with important gaps", "Strong evidence for core requirements", "Very strong evidence across requirements"] },
     experience: { type: "score", instructions: "How well do the candidate's demonstrated experience level, responsibilities, and scope match the role and the user's target role preferences?", criteria: ["Major level or responsibility mismatch", "Limited relevant experience", "Partial responsibility and level match", "Strong level and responsibility match", "Very strong direct match"] },
@@ -105,11 +134,15 @@ export async function POST(request: Request) {
     if (!upstream.ok) {
       let detail = "";
       try { const errorBody: unknown = await upstream.json(); if (isRecord(errorBody) && typeof errorBody.error === "string") detail = ` ${errorBody.error.slice(0, 200)}`; } catch { /* status conveys failure */ }
+      if (upstream.status === 400 && /prompt\\s+\\d+\\s+has\\s+\\d+\\s+tokens.*expected\\s+1\\s*[–-]\\s*2050/i.test(detail)) {
+        return Response.json({ error: "The decision model rejected the compact screening request because it exceeds Ollama System One’s 2,050-token input limit. Choose a compatible decision model with a larger input window." }, { status: 502 });
+      }
       return Response.json({ error: `Ollama screening failed (HTTP ${upstream.status}). Check that the selected model is a decision model.${detail}` }, { status: 502 });
     }
     const payload: unknown = await upstream.json();
     const screening = normalizeSystemOneScreenResult(payload, body.model, settings.weights);
     if (!screening) return Response.json({ error: "The decision model returned malformed or incomplete answers. Try another installed decision model." }, { status: 502 });
+    screening.evidenceTruncated = cvEvidence.truncated || description.truncated;
     return Response.json({ screening }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     if (request.signal.aborted) return Response.json({ error: "Local screening was cancelled." }, { status: 499 });
