@@ -39,6 +39,7 @@ export type JobScreening = {
   model: string;
   score: number;
   confidence: number | null;
+  evidenceTruncated?: boolean;
   breakdown: { skills: number | null; experience: number | null; domain: number | null };
   disqualifierRisk: number | null;
   informationStatus: "sufficient" | "cv_missing" | "job_missing" | "both_missing";
