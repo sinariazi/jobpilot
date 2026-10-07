@@ -25,7 +25,7 @@ describe("local Ollama decision screening endpoint", () => {
     vi.stubGlobal("fetch", fetchMock);
     const response = await POST(request());
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ screening: { model: body.model, score: 78, confidence: 80, breakdown: { skills: 90, experience: 70, domain: 60 }, disqualifierRisk: 10, informationStatus: "sufficient" } });
+    expect(await response.json()).toEqual({ screening: { model: body.model, score: 78, confidence: 80, evidenceTruncated: false, breakdown: { skills: 90, experience: 70, domain: 60 }, disqualifierRisk: 10, informationStatus: "sufficient" } });
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["http://127.0.0.1:11434/api/version", "http://127.0.0.1:11434/api/tags", "http://127.0.0.1:11434/v1/systemone"]);
     const payload = JSON.parse(String((fetchMock.mock.calls[2]?.[1] as RequestInit).body)) as { state: { cv: string; candidateLocationPreferences: string; targetRolePreferences: string; job: { description: string } }; questions: Record<string, { type: string; criteria?: Record<string, string> }> };
     expect(payload.state.cv).toContain(body.cvText);
@@ -37,6 +37,30 @@ describe("local Ollama decision screening endpoint", () => {
       type: "noul",
       criteria: { false: expect.any(String), true: expect.any(String) },
     });
+  });
+
+  it("compacts long CV and job evidence to fit System One's bounded input window", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ version: "0.35.1" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ models: [{ name: body.model }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(answer), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await POST(request({
+      ...body,
+      cvText: `CV evidence. ${"Relevant skills and delivery evidence. ".repeat(300)}`,
+      job: { ...body.job, description: `Job requirements. ${"Required experience and qualifications. ".repeat(250)}` },
+    }));
+    expect(response.status).toBe(200);
+    const payload = JSON.parse(String((fetchMock.mock.calls[2]?.[1] as RequestInit).body)) as {
+      state: { cv: string; cvEvidenceTruncated: boolean; job: { description: string; descriptionTruncated: boolean } };
+    };
+    expect(payload.state.cv.length).toBeLessThanOrEqual(1_600);
+    expect(payload.state.job.description.length).toBeLessThanOrEqual(1_600);
+    expect(payload.state.cvEvidenceTruncated).toBe(true);
+    expect(payload.state.job.descriptionTruncated).toBe(true);
+    expect(payload.state.cv).toContain("middle omitted");
+    expect(payload.state.job.description).toContain("middle omitted");
+    expect((await response.json() as { screening: { evidenceTruncated: boolean } }).screening.evidenceTruncated).toBe(true);
   });
 
   it("returns an actionable version error without calling an unsupported endpoint", async () => {
@@ -68,6 +92,17 @@ describe("local Ollama decision screening endpoint", () => {
       .mockResolvedValueOnce(new Response("not found", { status: 404 }));
     vi.stubGlobal("fetch", unsupported);
     expect((await POST(request())).status).toBe(503);
+  });
+
+  it("explains if a decision model still rejects the compact request for exceeding its token limit", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ version: "0.35.0" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ models: [{ name: body.model }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "prompt 0 has 2200 tokens; expected 1–2050 (input is never truncated)" }), { status: 400 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await POST(request());
+    expect(response.status).toBe(502);
+    expect((await response.json()).error).toContain("2,050-token input limit");
   });
 
   it("returns a useful timeout message when the local decision model stalls", async () => {
