@@ -31,8 +31,9 @@ describe("local CV-to-job matching API", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ matches: [{ id: "job-1", relevant: true, score: 86, reason: "The role uses frontend engineering skills demonstrated in your CV.", cvEvidence: "TypeScript and React experience", detailedAnalysis: { model: requestBody.model, summary: "The role uses frontend engineering skills demonstrated in your CV.", matchedRequirements: [], gaps: [], evidence: [] } }] });
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["http://127.0.0.1:11434/api/tags", "http://127.0.0.1:11434/api/chat"]);
-    const payload = JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body)) as { think: boolean; messages: Array<{ content: string }> };
+    const payload = JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body)) as { think: boolean; options: { num_predict: number }; messages: Array<{ content: string }> };
     expect(payload.think).toBe(false);
+    expect(payload.options.num_predict).toBe(1_600);
     expect(payload.messages[1]?.content).toContain(requestBody.cvText);
     expect(payload.messages[1]?.content).toContain(requestBody.candidatePreferences.targetRoles);
   });
@@ -46,6 +47,29 @@ describe("local CV-to-job matching API", () => {
     expect(response.status).toBe(502);
     expect(await response.json()).toEqual({ error: "The local model did not assess every listing. Try another installed model." });
   });
+
+  it("accepts a valid JSON response wrapped in a markdown code fence", async () => {
+    const output = { matches: [{ id: "job-1", relevant: true, score: 81, reason: "Relevant responsibilities and experience.", cvEvidence: "TypeScript experience" }] };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ models: [{ name: requestBody.model }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: `\`\`\`json\n${JSON.stringify(output)}\n\`\`\`` } }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await POST(new Request("http://localhost/api/jobs/match", { method: "POST", body: JSON.stringify(requestBody) }));
+    expect(response.status).toBe(200);
+    expect((await response.json()).matches[0].score).toBe(81);
+  });
+
+
+  it("reports when generation stopped at the output limit before completing JSON", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ models: [{ name: requestBody.model }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ done_reason: "length", message: { content: "{\\\"matches\\\":[" } }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await POST(new Request("http://localhost/api/jobs/match", { method: "POST", body: JSON.stringify(requestBody) }));
+    expect(response.status).toBe(502);
+    expect((await response.json()).error).toContain("reached its output limit");
+  });
+
 
   it("keeps detailed scores distinct and drops evidence that is not an exact source excerpt", async () => {
     const fetchMock = vi.fn()
