@@ -229,12 +229,18 @@ export function parsePersistedState(value: unknown): PersistedState | null {
       || (item.seniority !== undefined && (typeof item.seniority !== "string" || item.seniority.length > 200))
       || (item.domains !== undefined && !parseStringArray(item.domains, 30, 200))
       || (item.highlights !== undefined && !parseStringArray(item.highlights, 30, 500))
+      || (item.strengths !== undefined && !parseStringArray(item.strengths, 10, 500))
+      || (item.improvements !== undefined && !parseStringArray(item.improvements, 10, 500))
+      || (item.topRecommendation !== undefined && (typeof item.topRecommendation !== "string" || item.topRecommendation.length > 500))
       || (item.notes !== undefined && !parseStringArray(item.notes, 30, 500))) return null;
     cvAnalysis = {
       ...(typeof item.summary === "string" ? { summary: item.summary } : {}),
       ...(typeof item.seniority === "string" ? { seniority: item.seniority } : {}),
       ...(Array.isArray(item.domains) ? { domains: parseStringArray(item.domains, 30, 200)! } : {}),
       ...(Array.isArray(item.highlights) ? { highlights: parseStringArray(item.highlights, 30, 500)! } : {}),
+      ...(Array.isArray(item.strengths) ? { strengths: parseStringArray(item.strengths, 10, 500)! } : {}),
+      ...(Array.isArray(item.improvements) ? { improvements: parseStringArray(item.improvements, 10, 500)! } : {}),
+      ...(typeof item.topRecommendation === "string" ? { topRecommendation: item.topRecommendation } : {}),
       ...(Array.isArray(item.notes) ? { notes: parseStringArray(item.notes, 30, 500)! } : {}),
     };
   }
