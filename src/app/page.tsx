@@ -518,7 +518,7 @@ export default function Home() {
     setDetailedAnalysisJobId(job.id);
     const timeout = window.setTimeout(() => {
       controller.abort(new DOMException("The local model took too long to respond.", "TimeoutError"));
-    }, 45_000);
+    }, 90_000);
     try {
       const response = await fetch("/api/jobs/match", {
         method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
@@ -533,7 +533,7 @@ export default function Home() {
     } catch (error) {
       if (controller.signal.aborted) {
         if (controller.signal.reason instanceof DOMException && controller.signal.reason.name === "TimeoutError") {
-          setDetailedAnalysisError({ jobId: job.id, message: "The local model took longer than 45 seconds and the request was stopped. Check Local AI status, select a smaller chat model, or try again." });
+          setDetailedAnalysisError({ jobId: job.id, message: "The local model took longer than 90 seconds and the request was stopped. Check Local AI status, select a smaller chat model, or try again." });
         }
       } else {
         setDetailedAnalysisError({ jobId: job.id, message: error instanceof Error ? error.message : "Detailed local analysis failed." });
