@@ -249,6 +249,9 @@ export default function Home() {
               seniority: analysis.seniority ?? "Not identified",
               domains: analysis.domains ?? [],
               highlights: analysis.highlights ?? [],
+              strengths: analysis.strengths ?? [],
+              improvements: analysis.improvements ?? [],
+              topRecommendation: analysis.topRecommendation ?? "",
             } } : {}),
           });
           setCvMessage("Restored the locally saved CV excerpt and analysis. The original CV file was not saved.");
@@ -743,8 +746,8 @@ export default function Home() {
           cache: "no-store",
           body: JSON.stringify({ model: selectedAiModel, cvText: (suggestions.sourceText ?? "").slice(0, MAX_CV_MATCH_CHARS) }),
         });
-        const result = await response.json() as { summary?: string; roles?: string[]; skills?: string[]; seniority?: string; domains?: string[]; highlights?: string[]; error?: string };
-        if (!response.ok || !result.summary || !Array.isArray(result.roles) || !Array.isArray(result.skills)) {
+        const result = await response.json() as { summary?: string; roles?: string[]; skills?: string[]; seniority?: string; domains?: string[]; highlights?: string[]; strengths?: string[]; improvements?: string[]; topRecommendation?: string; error?: string };
+        if (!response.ok || !result.summary || !Array.isArray(result.roles) || !Array.isArray(result.skills) || !Array.isArray(result.strengths) || !Array.isArray(result.improvements) || typeof result.topRecommendation !== "string") {
           throw new Error(result.error ?? "The local model returned incomplete CV analysis.");
         }
         const analyzedRoles = result.roles.join("; ") || browserRoles;
@@ -753,8 +756,13 @@ export default function Home() {
           summary: result.summary,
           seniority: result.seniority ?? "Not identified",
           domains: result.domains ?? [],
+          summary: result.summary,
+          seniority: result.seniority ?? "Not identified",
+          domains: result.domains ?? [],
           highlights: result.highlights ?? [],
-        };
+          strengths: result.strengths,
+          improvements: result.improvements,
+          topRecommendation: result.topRecommendation,
         setCvSuggestions({ ...suggestions, roles: analyzedRoles, skills: analyzedSkills, analysis });
         setProfile((current) => ({ ...current,
           roles: current.roles === browserRoles ? analyzedRoles : current.roles,
@@ -765,7 +773,7 @@ export default function Home() {
           roles: current.roles === browserRoles ? analyzedRoles : current.roles,
           skills: current.skills === browserSkills ? analyzedSkills : current.skills,
         }));
-        setCvAnalysisStatus(`CV analyzed locally with ${selectedAiModel}. Target roles and skills were updated automatically; review or edit them below. Your name and location were not inferred from the CV.`);
+        setCvAnalysisStatus(`CV analyzed locally with ${selectedAiModel}. Review the CV-specific strengths and improvement suggestions below, then edit any profile fields that are inaccurate. Your name and location were not inferred from the CV.`);
       } catch (error) {
         setCvAnalysisStatus(`Local AI analysis could not finish: ${error instanceof Error ? error.message : "unknown error"} Text-extracted role and skill fields are already filled. You can still search or try another model.`);
       } finally {
@@ -1337,7 +1345,7 @@ export default function Home() {
         </div>
       </section>
       {profileOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setProfileOpen(false); }}><section className="profile-modal" role="dialog" aria-modal="true" aria-labelledby="profile-title"><div className="modal-heading"><div><span className="eyebrow">YOUR LOCAL SEARCH PROFILE</span><h2 id="profile-title">Candidate profile</h2><p>These editable details are stored in a file on this device.</p></div><button className="icon-button" onClick={() => setProfileOpen(false)} aria-label="Close profile">×</button></div><section className="cv-import" aria-labelledby="cv-import-title">
-        <div className="cv-import-heading"><div><h3 id="cv-import-title">Analyze CV</h3><p>Upload once. Job titles and skills fill your profile automatically; your name and preferred locations stay unchanged.</p></div><span className="local-only-tag">ON THIS DEVICE</span></div>
+        <div className="cv-import-heading"><div><h3 id="cv-import-title">Analyze CV</h3><p>Upload once. Local Ollama analyzes your experience, suggests roles and skills, and gives CV-specific strengths and improvement ideas. Your name and preferred locations stay unchanged.</p></div><span className="local-only-tag">ON THIS DEVICE</span></div>
         <label className="cv-file-label" htmlFor="cv-file">{cvParsing ? "Reading CV…" : cvAnalyzing ? "Analyzing with Ollama…" : cvFileName ? "Choose a different CV" : "Choose a CV file"}<input id="cv-file" type="file" accept=".pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain" onChange={(event) => void parseSelectedCv(event)} disabled={cvParsing || cvAnalyzing}/></label>
         <p className="cv-file-hint">PDF, DOCX, or TXT · up to 12 MB. Scanned PDF pages are converted to images in your browser and read by Tesseract on this laptop. CV pages are not sent to a hosted OCR service.</p>
         <label className="local-model-select">OCR language<select aria-label="OCR language" value={ocrLanguage} onChange={(event) => setOcrLanguage(event.target.value as "eng" | "deu" | "eng+deu")} disabled={cvParsing || cvAnalyzing}><option value="eng">English</option><option value="deu">German</option><option value="eng+deu">English and German</option></select></label>
@@ -1347,8 +1355,9 @@ export default function Home() {
         {cvSuggestions && <div className="cv-preview">
           <div className="cv-analysis-summary"><span className="eyebrow">CV ANALYSIS {(cvParsing || cvAnalyzing) && "· IN PROGRESS"}</span><strong className="cv-file-name">{cvFileName}</strong><p>{cvSuggestions.analysis?.summary ?? (cvAnalyzing ? "Ollama is analyzing your experience, skills, and suitable job titles…" : "AI summary is not available. Profile fields were extracted from readable CV sections.")}</p></div>
           {cvSuggestions.analysis && <div className="cv-analysis-facts"><p><strong>Seniority</strong><span>{cvSuggestions.analysis.seniority}</span></p><p><strong>Domains</strong><span>{cvSuggestions.analysis.domains.join(" · ") || "Not identified"}</span></p></div>}
-          <div className="cv-analysis-facts"><p><strong>Suggested job titles</strong><span>{cvSuggestions.roles || (cvParsing || cvAnalyzing ? "Analyzing CV for role titles…" : "No role titles detected")}</span></p><p><strong>Skills and keywords</strong><span>{cvSuggestions.skills || (cvParsing || cvAnalyzing ? "Analyzing CV for skills…" : "No skills detected")}</span></p></div>
+          <div className="cv-analysis-facts"><p><strong>Suggested job titles</strong><span>{cvSuggestions.roles || (cvParsing || cvAnalyzing ? "Analyzing CV for role titles…" : "No role titles detected")}</span></p><p><strong>Skills and expertise</strong><span>{cvSuggestions.skills || (cvParsing || cvAnalyzing ? "Analyzing CV for skills…" : "No skills detected")}</span></p></div>
           {Boolean(cvSuggestions.analysis?.highlights.length) && <div className="cv-highlights"><strong>Experience evidence</strong><ul>{cvSuggestions.analysis?.highlights.map((highlight) => <li key={highlight}>{highlight}</li>)}</ul></div>}
+          {cvSuggestions.analysis && <section className="cv-feedback" aria-label="CV improvement feedback"><h4>How to strengthen this CV</h4>{cvSuggestions.analysis.topRecommendation && <p className="cv-top-recommendation"><strong>Top suggestion:</strong> {cvSuggestions.analysis.topRecommendation}</p>}<div className="cv-feedback-columns"><div><strong>Strengths in your CV</strong>{cvSuggestions.analysis.strengths.length ? <ul>{cvSuggestions.analysis.strengths.map((item) => <li key={item}>{item}</li>)}</ul> : <p>No specific strengths could be confirmed from the extracted text.</p>}</div><div><strong>Recommended improvements</strong>{cvSuggestions.analysis.improvements.length ? <ul>{cvSuggestions.analysis.improvements.map((item) => <li key={item}>{item}</li>)}</ul> : <p>No specific changes were identified from the extracted text. Review the CV against each role you apply for.</p>}</div></div><small>Feedback is based on extracted CV text, which can miss layout or column content. Add achievements or metrics only when you can verify them. These suggestions may improve clarity and relevance; they cannot guarantee an interview.</small></section>}
           {cvSuggestions.notes.filter((note) => !(cvParsing || cvAnalyzing) || !/no skills section|no dated role titles/i.test(note)).map((note) => <p className="cv-file-hint" key={note}>{note}</p>)}
           {cvPreviewUrl && <details className="cv-document-details"><summary>View original CV PDF</summary><iframe title="Uploaded CV PDF preview" src={cvPreviewUrl}/></details>}
           <details className="cv-text-details"><summary>View saved CV matching excerpt</summary><pre>{(cvSuggestions.sourceText ?? "").slice(0, 12_000)}</pre>{(cvSuggestions.sourceText?.length ?? 0) > 12_000 && <small>Preview limited to 12,000 characters. Job matching uses a locally saved excerpt of up to 10,000 characters.</small>}</details>
