@@ -65,7 +65,7 @@ describe("local state storage", () => {
       webSearchEnabled: true,
       cvText: "CV evidence used for matching",
       cvFileName: "candidate-cv.pdf",
-      cvAnalysis: { summary: "Senior product engineer", seniority: "Senior", domains: ["SaaS"], highlights: ["Led a product team"], notes: ["Two-column layout"] },
+      cvAnalysis: { summary: "Senior product engineer", seniority: "Senior", domains: ["SaaS"], highlights: ["Led a product team"], strengths: ["Combines product and engineering delivery"], improvements: ["Add verified delivery outcomes"], topRecommendation: "Clarify measurable impact where evidence is available.", notes: ["Two-column layout"] },
       liveJobs: [exampleJob],
     };
 
