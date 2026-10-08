@@ -16,6 +16,9 @@ export type CvSuggestions = {
     seniority: string;
     domains: string[];
     highlights: string[];
+    strengths: string[];
+    improvements: string[];
+    topRecommendation: string;
   };
   sourceText?: string;
   pageCount?: number;
