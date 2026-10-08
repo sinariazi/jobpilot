@@ -1184,7 +1184,7 @@ export default function Home() {
             {(nextArbeitnowPage !== null || nextJobicyCursor !== null) && <button className="load-more" onClick={() => void fetchMoreJobs()} disabled={loadingMoreJobs || loadingJobs}>{loadingMoreJobs ? "Loading more jobs…" : "Load more from public feeds"}</button>}
             <footer className="page-footer"><span>JOBPILOT <b>·</b> PUBLIC FEED DISCOVERIES</span><span>Source descriptions are shown as provided; verify on the original posting.</span></footer>
           </> : <>
-          <div className="greeting-row"><div><div className="eyebrow">{new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric" }).format(new Date()).toUpperCase()}</div><h1>Your next opportunity <span>starts here.</span></h1><p className="subheading">A focused view of live roles that match your preferences.</p></div><button className="primary-button" onClick={searchWithPreferences} disabled={!stateLoaded || loadingJobs || loadingMoreJobs}><span>＋</span> {loadingJobs ? "Searching feeds…" : "Search jobs"}</button></div>
+          <div className="greeting-row"><div><div className="eyebrow">{stateLoaded ? new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric" }).format(new Date()).toUpperCase() : "YOUR JOB SEARCH"}</div><h1>Your next opportunity <span>starts here.</span></h1><p className="subheading">A focused view of live roles that match your preferences.</p></div><button className="primary-button" onClick={searchWithPreferences} disabled={!stateLoaded || loadingJobs || loadingMoreJobs}><span>＋</span> {loadingJobs ? "Searching feeds…" : "Search jobs"}</button></div>
 
           <section className="source-panel search-panel">
             <div>
