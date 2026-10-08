@@ -105,6 +105,9 @@ export type PersistedCvAnalysis = {
   seniority?: string;
   domains?: string[];
   highlights?: string[];
+  strengths?: string[];
+  improvements?: string[];
+  topRecommendation?: string;
   notes?: string[];
 };
 
