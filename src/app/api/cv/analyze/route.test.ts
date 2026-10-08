@@ -14,6 +14,9 @@ const analysis = {
   seniority: "Senior",
   domains: ["SaaS", "E-commerce"],
   highlights: ["Led delivery of a cloud SaaS product."],
+  strengths: ["Combines hands-on full-stack development with product delivery experience."],
+  improvements: ["Several responsibilities lack outcomes; add verified results where available."],
+  topRecommendation: "Make the impact of your strongest product delivery example clearer with evidence you can verify.",
 };
 
 describe("local CV analysis API", () => {
@@ -26,9 +29,27 @@ describe("local CV analysis API", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual(analysis);
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["http://127.0.0.1:11434/api/tags", "http://127.0.0.1:11434/api/chat"]);
-    const payload = JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body)) as { think: boolean; messages: Array<{ content: string }> };
+    const payload = JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body)) as { think: boolean; options: { num_predict: number }; messages: Array<{ content: string }> };
     expect(payload.think).toBe(false);
+    expect(payload.options.num_predict).toBe(1_600);
     expect(payload.messages[1]?.content).toContain(input.cvText);
+  });
+
+  it("accepts fenced JSON and reports when the model hits its output limit", async () => {
+    const fencedFetch = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ models: [{ name: input.model }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: `\`\`\`json\n${JSON.stringify(analysis)}\n\`\`\`` } }), { status: 200 }));
+    vi.stubGlobal("fetch", fencedFetch);
+    const fenced = await POST(new Request("http://localhost/api/cv/analyze", { method: "POST", body: JSON.stringify(input) }));
+    expect(fenced.status).toBe(200);
+
+    const limitedFetch = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ models: [{ name: input.model }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ done_reason: "length", message: { content: "{\\\"summary\\\":" } }), { status: 200 }));
+    vi.stubGlobal("fetch", limitedFetch);
+    const limited = await POST(new Request("http://localhost/api/cv/analyze", { method: "POST", body: JSON.stringify(input) }));
+    expect(limited.status).toBe(502);
+    expect((await limited.json()).error).toContain("reached its output limit");
   });
 
   it("rejects a hosted Jobpilot address before sending CV text anywhere", async () => {
