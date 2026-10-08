@@ -756,13 +756,11 @@ export default function Home() {
           summary: result.summary,
           seniority: result.seniority ?? "Not identified",
           domains: result.domains ?? [],
-          summary: result.summary,
-          seniority: result.seniority ?? "Not identified",
-          domains: result.domains ?? [],
           highlights: result.highlights ?? [],
           strengths: result.strengths,
           improvements: result.improvements,
           topRecommendation: result.topRecommendation,
+        };
         setCvSuggestions({ ...suggestions, roles: analyzedRoles, skills: analyzedSkills, analysis });
         setProfile((current) => ({ ...current,
           roles: current.roles === browserRoles ? analyzedRoles : current.roles,
