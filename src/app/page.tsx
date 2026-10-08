@@ -790,6 +790,62 @@ export default function Home() {
     }
   }
 
+  async function reanalyzeSavedCv() {
+    const savedCvText = cvText.slice(0, MAX_CV_MATCH_CHARS).trim();
+    if (!savedCvText) {
+      setCvAnalysisStatus("Upload a readable CV before requesting local analysis.");
+      return;
+    }
+    if (!selectedAiModel || !localAiModels.includes(selectedAiModel)) {
+      setCvAnalysisStatus("Select an installed local chat model in Local AI status, then try again.");
+      return;
+    }
+    if (!isLocalJobpilotPage()) {
+      setCvAnalysisStatus("CV analysis is available only from localhost so your CV text stays on this laptop.");
+      return;
+    }
+
+    const previousRoles = cvSuggestions?.roles ?? profile.roles;
+    const previousSkills = cvSuggestions?.skills ?? profile.skills;
+    setCvAnalyzing(true);
+    setCvAnalysisStatus(`Re-analyzing saved CV text with local model ${selectedAiModel}…`);
+    try {
+      const response = await fetch("/api/cv/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ model: selectedAiModel, cvText: savedCvText }),
+      });
+      const result = await response.json() as { summary?: string; roles?: string[]; skills?: string[]; seniority?: string; domains?: string[]; highlights?: string[]; strengths?: string[]; improvements?: string[]; topRecommendation?: string; error?: string };
+      if (!response.ok || !result.summary || !Array.isArray(result.roles) || !Array.isArray(result.skills) || !Array.isArray(result.strengths) || !Array.isArray(result.improvements) || typeof result.topRecommendation !== "string") {
+        throw new Error(result.error ?? "The local model returned incomplete CV analysis.");
+      }
+      const roles = result.roles.join("; ") || previousRoles;
+      const skills = result.skills.join(", ") || previousSkills;
+      const analysis = {
+        summary: result.summary,
+        seniority: result.seniority ?? "Not identified",
+        domains: result.domains ?? [],
+        highlights: result.highlights ?? [],
+        strengths: result.strengths,
+        improvements: result.improvements,
+        topRecommendation: result.topRecommendation,
+      };
+      setCvSuggestions((current) => current ? { ...current, roles, skills, analysis } : current);
+      setProfile((current) => ({ ...current, roles: current.roles === previousRoles ? roles : current.roles, skills: current.skills === previousSkills ? skills : current.skills }));
+      setProfileDraft((current) => ({ ...current, roles: current.roles === previousRoles ? roles : current.roles, skills: current.skills === previousSkills ? skills : current.skills }));
+      setSearchRolesDraft((current) => current === previousRoles ? roles : current);
+      invalidateAiAssessment();
+      setCvAnalyzedModel("");
+      setLiveJobs((current) => current.map((job) => ({ ...job, aiMatch: undefined, screening: undefined, detailedAnalysis: undefined })));
+      setCvAnalysisStatus(`CV re-analyzed locally with ${selectedAiModel}. Review the feedback below; job scores were cleared so they can be recalculated with the updated CV analysis.`);
+    } catch (error) {
+      setCvAnalysisStatus(`Local CV analysis could not finish: ${error instanceof Error ? error.message : "unknown error"}`);
+    } finally {
+      setCvAnalyzing(false);
+    }
+  }
+
   function removeSavedCvEvidence() {
     invalidateAiAssessment();
     if (cvPreviewUrl) URL.revokeObjectURL(cvPreviewUrl);
@@ -1361,7 +1417,11 @@ export default function Home() {
           {cvSuggestions.notes.filter((note) => !(cvParsing || cvAnalyzing) || !/no skills section|no dated role titles/i.test(note)).map((note) => <p className="cv-file-hint" key={note}>{note}</p>)}
           {cvPreviewUrl && <details className="cv-document-details"><summary>View original CV PDF</summary><iframe title="Uploaded CV PDF preview" src={cvPreviewUrl}/></details>}
           <details className="cv-text-details"><summary>View saved CV matching excerpt</summary><pre>{(cvSuggestions.sourceText ?? "").slice(0, 12_000)}</pre>{(cvSuggestions.sourceText?.length ?? 0) > 12_000 && <small>Preview limited to 12,000 characters. Job matching uses a locally saved excerpt of up to 10,000 characters.</small>}</details>
-          <button type="button" className="secondary-button" onClick={removeSavedCvEvidence}>Remove saved CV matching text</button>
+          <div className="cv-evidence-actions">
+            <button type="button" className="primary-button" onClick={() => void reanalyzeSavedCv()} disabled={cvAnalyzing || cvParsing || !cvText.trim() || !selectedAiModel || !localAiModels.includes(selectedAiModel)}>{cvAnalyzing ? "Analyzing CV…" : "Re-analyze saved CV"}</button>
+            <button type="button" className="secondary-button" onClick={removeSavedCvEvidence}>Remove saved CV matching text</button>
+          </div>
+          <p className="cv-file-hint">Re-analysis uses the saved extracted CV text with the selected Ollama model on this laptop. It does not need the original file; changed CV feedback clears old job scores so they can be recalculated.</p>
           <p className="cv-file-hint">Your preferred location was not inferred from the CV. Profile role and skill fields below were filled automatically and can be edited. Matching uses the locally saved CV excerpt, not the keyword count shown on each job.</p>
         </div>}
       </section><label>Display name<input value={profileDraft.name} onChange={(event) => setProfileDraft({ ...profileDraft, name: event.target.value })}/></label><label>Target roles<span className="field-hint">Enter the roles you want to apply for, separated by commas or new lines. Filled automatically from your CV analysis; edit this list to steer job discovery.</span><textarea rows={2} value={profileDraft.roles} onChange={(event) => setProfileDraft({ ...profileDraft, roles: event.target.value })}/></label><label>Preferred locations<span className="field-hint">Enter locations explicitly, for example Austria or Vienna, Austria. Separate alternatives with semicolons. Leave blank to show any location. A bare “Remote” listing is excluded unless you choose Remote; broad “Europe” or “EMEA” remote listings require the explicit preference Remote Europe.</span><textarea rows={2} value={profileDraft.locations} onChange={(event) => setProfileDraft({ ...profileDraft, locations: event.target.value })}/></label><label>Skills <span className="field-hint">Filled automatically from your CV analysis. Edit these keywords to steer job discovery; local AI also compares the CV text with each job description.</span><textarea rows={4} value={profileDraft.skills} onChange={(event) => setProfileDraft({ ...profileDraft, skills: event.target.value })}/></label><section className="application-contact-fields"><h3>Application contact details</h3><p>Optional details for your copyable application packet. They stay in the local Jobpilot data file.</p><label>Email<input type="email" maxLength={320} autoComplete="email" value={profileDraft.email ?? ""} onChange={(event) => setProfileDraft({ ...profileDraft, email: event.target.value })}/></label><label>Phone<input type="tel" maxLength={100} autoComplete="tel" value={profileDraft.phone ?? ""} onChange={(event) => setProfileDraft({ ...profileDraft, phone: event.target.value })}/></label><label>LinkedIn profile<input type="url" maxLength={2048} value={profileDraft.linkedin ?? ""} onChange={(event) => setProfileDraft({ ...profileDraft, linkedin: event.target.value })}/></label><label>Portfolio or personal website<input type="url" maxLength={2048} value={profileDraft.portfolio ?? ""} onChange={(event) => setProfileDraft({ ...profileDraft, portfolio: event.target.value })}/></label><label>Work authorization or eligibility<textarea rows={2} maxLength={1000} value={profileDraft.workAuthorization ?? ""} onChange={(event) => setProfileDraft({ ...profileDraft, workAuthorization: event.target.value })} placeholder="Add only if you want this in your application packet"/></label></section><div className="modal-actions"><button className="secondary-button" onClick={() => setProfileDraft(defaultProfile)}>Reset default profile</button><button className="primary-button" onClick={saveProfileDraft}>Save profile</button></div><section className="data-backup" aria-label="Profile and job data backup"><div><strong>Data backup</strong><p>Download a copy of your profile and job tracker, or restore a previous backup.</p></div><div className="data-backup-actions"><button type="button" className="secondary-button" onClick={downloadBackup}>Download backup</button><button type="button" className="secondary-button" onClick={() => backupInput.current?.click()} disabled={backupBusy}>{backupBusy ? "Restoring…" : "Restore backup"}</button><input ref={backupInput} className="visually-hidden" type="file" accept="application/json,.json" aria-label="Choose Jobpilot backup file" onChange={(event) => void restoreBackup(event)}/></div>{backupMessage && <p role="status">{backupMessage}</p>}</section><p className="privacy-explainer">Scanned PDF page images are processed by Tesseract on this laptop; temporary image files are deleted immediately. The original CV file is not saved. A matching excerpt of up to 10,000 extracted characters and its analysis are saved in the unencrypted local state file so scores can run after a restart. This text is sent only to Ollama on this laptop. Use ‘Remove saved CV matching text’ to delete it; your editable role and skill fields remain.</p></section></div>}
