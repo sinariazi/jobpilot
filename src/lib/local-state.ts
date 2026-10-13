@@ -9,6 +9,9 @@ import type { DetailedJobAnalysis, JobScreening, MatchingSettings } from "./type
 
 const STORAGE_VERSION = 1;
 const MAX_TRACKED_JOBS = 2_000;
+// Search can return a larger unfiltered pool than the user's saved/tracked set.
+// Keep those listings available in All found jobs without rejecting the state update.
+const MAX_LIVE_JOBS = 5_000;
 const allowedStatuses = new Set<ApplicationStatus>([
   "Needs review",
   "Approved to prepare",
@@ -244,7 +247,7 @@ export function parsePersistedState(value: unknown): PersistedState | null {
       ...(Array.isArray(item.notes) ? { notes: parseStringArray(item.notes, 30, 500)! } : {}),
     };
   }
-  if (value.liveJobs !== undefined && (!Array.isArray(value.liveJobs) || value.liveJobs.length > MAX_TRACKED_JOBS)) return null;
+  if (value.liveJobs !== undefined && (!Array.isArray(value.liveJobs) || value.liveJobs.length > MAX_LIVE_JOBS)) return null;
   const liveJobs = value.liveJobs === undefined ? [] : value.liveJobs.map(parseJob);
   if (liveJobs.some((job) => job === null)) return null;
   const matchingSettings: MatchingSettings = normalizeMatchingSettings(value.matchingSettings);
