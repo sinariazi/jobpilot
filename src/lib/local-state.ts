@@ -65,11 +65,12 @@ function parseStringArray(value: unknown, maxItems: number, maxLength: number): 
 
 function parseJob(value: unknown): Job | null {
   if (!isRecord(value)) return null;
-  const textFields: Array<[keyof Pick<Job, "id" | "company" | "role" | "location" | "mode" | "posted" | "source" | "summary">, number]> = [
+  const textFields: Array<[keyof Pick<Job, "id" | "company" | "role" | "location" | "mode" | "posted" | "source">, number]> = [
     ["id", 300], ["company", 160], ["role", 300], ["location", 300],
-    ["mode", 100], ["posted", 100], ["source", 100], ["summary", 4000],
+    ["mode", 100], ["posted", 100], ["source", 100],
   ];
   if (!textFields.every(([key, max]) => boundedString(value[key], max))) return null;
+  if (typeof value.summary !== "string" || !value.summary.trim()) return null;
   if (value.sourceUrl !== undefined) {
     if (!boundedString(value.sourceUrl, 2048)) return null;
     try {
@@ -80,14 +81,14 @@ function parseJob(value: unknown): Job | null {
   }
   if (value.retrievedAt !== undefined && !boundedString(value.retrievedAt, 50)) return null;
   if (value.postedAt !== undefined && (!boundedString(value.postedAt, 50) || !Number.isFinite(Date.parse(value.postedAt)))) return null;
-  if (value.department !== undefined && !boundedString(value.department, 500)) return null;
+  if (value.department !== undefined && (typeof value.department !== "string" || !value.department.trim())) return null;
   if (value.sourceLocationScope !== undefined && !boundedString(value.sourceLocationScope, 100)) return null;
   if (value.locationEvidence !== undefined && !boundedString(value.locationEvidence, 100)) return null;
   if (value.listingVerification !== undefined && value.listingVerification !== "search-result") return null;
   if (value.descriptionKind !== undefined && value.descriptionKind !== "search-snippet") return null;
   const sourceAliases = value.sourceAliases === undefined ? undefined : parseStringArray(value.sourceAliases, 10, 100);
   if (value.sourceAliases !== undefined && !sourceAliases) return null;
-  if (value.description !== undefined && (typeof value.description !== "string" || value.description.length > 8000)) return null;
+  if (value.description !== undefined && typeof value.description !== "string") return null;
   if (value.aiMatch !== undefined && (!isRecord(value.aiMatch)
     || !boundedString(value.aiMatch.model, 200)
     || typeof value.aiMatch.relevant !== "boolean"
@@ -126,9 +127,9 @@ function parseJob(value: unknown): Job | null {
     posted: (value.posted as string).trim(),
     ...(typeof value.postedAt === "string" ? { postedAt: value.postedAt } : {}),
     source: (value.source as string).trim(),
-    ...(typeof value.department === "string" ? { department: value.department.trim() } : {}),
-    summary: (value.summary as string).trim(),
-    ...(typeof value.description === "string" ? { description: value.description.trim() } : {}),
+    ...(typeof value.department === "string" ? { department: value.department.trim().slice(0, 500) } : {}),
+    summary: (value.summary as string).trim().slice(0, 4000),
+    ...(typeof value.description === "string" ? { description: value.description.trim().slice(0, 8000) } : {}),
     ...(typeof value.sourceUrl === "string" ? { sourceUrl: value.sourceUrl } : {}),
     ...(typeof value.sourceLocationScope === "string" ? { sourceLocationScope: value.sourceLocationScope } : {}),
     ...(typeof value.locationEvidence === "string" ? { locationEvidence: value.locationEvidence } : {}),
