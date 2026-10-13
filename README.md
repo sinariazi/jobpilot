@@ -141,7 +141,7 @@ Restart Jobpilot and choose English, German, or both in the CV upload section. T
 - Encrypt local profile, tracker, and backup data.
 README TODO- Complete a screen-reader and cross-browser accessibility audit, including contrast checks; the workspace navigation now has a labeled landmark and page state, and the mobile layout keeps full navigation labels visible, but a full WCAG audit has not been completed.
 - Add end-to-end tests for job search, job details, profile, tracking, and extension prefill on live ATS pages. Automated extension tests currently cover supported hosts, field mapping, and local access controls only.
-- Evaluate local decision scores against a real human-reviewed set of strong, borderline, and poor matches. No such reviewed dataset is currently available, so false-positive/false-negative rates and model calibration have not been established.
+- Create and review a held-out evaluation set for one fixed CV, decision model, and scoring configuration. Target at least 30 distinct real postings across low (0–39), borderline (40–59), and high (60–100) score bands, recording the model score/confidence and a human relevant/not-relevant decision. No human-reviewed data is available in this workspace; test fixtures are not human labels. The UI records local judgments and reports descriptive false-positive/false-negative counts, but no valid rates or calibration result can be reported until a real, sufficiently varied set is reviewed.
 
 ## For developers
 
