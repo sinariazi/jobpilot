@@ -73,6 +73,39 @@ const CITY_COUNTRIES: Record<string, string> = {
   vancouver: "canada", montreal: "canada", auckland: "newzealand", wellington: "newzealand",
 };
 
+const COUNTRY_CANONICAL_WORDS = new Set([
+  ...Object.values(CITY_COUNTRIES),
+  ...Object.values(LOCATION_ALIASES).filter((word) => !CITY_COUNTRIES[word]),
+]);
+
+const COUNTRY_PROVIDER_NAMES: Record<string, string> = {
+  usa: "United States", uk: "United Kingdom", uae: "United Arab Emirates",
+  newzealand: "New Zealand", southafrica: "South Africa", saudiarabia: "Saudi Arabia",
+  southkorea: "South Korea", northkorea: "North Korea", czechia: "Czechia",
+};
+
+/** Country filters accepted by public remote-job APIs, inferred from saved locations. */
+export function getCountryFilters(preferences: string): string[] {
+  const countries = new Set<string>();
+  for (const preference of preferences.split(/[;\n|]+/).map((value) => value.trim()).filter(Boolean)) {
+    for (const word of canonicalLocationWords(preference)) {
+      if (!COUNTRY_CANONICAL_WORDS.has(word)) continue;
+      countries.add(COUNTRY_PROVIDER_NAMES[word] ?? word.replace(/\b\w/g, (letter) => letter.toUpperCase()));
+    }
+  }
+  return [...countries];
+}
+
+/** Country eligibility implies the city, but remote listings must not be relabeled as office roles. */
+export function matchesEligibleRemoteLocation(jobLocation: string, preferences: string, jobMode = "") {
+  const requestedCountries = new Set(getCountryFilters(preferences).map((country) => canonicalLocationWords(country)[0]));
+  const eligibleCountries = new Set(canonicalLocationWords(jobLocation).filter((word) => COUNTRY_CANONICAL_WORDS.has(word)));
+  return /remote/i.test(jobMode)
+    && requestedCountries.size > 0
+    && [...requestedCountries].some((country) => eligibleCountries.has(country));
+}
+
+
 function canonicalLocationWords(value: string): string[] {
   const input = locationWords(value);
   const words: string[] = [];
