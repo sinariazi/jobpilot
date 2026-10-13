@@ -15,6 +15,7 @@ import { createMatchCohortKey, MAX_MATCH_REVIEWS, summarizeMatchReviews } from "
 import { DEFAULT_MATCHING_SETTINGS, localScreeningReadinessMessage } from "@/lib/job-screening";
 import { createApplicationPacket, detectAtsPlatform } from "@/lib/application-preparation";
 import { compareDecisionScores, passesMinimumDecisionScore } from "@/lib/job-ranking";
+import { composeTailoredCvText, renderTailoredCvHtml, tailoredCvFilename, type VerifiedCvTailoring } from "@/lib/cv-tailoring";
 
 const LEGACY_STORAGE_KEY = "jobpilot-local-v1";
 const MAX_BACKUP_BYTES = 23_000_000;
@@ -76,6 +77,9 @@ export default function Home() {
   const [screeningErrors, setScreeningErrors] = useState<Record<string, string>>({});
   const [detailedAnalysisJobId, setDetailedAnalysisJobId] = useState("");
   const [detailedAnalysisError, setDetailedAnalysisError] = useState<{ jobId: string; message: string } | null>(null);
+  const [cvTailoringJobId, setCvTailoringJobId] = useState("");
+  const [cvTailoringError, setCvTailoringError] = useState<{ jobId: string; message: string } | null>(null);
+  const [tailoredCvDraft, setTailoredCvDraft] = useState<{ jobId: string; role: string; text: string; verifiedText: string; result: VerifiedCvTailoring } | null>(null);
   const [nextArbeitnowPage, setNextArbeitnowPage] = useState<number | null>(null);
   const [nextJobicyCursor, setNextJobicyCursor] = useState<string | null>(null);
   const [stateLoaded, setStateLoaded] = useState(false);
@@ -83,6 +87,7 @@ export default function Home() {
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
   const aiMatchAbortController = useRef<AbortController | null>(null);
   const detailedAnalysisAbortController = useRef<AbortController | null>(null);
+  const cvTailoringAbortController = useRef<AbortController | null>(null);
   const aiMatchGeneration = useRef(0);
   const fetchLiveJobsRef = useRef<() => Promise<void>>(async () => undefined);
   const handledSearchRequestId = useRef(0);
@@ -546,6 +551,45 @@ export default function Home() {
       if (detailedAnalysisAbortController.current === controller) detailedAnalysisAbortController.current = null;
       setDetailedAnalysisJobId((current) => current === job.id ? "" : current);
     }
+  }
+
+
+  async function tailorCvForJob(job: Job) {
+    setCvTailoringError(null);
+    if (!cvText.trim()) { setCvTailoringError({ jobId: job.id, message: "Upload and analyze your CV before tailoring it for a job." }); return; }
+    if (!isLocalJobpilotPage()) { setCvTailoringError({ jobId: job.id, message: "Open Jobpilot at localhost so your CV and job description stay on this laptop." }); return; }
+    if (!localAiModels.includes(selectedAiModel)) { setCvTailoringError({ jobId: job.id, message: "Install and select a local chat model in Local AI status, then try again." }); return; }
+    if (job.descriptionKind === "search-snippet" || !job.description?.trim()) { setCvTailoringError({ jobId: job.id, message: "This listing has no full job description to compare. Open the original posting and add its description as a manual job before tailoring a CV." }); return; }
+    cvTailoringAbortController.current?.abort();
+    const controller = new AbortController();
+    cvTailoringAbortController.current = controller;
+    setCvTailoringJobId(job.id);
+    const timeout = window.setTimeout(() => controller.abort(new DOMException("CV tailoring took too long.", "TimeoutError")), 95_000);
+    try {
+      const response = await fetch("/api/cv/tailor", { method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal, body: JSON.stringify({ model: selectedAiModel, cvText: cvText.slice(0, MAX_CV_MATCH_CHARS), targetRole: job.role, company: job.company, jobDescription: job.description.slice(0, 8_000) }) });
+      const result = await response.json() as VerifiedCvTailoring & { error?: string };
+      if (!response.ok) throw new Error(result.error ?? "Local CV tailoring failed.");
+      const text = composeTailoredCvText({ name: profile.name === "Candidate" ? "" : profile.name, contact: { email: profile.email, phone: profile.phone, linkedin: profile.linkedin, portfolio: profile.portfolio }, targetRole: job.role, sections: result });
+      setTailoredCvDraft({ jobId: job.id, role: job.role, text, verifiedText: text, result });
+    } catch (error) {
+      if (controller.signal.aborted && controller.signal.reason instanceof DOMException && controller.signal.reason.name === "TimeoutError") setCvTailoringError({ jobId: job.id, message: "CV tailoring took too long and was stopped. Check Ollama, select a smaller local chat model, or try again." });
+      else if (!controller.signal.aborted) setCvTailoringError({ jobId: job.id, message: error instanceof Error ? error.message : "Local CV tailoring failed." });
+    } finally {
+      window.clearTimeout(timeout);
+      if (cvTailoringAbortController.current === controller) cvTailoringAbortController.current = null;
+      setCvTailoringJobId((current) => current === job.id ? "" : current);
+    }
+  }
+
+  function downloadTailoredCv() {
+    if (!tailoredCvDraft) return;
+    const blob = new Blob([renderTailoredCvHtml(tailoredCvDraft.text)], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = tailoredCvFilename(tailoredCvDraft.role);
+    anchor.click();
+    URL.revokeObjectURL(url);
   }
 
   async function screenCurrentJobs() {
@@ -1357,6 +1401,21 @@ export default function Home() {
                   <p>Uses the selected local chat model only for this job when requested. The first-stage score stays separate.</p>
                   {detailedAnalysisError?.jobId === selected.job.id && <p className="source-error-message" role="alert">{detailedAnalysisError.message}</p>}
                   {detailedAnalysisJobId && detailedAnalysisJobId !== selected.job.id && <p role="status">A different job is being analyzed. Starting a review here will stop that request.</p>}
+                </section>
+
+                <section className="cv-tailoring-panel" aria-label="Tailored CV export">
+                  <div className="cv-tailoring-heading"><div><h4>Tailor CV for this job</h4><p>Selects relevant excerpts from the saved CV text. It does not invent or rewrite experience.</p></div><button type="button" className="secondary-button" onClick={() => void tailorCvForJob(selected.job)} disabled={cvTailoringJobId === selected.job.id}>{cvTailoringJobId === selected.job.id ? "Selecting verified CV evidence…" : tailoredCvDraft?.jobId === selected.job.id ? "Tailor again" : "Tailor CV"}</button></div>
+                  <p className="cv-tailoring-help">Uses the selected local Ollama chat model and this posting’s full description. Every model-selected excerpt is checked against your saved CV text. Your original CV file is unchanged; no file is saved on the Jobpilot server.</p>
+                  {profile.name === "Candidate" && <p className="cv-tailoring-help">Your profile still has its default name. Add your name under Candidate profile before exporting a ready-to-send CV.</p>}
+                  {cvTailoringJobId === selected.job.id && <p className="cv-tailoring-progress" role="status">The local model is selecting evidence from your CV and comparing it with this role.</p>}
+                  {cvTailoringError?.jobId === selected.job.id && <p className="source-error-message" role="alert">{cvTailoringError.message}</p>}
+                  {tailoredCvDraft?.jobId === selected.job.id && <>
+                    <div className="cv-tailoring-audit" role="status"><strong>Source check: {(["profile", "skills", "experience", "education"] as const).reduce((count, section) => count + tailoredCvDraft.result[section].length, 0)} excerpts verified</strong><span>{tailoredCvDraft.result.rejectedCount ? `${tailoredCvDraft.result.rejectedCount} unsupported excerpt${tailoredCvDraft.result.rejectedCount === 1 ? " was" : "s were"} excluded.` : "No unsupported excerpts were returned."} Review the content and formatting before using it.</span></div>
+                    <details className="cv-tailoring-evidence"><summary>Review selected CV evidence</summary>{(["profile", "skills", "experience", "education"] as const).map((section) => tailoredCvDraft.result[section].length > 0 && <div key={section}><strong>{section.replaceAll("_", " ")}</strong><ul>{tailoredCvDraft.result[section].map((excerpt, index) => <li key={`${section}-${index}`}>{excerpt}</li>)}</ul></div>)}</details>
+                    <label className="cv-tailoring-editor">Editable CV draft<textarea rows={16} maxLength={30000} value={tailoredCvDraft.text} onChange={(event) => setTailoredCvDraft((current) => current ? { ...current, text: event.target.value } : current)} /></label>
+                    {tailoredCvDraft.text !== tailoredCvDraft.verifiedText && <p className="cv-tailoring-help">You edited the source-checked draft. The edited text is no longer verified against the original CV; review every statement yourself.</p>}
+                    <div className="cv-tailoring-export"><button type="button" className="primary-button" onClick={downloadTailoredCv}>Download print-ready CV</button><span>Open the downloaded HTML file, then choose Print / Save as PDF. Your original CV is not replaced.</span></div>
+                  </>}
                 </section>
                 {selected.job.detailedAnalysis && <section className="ai-match-explanation detailed-analysis" aria-label="Detailed local CV and job evidence"><div className="ai-match-title"><h4>Detailed local analysis</h4><strong>{selected.job.aiMatch?.score !== undefined ? `${selected.job.aiMatch.score}% detailed estimate · ` : ""}{selected.job.aiMatch?.model ?? selected.job.detailedAnalysis.model}</strong></div><p>{selected.job.aiMatch?.reason ?? selected.job.detailedAnalysis.summary}</p>{selected.job.detailedAnalysis.matchedRequirements.length > 0 && <><h5>Matched requirements</h5><ul>{selected.job.detailedAnalysis.matchedRequirements.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</ul></>}{selected.job.detailedAnalysis.gaps.length > 0 && <><h5>Gaps or unclear requirements</h5><ul>{selected.job.detailedAnalysis.gaps.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</ul></>}{selected.job.detailedAnalysis.evidence.map((item, index) => <blockquote key={`${index}-${item.requirement}`}><strong>{item.requirement}</strong><br/><b>CV:</b> “{item.cvQuote}”<br/><b>Job:</b> “{item.jobQuote}”</blockquote>)}</section>}
                 <div className="evidence-label">PROFILE SKILLS MENTIONED IN POSTING <span>{selected.matched.length} found</span></div>
