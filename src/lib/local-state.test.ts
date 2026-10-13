@@ -76,8 +76,8 @@ describe("local state storage", () => {
     }
   });
 
-  it("persists Greenhouse result batches larger than 500 jobs", async () => {
-    const manyJobs = Array.from({ length: 711 }, (_, index) => ({
+  it("persists an unfiltered job pool larger than the saved-job limit", async () => {
+    const manyJobs = Array.from({ length: 2_086 }, (_, index) => ({
       ...exampleJob,
       id: `gh-example-${index}`,
       sourceUrl: `https://boards.greenhouse.io/example/jobs/${index}`,
@@ -91,7 +91,7 @@ describe("local state storage", () => {
     };
     await saveLocalState(state, dataDirectory);
     const restored = await loadLocalState(dataDirectory);
-    expect(restored.liveJobs).toHaveLength(711);
+    expect(restored.liveJobs).toHaveLength(2_086);
   });
 
   it("rejects invalid review states and unsafe job posting URLs", () => {
