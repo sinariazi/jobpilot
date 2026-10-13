@@ -94,6 +94,16 @@ describe("local state storage", () => {
     expect(restored.liveJobs).toHaveLength(2_086);
   });
 
+  it("keeps long provider descriptions without rejecting the whole state update", () => {
+    const parsed = parsePersistedState({
+      ...defaultState(),
+      liveJobs: [{ ...exampleJob, description: "x".repeat(12_000), summary: "s".repeat(5_000), department: "d".repeat(700) }],
+    });
+    expect(parsed?.liveJobs[0]?.description).toHaveLength(8_000);
+    expect(parsed?.liveJobs[0]?.summary).toHaveLength(4_000);
+    expect(parsed?.liveJobs[0]?.department).toHaveLength(500);
+  });
+
   it("rejects invalid review states and unsafe job posting URLs", () => {
     const base = {
       ...defaultState(),
