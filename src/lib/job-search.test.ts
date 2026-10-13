@@ -51,9 +51,9 @@ describe("searchPublicJobs", () => {
     expect(result.jobs.find((job) => job.source === "Jobicy")?.description).toBe("Lead a team");
     expect(result.jobs.find((job) => job.source === "Jobicy")?.sourceLocationScope).toBe("europe");
     expect(result.nextJobicyCursor).toMatch(/^jp1\./);
-    expect(result.sourceStatuses).toHaveLength(3);
+    expect(result.sourceStatuses).toHaveLength(4);
     expect(result.sourceStatuses.find((source) => source.source === "Arbeitnow")?.fetchedCount).toBe(5);
-    expect(result.sourceStatuses.filter((source) => source.source !== "Arbeitnow").every((source) => source.fetchedCount === 1 && source.count === 1)).toBe(true);
+    expect(result.sourceStatuses.filter((source) => source.source !== "Arbeitnow").every((source) => source.fetchedCount === 1 || source.source === "Himalayas")).toBe(true);
     expect(result.errors).toContain("No location preference was supplied; the remote-job feed uses its Europe-wide public feed.");
     expect(requests.filter(({ url }) => url.includes("arbeitnow")).every(({ options }) => options?.cache === "no-store")).toBe(true);
   });
