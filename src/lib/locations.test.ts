@@ -1,7 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { matchesPreferredLocation, resolveProviderGeographies } from "./locations";
+import { getCountryFilters, matchesEligibleRemoteLocation, matchesPreferredLocation, resolveProviderGeographies } from "./locations";
 
 describe("preferred job locations", () => {
+  it("extracts supported country filters from selected locations without treating regions as countries", () => {
+    expect(getCountryFilters("Vienna, Austria; Remote Europe")).toEqual(["Austria"]);
+    expect(getCountryFilters("Zürich; Schweiz")).toEqual(["Switzerland"]);
+    expect(getCountryFilters("Remote Europe")).toEqual([]);
+  });
+
+  it("matches country-eligible remote roles for a city preference without reclassifying other remote regions", () => {
+    expect(matchesEligibleRemoteLocation("Remote · Austria", "Vienna, Austria", "Remote · Full-time")).toBe(true);
+    expect(matchesEligibleRemoteLocation("Remote · Germany", "Vienna, Austria", "Remote · Full-time")).toBe(false);
+    expect(matchesEligibleRemoteLocation("Remote · Europe", "Vienna, Austria", "Remote · Full-time")).toBe(false);
+    expect(matchesEligibleRemoteLocation("Remote · Austria", "Vienna, Austria", "On-site")).toBe(false);
+  });
+
+
   it("maps user preferences to the current public provider taxonomy", () => {
     const available = [{ name: "Austria", slug: "austria" }, { name: "Europe", slug: "europe" }, { name: "Anywhere", slug: "anywhere" }];
     expect(resolveProviderGeographies("Austria", available).geographies).toEqual([{ name: "Austria", slug: "austria" }]);
