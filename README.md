@@ -120,6 +120,8 @@ To use Jobpilot another day, open Ollama, open a terminal in the `jobpilot-main`
 
 The original CV file is read in your browser and is not saved. To let scores resume after a restart, Jobpilot saves an excerpt of up to 10,000 extracted characters, its CV analysis, and profile suggestions in the unencrypted local state file. You can review this excerpt or remove it from **Candidate profile → Analyze CV**; removing it keeps your editable role and skill fields. The excerpt and job descriptions are sent only to Ollama on this same computer. Jobpilot has no hosted AI fallback, and public feeds do not receive candidate profile data. Cover-letter generation sends job details, profile name and skills, and your notes to local Ollama, but not the CV excerpt. Keep Jobpilot bound to `localhost`; do not expose it to your network.
 
+For a selected job with a full description, **Tailor CV** asks the selected local chat model to select and order exact excerpts from the saved CV text. The API verifies every excerpt against that CV before showing it. Review the selected evidence, edit the draft, and download a new print-ready HTML file; open it in a browser and use **Print / Save as PDF** to create a PDF. The original CV is never changed, and no tailored file is stored by Jobpilot. Profile contact details are added to the export; set your real name in Candidate profile before sending it. A changed draft is no longer source-checked. This flow does not rewrite claims, generate a DOCX, or guarantee that selected evidence is relevant or accurate; review the complete document and the employer's requirements yourself.
+
 When you enable the optional web-search checkbox, the selected job-title/location query goes to Ollama's hosted Web Search API and snippets are returned to Jobpilot and saved with the local job pool. CV text, skills, and full job descriptions stay on this computer. Turn the checkbox off to keep job discovery limited to the existing public feeds.
 
 Job discovery needs an internet connection. AI matching needs Ollama and installed models. The model's speed and quality depend on the model and your computer. User-reviewed match feedback is a selected sample and does not establish general accuracy or calibration.
@@ -137,8 +139,7 @@ Restart Jobpilot and choose English, German, or both in the CV upload section. T
 ## Current limitations (TODO)
 
 - Encrypt local profile, tracker, and backup data.
-- Tailor and export a CV from verified source material; currently Jobpilot analyzes CVs but does not generate tailored CV files.
-- Complete a screen-reader and cross-browser accessibility audit, including contrast checks; the workspace navigation now has a labeled landmark and page state, and the mobile layout keeps full navigation labels visible, but a full WCAG audit has not been completed.
+README TODO- Complete a screen-reader and cross-browser accessibility audit, including contrast checks; the workspace navigation now has a labeled landmark and page state, and the mobile layout keeps full navigation labels visible, but a full WCAG audit has not been completed.
 - Add end-to-end tests for job search, job details, profile, tracking, and extension prefill on live ATS pages. Automated extension tests currently cover supported hosts, field mapping, and local access controls only.
 - Evaluate local decision scores against a real human-reviewed set of strong, borderline, and poor matches. No such reviewed dataset is currently available, so false-positive/false-negative rates and model calibration have not been established.
 
@@ -223,6 +224,10 @@ flowchart LR
     extract --> analyze["Local Ollama CV analysis"]
     analyze --> profile["Candidate reviews and edits profile suggestions"]
     profile --> search["Search, score, and inspect job evidence"]
+    search --> tailor["User requests a role-specific CV"]
+    tailor --> selectEvidence["Local model selects exact CV excerpts"]
+    selectEvidence --> verify["App verifies excerpts against saved CV text"]
+    verify --> export["Candidate reviews, edits, and exports new HTML / PDF"]
     search --> context["Role details, skills, and user-provided interest and experience"]
     context --> draft["Local model applies tone, language, length; returns letter and claim ledger"]
     draft --> sourcecheck["Check exact quotes against supplied source fields"]
