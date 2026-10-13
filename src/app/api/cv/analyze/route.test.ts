@@ -31,7 +31,7 @@ describe("local CV analysis API", () => {
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["http://127.0.0.1:11434/api/tags", "http://127.0.0.1:11434/api/chat"]);
     const payload = JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body)) as { think: boolean; options: { num_predict: number }; messages: Array<{ content: string }> };
     expect(payload.think).toBe(false);
-    expect(payload.options.num_predict).toBe(1_600);
+    expect(payload.options.num_predict).toBe(1_000);
     expect(payload.messages[1]?.content).toContain(input.cvText);
   });
 
