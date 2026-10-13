@@ -102,7 +102,7 @@ describe("local Ollama decision screening endpoint", () => {
     vi.stubGlobal("fetch", fetchMock);
     const response = await POST(request());
     expect(response.status).toBe(502);
-    expect((await response.json()).error).toContain("2,050-token input limit");
+    expect((await response.json()).error).toContain("expected 1–2050");
   });
 
   it("returns a useful timeout message when the local decision model stalls", async () => {
