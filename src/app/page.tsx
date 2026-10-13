@@ -770,6 +770,8 @@ export default function Home() {
       setProfile(autoFilledProfile);
       setProfileDraft(autoFilledProfile);
       setSearchRolesDraft(browserRoles);
+      setSourceMessage("The CV changed. Refreshing job listings and recalculating their local scores; the current list stays visible until results arrive.");
+      setSearchRequestId((current) => current + 1);
       setCvMessage(`CV text extracted in your browser. Job titles and skills have been filled into your profile; Jobpilot saves them automatically on this device. Your name and preferred locations were left unchanged.${(suggestions.sourceText?.length ?? 0) > MAX_CV_MATCH_CHARS ? ` Matching uses the first ${MAX_CV_MATCH_CHARS.toLocaleString()} characters.` : ""}`);
 
       if (!localAiModels.includes(selectedAiModel)) {
@@ -815,6 +817,10 @@ export default function Home() {
           roles: current.roles === browserRoles ? analyzedRoles : current.roles,
           skills: current.skills === browserSkills ? analyzedSkills : current.skills,
         }));
+        if (analyzedRoles !== browserRoles) {
+          setSourceMessage("The CV analysis suggested updated job titles. Refreshing listings for those titles now.");
+          setSearchRequestId((current) => current + 1);
+        }
         setCvAnalysisStatus(`CV analyzed locally with ${selectedAiModel}. Review the CV-specific strengths and improvement suggestions below, then edit any profile fields that are inaccurate. Your name and location were not inferred from the CV.`);
       } catch (error) {
         setCvAnalysisStatus(`Local AI analysis could not finish: ${error instanceof Error ? error.message : "unknown error"} Text-extracted role and skill fields are already filled. You can still search or try another model.`);
