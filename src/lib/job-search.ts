@@ -1,6 +1,6 @@
 import { descriptionText } from "./greenhouse";
 import { matchesTargetRole } from "./matcher";
-import { matchesPreferredLocation, resolveProviderGeographies, type ProviderGeography } from "./locations";
+import { getCountryFilters, matchesEligibleRemoteLocation, matchesPreferredLocation, resolveProviderGeographies, type ProviderGeography } from "./locations";
 import { searchWithOllamaWeb } from "./ollama-web-search";
 import type { Job } from "./types";
 
@@ -42,13 +42,32 @@ type JobicyPosting = {
 };
 type JobicyPage = { jobs?: JobicyPosting[]; nextCursor?: string | null; hasMore?: boolean; success?: boolean; error?: string };
 type JobicyLocationsPage = { locations?: Array<{ geoName?: string; geoSlug?: string }> };
+type HimalayasPosting = {
+  title?: string;
+  excerpt?: string;
+  companyName?: string;
+  employmentType?: string;
+  locationRestrictions?: string[];
+  timezoneRestrictions?: number[];
+  timezoneRestriction?: number[];
+  categories?: string[];
+  category?: string[];
+  description?: string;
+  pubDate?: number;
+  applicationLink?: string;
+  guid?: string;
+};
+type HimalayasPage = { jobs?: HimalayasPosting[]; totalCount?: number };
 export type SearchSourceStatus = { source: string; state: "success" | "partial" | "failed"; count: number; fetchedCount: number; checkedAt: string; message?: string };
 export const PUBLIC_JOB_SOURCES = [
   { name: "Arbeitnow", access: "Public paginated JSON API; no key", geography: "Primarily Germany with some Europe-wide listings", fields: "Title, company, location, remote flag, employment type, description, posting date, link", freshness: "Provider-dependent; no freshness guarantee published", restriction: "Credit/link Arbeitnow; use is as-is and permission may be revoked" },
   { name: "Remotive", access: "Public JSON API; no key", geography: "Remote roles with candidate eligibility text; not a broad local Austria board", fields: "Title, company, required location, job type, category, HTML description, date, source link", freshness: "Listings are delayed 24 hours; cache and fetch no more than four times daily", restriction: "Link the Remotive listing and identify Remotive; not for reposting to third-party job boards" },
   { name: "Jobicy", access: "Public JSON API; no key or registration", geography: "Remote jobs; location and keyword filters; rolling seven-day feed", fields: "Title, company, geo eligibility, type, industry, description, date, Jobicy link", freshness: "Three-hour publication delay; only the last seven days; cursor is valid 24 hours", restriction: "Preserve canonical Jobicy link and source attribution; avoid excessive requests" },
+  { name: "Himalayas", access: "Public JSON search API; no key or registration", geography: "Remote roles, including country-filtered roles that allow candidates in Austria", fields: "Title, company, candidate country/timezone restrictions, employment type, description, date, Himalayas link", freshness: "Provider data refreshes every 24 hours; request limits are not published", restriction: "Credit Himalayas and link each original listing; do not submit listings to third-party job aggregators" },
 ] as const;
 const OPTIONAL_WEB_SOURCE = "Ollama Web Search";
+const HIMALAYAS_SOURCE = "Himalayas";
+export const HIMALAYAS_MAX_QUERIES_PER_SEARCH = 5;
 
 function validHttpUrl(value: unknown): value is string {
   if (typeof value !== "string") return false;
@@ -61,9 +80,9 @@ function postedDate(value?: string) {
   return Number.isNaN(date.getTime()) ? "Date not provided" : date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
-function publishedAt(value?: string) {
+function publishedAt(value?: string | number) {
   if (!value) return undefined;
-  const date = new Date(value);
+  const date = new Date(typeof value === "number" ? value * 1000 : value);
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
 }
 
@@ -135,6 +154,33 @@ function mapJobicy(posting: JobicyPosting, retrievedAt: string, sourceLocationSc
   };
 }
 
+function mapHimalayas(posting: HimalayasPosting, retrievedAt: string): Job | null {
+  const sourceUrl = validHttpUrl(posting.applicationLink) ? posting.applicationLink : validHttpUrl(posting.guid) ? posting.guid : "";
+  if (!posting.title?.trim() || !posting.companyName?.trim() || !sourceUrl) return null;
+  const description = clean(posting.description);
+  const locations = Array.isArray(posting.locationRestrictions) ? posting.locationRestrictions.filter((value) => typeof value === "string" && value.trim()) : [];
+  const timezoneRestrictions = (posting.timezoneRestrictions ?? posting.timezoneRestriction ?? []).filter(Number.isFinite);
+  const location = locations.length ? `Remote · ${locations.join(", ")}` : "Remote · Worldwide";
+  const timezone = timezoneRestrictions.length ? ` · UTC${timezoneRestrictions.map((offset) => `${offset >= 0 ? "+" : ""}${offset}`).join("/")}` : "";
+  const date = typeof posting.pubDate === "number" ? postedDate(new Date(posting.pubDate * 1000).toISOString()) : "Date not provided";
+  return {
+    id: `himalayas-${posting.guid || sourceUrl}`,
+    company: posting.companyName,
+    role: posting.title,
+    location,
+    mode: `Remote${timezone}${posting.employmentType ? ` · ${posting.employmentType}` : ""}`,
+    posted: date,
+    ...(publishedAt(posting.pubDate) ? { postedAt: publishedAt(posting.pubDate) } : {}),
+    source: HIMALAYAS_SOURCE,
+    sourceUrl,
+    sourceAttributionUrl: "https://himalayas.app/jobs",
+    ...((posting.categories ?? posting.category)?.length ? { department: (posting.categories ?? posting.category)!.join(", ") } : {}),
+    retrievedAt,
+    summary: clean(posting.excerpt ?? "").slice(0, 1200) || description.slice(0, 1200) || "Open the Himalayas listing for the full role description.",
+    ...(description ? { description } : {}),
+  };
+}
+
 async function getJson<T>(url: string, revalidate?: number): Promise<T> {
   const cacheOptions = revalidate === undefined
     ? { cache: "no-store" as const }
@@ -196,6 +242,40 @@ async function remotiveJobs(retrievedAt: string) {
   const page = await getJson<RemotivePage>("https://remotive.com/api/remote-jobs", 21600);
   return (page.jobs ?? []).map((posting) => mapRemotive(posting, retrievedAt)).filter((job): job is Job => job !== null);
 }
+
+export function buildHimalayasSearchPlan(roles: string, locations: string) {
+  const titles = roles.split(/[;\n]+/).map((value) => value.trim()).filter(Boolean);
+  const countries = getCountryFilters(locations);
+  const plan: Array<{ role?: string; country?: string }> = [];
+  if (titles.length) {
+    if (countries.length) {
+      for (const country of countries) for (const role of titles) plan.push({ role, country });
+    } else {
+      for (const role of titles) plan.push({ role });
+    }
+  } else if (countries.length) {
+    for (const country of countries) plan.push({ country });
+  } else {
+    plan.push({});
+  }
+  return plan.slice(0, HIMALAYAS_MAX_QUERIES_PER_SEARCH);
+}
+
+async function himalayasJobs(retrievedAt: string, roles: string, locations: string) {
+  const plan = buildHimalayasSearchPlan(roles, locations);
+  const outcomes = await Promise.allSettled(plan.map(async (query) => {
+    const params = new URLSearchParams({ sort: "recent", page: "1" });
+    if (query.role) params.set("q", query.role);
+    if (query.country) params.set("country", query.country);
+    const page = await getJson<HimalayasPage>(`https://himalayas.app/jobs/api/search?${params}`, 86400);
+    if (!Array.isArray(page.jobs)) throw new Error("Himalayas returned an unexpected response.");
+    return page.jobs.map((posting) => mapHimalayas(posting, retrievedAt)).filter((job): job is Job => job !== null);
+  }));
+  const jobs = outcomes.flatMap((outcome) => outcome.status === "fulfilled" ? outcome.value : []);
+  const errors = outcomes.flatMap((outcome) => outcome.status === "rejected" ? ["Himalayas failed for one search query; results from other queries and sources are retained."] : []);
+  return { jobs, errors, state: outcomes.length > 0 && outcomes.every((outcome) => outcome.status === "rejected") ? "failed" as const : errors.length ? "partial" as const : "success" as const };
+}
+
 
 type JobicyCursorState = Record<string, string>;
 function decodeJobicyCursor(cursor?: string): JobicyCursorState {
@@ -274,13 +354,15 @@ export async function searchPublicJobs(options: { arbeitnowStartPage?: number; j
   const requestArbeitnow = !loadingMore || options.arbeitnowStartPage !== undefined;
   const requestRemotive = !loadingMore;
   const requestJobicy = !loadingMore || options.jobicyCursor !== undefined;
+  const requestHimalayas = !loadingMore;
   const requestWebSearch = options.includeWebSearch === true && !loadingMore;
-  const [geoOutcome, arbeitnowResult, remotiveResult, webSearchResult] = await Promise.all([
+  const [geoOutcome, arbeitnowResult, remotiveResult, himalayasResult, webSearchResult] = await Promise.all([
     requestJobicy ? getJson<JobicyLocationsPage>("https://jobicy.com/api/v2/remote-jobs?get=locations", 86400)
       .then((data) => ({ state: "success" as const, value: resolveProviderGeographies(options.locations ?? "", (data.locations ?? []).flatMap((item) => item.geoName && item.geoSlug ? [{ name: item.geoName, slug: item.geoSlug }] : [])) }))
       .catch(() => ({ state: "failed" as const, error: "Jobicy's public location list is unavailable; its feed was skipped." })) : Promise.resolve(null),
     requestArbeitnow ? arbeitnowJobs(retrievedAt, startPage).then((result) => ({ status: "fulfilled" as const, value: result }), (reason) => ({ status: "rejected" as const, reason })) : Promise.resolve(null),
     requestRemotive ? remotiveJobs(retrievedAt).then((value) => ({ status: "fulfilled" as const, value }), (reason) => ({ status: "rejected" as const, reason })) : Promise.resolve(null),
+    requestHimalayas ? himalayasJobs(retrievedAt, options.roles ?? "", options.locations ?? "").then((value) => ({ status: "fulfilled" as const, value }), (reason) => ({ status: "rejected" as const, reason })) : Promise.resolve(null),
     requestWebSearch ? searchWithOllamaWeb({ roles: options.roles ?? "", locations: options.locations ?? "" })
       .then((value) => ({ status: "fulfilled" as const, value }), (reason) => ({ status: "rejected" as const, reason })) : Promise.resolve(null),
   ]);
@@ -309,6 +391,13 @@ export async function searchPublicJobs(options: { arbeitnowStartPage?: number; j
     if (remotiveResult.status === "fulfilled") jobsBySource.set("Remotive", remotiveResult.value);
     else errors.push("Remotive is temporarily unavailable.");
   }
+  if (himalayasResult) {
+    if (himalayasResult.status === "fulfilled") {
+      jobsBySource.set(HIMALAYAS_SOURCE, himalayasResult.value.jobs);
+      if (himalayasResult.value.state !== "success") errors.push(himalayasResult.value.state === "failed" ? "Himalayas is temporarily unavailable." : "Himalayas had partial query failures; successful query results remain available.");
+      errors.push(...himalayasResult.value.errors);
+    } else errors.push("Himalayas is temporarily unavailable.");
+  }
   if (jobicyResult) {
     if (jobicyResult.status === "fulfilled") {
       jobsBySource.set("Jobicy", jobicyResult.value.jobs);
@@ -334,16 +423,19 @@ export async function searchPublicJobs(options: { arbeitnowStartPage?: number; j
   }
   const discoveredJobs = [...unique.values()];
   const jobs = discoveredJobs.filter((job) =>
-    matchesPreferredLocation(job.location, options.locations ?? "", job.mode, job.source, job.sourceLocationScope)
+    (matchesPreferredLocation(job.location, options.locations ?? "", job.mode, job.source, job.sourceLocationScope)
+      || job.source === HIMALAYAS_SOURCE && matchesEligibleRemoteLocation(job.location, options.locations ?? "", job.mode))
     && (!(options.roles ?? "").trim() || matchesTargetRole(job, options.roles ?? "")));
   const sourceStatuses: SearchSourceStatus[] = PUBLIC_JOB_SOURCES.filter((source) => jobsBySource.has(source.name) || errors.some((error) => error.startsWith(source.name)) || skipped.has(source.name)).map((source) => {
     const sourceJobs = jobs.filter((job) => job.sourceAliases?.includes(source.name) || job.source === source.name);
     const failed = skipped.has(source.name) ? true
       : source.name === "Arbeitnow" && arbeitnowResult?.status === "fulfilled" ? arbeitnowResult.value.state === "failed"
       : source.name === "Jobicy" && jobicyResult?.status === "fulfilled" ? jobicyResult.value.state === "failed"
+      : source.name === HIMALAYAS_SOURCE && himalayasResult?.status === "fulfilled" ? himalayasResult.value.state === "failed"
         : errors.some((error) => error.startsWith(source.name) && !/page \d+ failed|failed for one selected region|had partial/.test(error));
     const partial = source.name === "Arbeitnow" && arbeitnowResult?.status === "fulfilled" ? arbeitnowResult.value.state === "partial"
       : source.name === "Jobicy" && jobicyResult?.status === "fulfilled" ? jobicyResult.value.state === "partial"
+      : source.name === HIMALAYAS_SOURCE && himalayasResult?.status === "fulfilled" ? himalayasResult.value.state === "partial"
         : errors.some((error) => error.startsWith(source.name) && !failed);
     return { source: source.name, state: skipped.has(source.name) ? "failed" : failed ? sourceJobs.length ? "partial" : "failed" : partial ? "partial" : "success", count: sourceJobs.length, fetchedCount: jobsBySource.get(source.name)?.length ?? 0, checkedAt: retrievedAt, ...(errors.find((error) => error.startsWith(source.name)) ? { message: errors.find((error) => error.startsWith(source.name)) } : geoResult?.warning && source.name === "Jobicy" ? { message: geoResult.warning } : {}) };
   });
