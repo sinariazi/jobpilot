@@ -404,7 +404,6 @@ export default function Home() {
     ? currentModelReviews.find((review) => review.jobId === selected.job.id)
     : undefined;
   const selectedCoverLetter = selected ? coverLetterDrafts[selected.job.id] : undefined;
-  const matchedJobs = preferredJobs.filter((job) => scoreJob(job, candidateSkills).matched.length > 0).length;
   const reviewedCount = preferredJobs.filter((job) => status[job.id]).length;
   const applicationJobs = jobs.filter((job) => saved.includes(job.id) || status[job.id]);
   const todayKey = (() => {
@@ -1347,7 +1346,7 @@ export default function Home() {
 
           <div className="stats-grid">
             <div className="stat-card"><div className="stat-label">JOBS REVIEWED</div><div className="stat-bottom"><strong>{reviewedCount}</strong><span className="stat-note">of {preferredJobs.length} live jobs in your locations</span></div></div>
-            <div className="stat-card"><div className="stat-label">JOBS WITH SKILL MENTIONS</div><div className="stat-bottom"><strong>{matchedJobs}</strong><span className="stat-note">At least one profile skill mentioned</span></div></div>
+            <div className="stat-card"><div className="stat-label">JOBS WITH SCORES</div><div className="stat-bottom"><strong>{decisionScoredCount}</strong><span className="stat-note">Local decision estimates · {locationMatchedJobs.length} eligible</span></div></div>
             <div className="stat-card"><div className="stat-label">SAVED JOBS <span>ⓘ</span></div><div className="stat-bottom"><strong>{String(saved.length).padStart(2, "0")}</strong><span className="stat-note">Kept for later review</span></div><div className="saved-stat-icon">☆</div></div>
             <div className="stat-card source-card"><div className="stat-label">JOB SOURCES <span>ⓘ</span></div><div className="source-logos"><b className="gh">↗</b><span>{liveJobs.length ? `${new Set(liveJobs.map((job) => job.source)).size} feeds searched` : "Ready to search"}</span></div><div className="source-foot">Public job feeds <i/> Europe + remote</div></div>
           </div>
