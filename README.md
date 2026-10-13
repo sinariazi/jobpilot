@@ -234,6 +234,7 @@ flowchart LR
     sourcecheck --> review["Show source quotes and unsupported claims for review"]
     search --> tracker["Save job and manually track application status"]
     review --> user["Candidate verifies, edits, copies, and submits"]
+    export --> user
     tracker --> user
     user -->|"Optional click-to-fill supported blank fields"| ext["Local Chromium extension"]
 ```
