@@ -1347,7 +1347,7 @@ export default function Home() {
           </div>
 
           {hasCurrentCvAssessment && <section className="match-calibration-panel" aria-labelledby="match-calibration-title">
-            <div className="match-calibration-heading"><div><span className="eyebrow">LOCAL FEEDBACK</span><h2 id="match-calibration-title">Review screening quality</h2><p>Review assessed jobs in the detail panel. Reviews are stored on this device and grouped by CV and decision model.</p></div><span className="calibration-sample-count">{currentModelMetrics.total} reviewed</span></div>
+            <div className="match-calibration-heading"><div><span className="eyebrow">LOCAL FEEDBACK</span><h2 id="match-calibration-title">Review screening quality</h2><p>Review assessed jobs in the detail panel. Include strong, borderline, and poor fits across score bands; reviewing only high scores can hide missed matches. Reviews are stored on this device and grouped by CV and decision model.</p></div><span className="calibration-sample-count">{currentModelMetrics.total} reviewed</span></div>
             {currentModelMetrics.total === 0 ? <p className="calibration-empty">No reviewed matches for this CV and model yet. Mark assessed jobs as relevant or not relevant to start measuring errors.</p> : <>
               <div className="calibration-metrics">
                 <div><span>False positives</span><strong>{currentModelMetrics.falsePositive} · {formatRate(currentModelMetrics.falsePositiveRate)}</strong><small>Model said match; your review said no</small></div>
