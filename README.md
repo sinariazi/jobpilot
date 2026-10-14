@@ -99,31 +99,42 @@ Ollama documents up to 10 results per query. Free usage and availability can cha
 
 ## Run Jobpilot
 
-### 1. Install the prerequisites
+### Quick start: one command
 
-1. Install [Node.js 22.13 or newer](https://nodejs.org/).
-2. Install [Ollama](https://ollama.com/download) and keep the Ollama app running.
-3. Open Terminal (Mac/Linux) or PowerShell (Windows) and download one chat model and one decision model:
+On **macOS or Linux**, open Terminal and paste:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/sinariazi/jobpilot/main/scripts/quickstart.sh | bash
+```
+
+On **Windows**, open PowerShell and paste:
+
+```powershell
+irm https://raw.githubusercontent.com/sinariazi/jobpilot/main/scripts/quickstart.ps1 | iex
+```
+
+The quick start downloads Jobpilot into `~/Jobpilot` (or `%USERPROFILE%\\Jobpilot` on Windows), installs Node.js if needed, asks before installing Ollama, downloads the suggested local models, installs the exact project dependencies, and starts the app. It will not overwrite an existing project folder. To reuse an existing copy, run the script from that project folder.
+
+The first run needs internet access and several gigabytes of free disk space for the models. Ollama's installer may request administrator permission. Keep the terminal open while Jobpilot is running; open [http://localhost:3000](http://localhost:3000) after the server reports that it is ready. Press **Ctrl+C** in that terminal to stop the app.
+
+The suggested models are `qwen3.5:4b` for CV analysis and detailed job reviews, and `tev1:0.8b` for quick first-stage scores. They do different work. You can choose other compatible installed models in **Local AI status**. To use different model tags with the quick-start scripts, set `JOBPILOT_CHAT_MODEL` and `JOBPILOT_DECISION_MODEL` before running the script.
+
+### If you prefer to install manually
+
+1. Install [Node.js 22.13 or newer](https://nodejs.org/) and [Ollama](https://ollama.com/download).
+2. Download and extract the [Jobpilot repository](https://github.com/sinariazi/jobpilot) ZIP, or clone it with Git.
+3. Open Terminal or PowerShell in the `jobpilot` folder and run:
 
    ```bash
    ollama pull qwen3.5:4b
    ollama pull tev1:0.8b
-   ```
-
-   The chat model is used for CV analysis, detailed job reviews, and writing drafts. The decision model is used for fast first-stage scores. They do different jobs. These are suggested Ollama tags, not fixed application dependencies; compatible installed models can be selected in **Local AI status**. Ollama 0.35 or newer is required for `/v1/systemone`.
-
-### 2. Start the app
-
-1. Download and extract the [Jobpilot repository](https://github.com/sinariazi/jobpilot) ZIP, or clone it with Git.
-2. Open a terminal in the extracted `jobpilot` folder. On macOS/Linux, for example: `cd ~/Downloads/jobpilot-main`. On Windows, open the folder in File Explorer, enter `powershell` in the address bar, and press Enter.
-3. Run:
-
-   ```bash
-   npm install
+   npm ci
    npm run dev
    ```
 
-4. Keep the terminal and Ollama running. Open [http://localhost:3000](http://localhost:3000).
+4. Keep Ollama and the terminal running. Open [http://localhost:3000](http://localhost:3000).
+
+Ollama 0.35 or newer is needed for the `/v1/systemone` decision endpoint. Jobpilot reports unavailable models and provider failures rather than silently switching to hosted AI.
 
 ### 3. Add a CV and search
 
