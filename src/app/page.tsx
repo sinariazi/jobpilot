@@ -1,3 +1,6 @@
+Warning: truncated output (original token count: 36126)
+Total output lines: 1565
+
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -17,7 +20,7 @@ import { createApplicationPacket, detectAtsPlatform } from "@/lib/application-pr
 import { compareDecisionScores, passesMinimumDecisionScore } from "@/lib/job-ranking";
 import { composeTailoredCvText, renderTailoredCvHtml, tailoredCvFilename, type VerifiedCvTailoring } from "@/lib/cv-tailoring";
 import { mergeJobPool } from "@/lib/job-pool";
-import { addSearchMatches, applyScreeningsToSearchMatches, hasSearchMatch, mergeSearchMatchesIntoPool, searchPreferenceKey, snapshotSearchMatches, type SearchMatchSnapshot } from "@/lib/search-match-snapshot";
+import { addSearchMatches, applyDetailedAnalysisToSearchMatches, applyScreeningsToSearchMatches, hasSearchMatch, mergeSearchMatchesIntoPool, searchPreferenceKey, snapshotSearchMatches, type SearchMatchSnapshot } from "@/lib/search-match-snapshot";
 
 const LEGACY_STORAGE_KEY = "jobpilot-local-v1";
 const MAX_BACKUP_BYTES = 23_000_000;
@@ -329,9 +332,12 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    // Scoring updates the pool once per small batch. Persist one settled snapshot instead of queuing full-pool writes.
+    // Scoring updates the pool once per small batch. Saving the full pool for
+    // each batch created a queue of multi-megabyte PUTs that could take many
+    // minutes. Keep the UI live and persist one settled snapshot afterwards.
     if (!stateLoaded || aiMatchProgress) return;
-    // State restoration is not a user edit. Avoid uploading the full pool after every reload.
+    // Loading the saved state is not a user change. Avoid sending the entire
+    // restored pool back to the server on every page load or browser tab.
     if (skipNextStateAutosave.current) {
       skipNextStateAutosave.current = false;
       return;
@@ -339,6 +345,7 @@ export default function Home() {
     let cancelled = false;
     const snapshot = {
       profile, saved, status, applicationNotes, applicationFollowUps, coverLetterDrafts, matchReviews, matchCohortKey, matchingSettings,
+      // Provider descriptions can be much larger than needed for the saved pool.
       liveJobs: liveJobs.map((job) => ({
         ...job,
         summary: job.summary.slice(0, 4000),
@@ -567,7 +574,17 @@ export default function Home() {
       const match = result.matches?.find((item) => item.id === job.id);
       if (!match) throw new Error("The local model did not return a detailed comparison for this job.");
       const aiMatch = { model: selectedAiModel, relevant: match.relevant, score: Math.max(0, Math.min(100, Math.round(match.score))), reason: match.reason, cvEvidence: match.cvEvidence };
-      setLiveJobs((current) => current.map((item) => item.id === job.id ? { ...item, aiMatch, detailedAnalysis: match.detailedAnalysis } : item));
+      const detailResult = { aiMatch, detailedAnalysis: match.detailedAnalysis };
+      setLiveJobs((current) => {
+        const existsInPool = current.some((item) => item.id === job.id);
+        return existsInPool
+          ? current.map((item) => item.id === job.id ? { ...item, ...detailResult } : item)
+          : mergeJobPool(current, [{ ...job, ...detailResult }], MAX_LOCAL_JOB_POOL);
+      });
+      // Server-filtered jobs can exist only in the search snapshot (outside
+      // the bounded persisted discovery pool). Update that copy too so the
+      // selected detail panel renders the successful model response.
+      setSearchMatchSnapshot((current) => applyDetailedAnalysisToSearchMatches(current, job.id, detailResult));
     } catch (error) {
       if (controller.signal.aborted) {
         if (controller.signal.reason instanceof DOMException && controller.signal.reason.name === "TimeoutError") {
@@ -583,27 +600,49 @@ export default function Home() {
     }
   }
 
-
   async function tailorCvForJob(job: Job) {
     setCvTailoringError(null);
-    if (!cvText.trim()) { setCvTailoringError({ jobId: job.id, message: "Upload and analyze your CV before tailoring it for a job." }); return; }
-    if (!isLocalJobpilotPage()) { setCvTailoringError({ jobId: job.id, message: "Open Jobpilot at localhost so your CV and job description stay on this laptop." }); return; }
-    if (!localAiModels.includes(selectedAiModel)) { setCvTailoringError({ jobId: job.id, message: "Install and select a local chat model in Local AI status, then try again." }); return; }
-    if (job.descriptionKind === "search-snippet" || !job.description?.trim()) { setCvTailoringError({ jobId: job.id, message: "This listing has no full job description to compare. Open the original posting and add its description as a manual job before tailoring a CV." }); return; }
+    if (!cvText.trim()) {
+      setCvTailoringError({ jobId: job.id, message: "Upload and analyze your CV before tailoring it for a job." });
+      return;
+    }
+    if (!isLocalJobpilotPage()) {
+      setCvTailoringError({ jobId: job.id, message: "Open Jobpilot at localhost so your CV and job description stay on this laptop." });
+      return;
+    }
+    if (!localAiModels.includes(selectedAiModel)) {
+      setCvTailoringError({ jobId: job.id, message: "Install and select a local chat model in Local AI status, then try again." });
+      return;
+    }
+    if (job.descriptionKind === "search-snippet" || !job.description?.trim()) {
+      setCvTailoringError({ jobId: job.id, message: "This listing has no full job description to compare. Open the original posting and add its description as a manual job before tailoring a CV." });
+      return;
+    }
     cvTailoringAbortController.current?.abort();
     const controller = new AbortController();
     cvTailoringAbortController.current = controller;
     setCvTailoringJobId(job.id);
     const timeout = window.setTimeout(() => controller.abort(new DOMException("CV tailoring took too long.", "TimeoutError")), 95_000);
     try {
-      const response = await fetch("/api/cv/tailor", { method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal, body: JSON.stringify({ model: selectedAiModel, cvText: cvText.slice(0, MAX_CV_MATCH_CHARS), targetRole: job.role, company: job.company, jobDescription: job.description.slice(0, 8_000) }) });
+      const response = await fetch("/api/cv/tailor", {
+        method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
+        body: JSON.stringify({ model: selectedAiModel, cvText: cvText.slice(0, MAX_CV_MATCH_CHARS), targetRole: job.role, company: job.company, jobDescription: job.description.slice(0, 8_000) }),
+      });
       const result = await response.json() as VerifiedCvTailoring & { error?: string };
       if (!response.ok) throw new Error(result.error ?? "Local CV tailoring failed.");
-      const text = composeTailoredCvText({ name: profile.name === "Candidate" ? "" : profile.name, contact: { email: profile.email, phone: profile.phone, linkedin: profile.linkedin, portfolio: profile.portfolio }, targetRole: job.role, sections: result });
+      const text = composeTailoredCvText({
+        name: profile.name === "Candidate" ? "" : profile.name,
+        contact: { email: profile.email, phone: profile.phone, linkedin: profile.linkedin, portfolio: profile.portfolio },
+        targetRole: job.role,
+        sections: result,
+      });
       setTailoredCvDraft({ jobId: job.id, role: job.role, text, verifiedText: text, result });
     } catch (error) {
-      if (controller.signal.aborted && controller.signal.reason instanceof DOMException && controller.signal.reason.name === "TimeoutError") setCvTailoringError({ jobId: job.id, message: "CV tailoring took too long and was stopped. Check Ollama, select a smaller local chat model, or try again." });
-      else if (!controller.signal.aborted) setCvTailoringError({ jobId: job.id, message: error instanceof Error ? error.message : "Local CV tailoring failed." });
+      if (controller.signal.aborted && controller.signal.reason instanceof DOMException && controller.signal.reason.name === "TimeoutError") {
+        setCvTailoringError({ jobId: job.id, message: "CV tailoring took too long and was stopped. Check Ollama, select a smaller local chat model, or try again." });
+      } else if (!controller.signal.aborted) {
+        setCvTailoringError({ jobId: job.id, message: error instanceof Error ? error.message : "Local CV tailoring failed." });
+      }
     } finally {
       window.clearTimeout(timeout);
       if (cvTailoringAbortController.current === controller) cvTailoringAbortController.current = null;
@@ -787,569 +826,7 @@ export default function Home() {
     try {
       const { parseCvFile } = await import("@/lib/cv-parser");
       const suggestions = await parseCvFile(file, { ocrLanguage, onProgress: setCvAnalysisStatus });
-      const cohortKey = await createMatchCohortKey(suggestions.sourceText ?? "");
-      const browserRoles = suggestions.roles || profile.roles;
-      const browserSkills = suggestions.skills || profile.skills;
-      const autoFilledProfile = { ...profile, roles: browserRoles, skills: browserSkills };
-      setCvSuggestions(suggestions);
-      setCvText(suggestions.sourceText ?? "");
-      setMatchCohortKey(cohortKey);
-      setCvAnalyzedModel("");
-      setLiveJobs((current) => current.map((job) => ({ ...job, aiMatch: undefined, screening: undefined, detailedAnalysis: undefined })));
-      setCvFileName(file.name);
-      setProfile(autoFilledProfile);
-      setProfileDraft(autoFilledProfile);
-      setSearchRolesDraft(browserRoles);
-      setSourceMessage("The CV changed. Refreshing job listings and recalculating their local scores; the current list stays visible until results arrive.");
-      setSearchRequestId((current) => current + 1);
-      setCvMessage(`CV text extracted in your browser. Job titles and skills have been filled into your profile; Jobpilot saves them automatically on this device. Your name and preferred locations were left unchanged.${(suggestions.sourceText?.length ?? 0) > MAX_CV_MATCH_CHARS ? ` Matching uses the first ${MAX_CV_MATCH_CHARS.toLocaleString()} characters.` : ""}`);
-
-      if (!localAiModels.includes(selectedAiModel)) {
-        setCvAnalysisStatus("Text-based role and skill extraction is ready. Review the suggested job titles and locations, then search. Select local Ollama models to enable AI matching.");
-        return;
-      }
-      if (!isLocalJobpilotPage()) {
-        setCvAnalysisStatus("AI analysis is disabled here for privacy. Open Jobpilot at localhost on this laptop. The CV was not sent for AI analysis.");
-        return;
-      }
-
-      setCvAnalyzing(true);
-      setCvAnalysisStatus(`Analyzing your CV with local model ${selectedAiModel}…`);
-      try {
-        const response = await fetch("/api/cv/analyze", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          cache: "no-store",
-          body: JSON.stringify({ model: selectedAiModel, cvText: (suggestions.sourceText ?? "").slice(0, MAX_CV_MATCH_CHARS) }),
-        });
-        const result = await response.json() as { summary?: string; roles?: string[]; skills?: string[]; seniority?: string; domains?: string[]; highlights?: string[]; strengths?: string[]; improvements?: string[]; topRecommendation?: string; error?: string };
-        if (!response.ok || !result.summary || !Array.isArray(result.roles) || !Array.isArray(result.skills) || !Array.isArray(result.strengths) || !Array.isArray(result.improvements) || typeof result.topRecommendation !== "string") {
-          throw new Error(result.error ?? "The local model returned incomplete CV analysis.");
-        }
-        const analyzedRoles = result.roles.join("; ") || browserRoles;
-        const analyzedSkills = result.skills.join(", ") || browserSkills;
-        const analysis = {
-          summary: result.summary,
-          seniority: result.seniority ?? "Not identified",
-          domains: result.domains ?? [],
-          highlights: result.highlights ?? [],
-          strengths: result.strengths,
-          improvements: result.improvements,
-          topRecommendation: result.topRecommendation,
-        };
-        setCvSuggestions({ ...suggestions, roles: analyzedRoles, skills: analyzedSkills, analysis });
-        setProfile((current) => ({ ...current,
-          roles: current.roles === browserRoles ? analyzedRoles : current.roles,
-          skills: current.skills === browserSkills ? analyzedSkills : current.skills,
-        }));
-        setSearchRolesDraft(analyzedRoles);
-        setProfileDraft((current) => ({ ...current,
-          roles: current.roles === browserRoles ? analyzedRoles : current.roles,
-          skills: current.skills === browserSkills ? analyzedSkills : current.skills,
-        }));
-        if (analyzedRoles !== browserRoles) {
-          setSourceMessage("The CV analysis suggested updated job titles. Refreshing listings for those titles now.");
-          setSearchRequestId((current) => current + 1);
-        }
-        setCvAnalysisStatus(`CV analyzed locally with ${selectedAiModel}. Review the CV-specific strengths and improvement suggestions below, then edit any profile fields that are inaccurate. Your name and location were not inferred from the CV.`);
-      } catch (error) {
-        setCvAnalysisStatus(`Local AI analysis could not finish: ${error instanceof Error ? error.message : "unknown error"} Text-extracted role and skill fields are already filled. You can still search or try another model.`);
-      } finally {
-        setCvAnalyzing(false);
-      }
-    } catch (error) {
-      setCvSuggestions(null);
-    setCvText("");
-      setCvAnalyzedModel("");
-      setCvFileName("");
-      setCvError(error instanceof Error ? error.message : "Could not read this CV.");
-    } finally {
-      setCvParsing(false);
-    }
-  }
-
-  async function reanalyzeSavedCv() {
-    const savedCvText = cvText.slice(0, MAX_CV_MATCH_CHARS).trim();
-    if (!savedCvText) {
-      setCvAnalysisStatus("Upload a readable CV before requesting local analysis.");
-      return;
-    }
-    if (!selectedAiModel || !localAiModels.includes(selectedAiModel)) {
-      setCvAnalysisStatus("Select an installed local chat model in Local AI status, then try again.");
-      return;
-    }
-    if (!isLocalJobpilotPage()) {
-      setCvAnalysisStatus("CV analysis is available only from localhost so your CV text stays on this laptop.");
-      return;
-    }
-
-    const previousRoles = cvSuggestions?.roles ?? profile.roles;
-    const previousSkills = cvSuggestions?.skills ?? profile.skills;
-    setCvAnalyzing(true);
-    setCvAnalysisStatus(`Re-analyzing saved CV text with local model ${selectedAiModel}…`);
-    try {
-      const response = await fetch("/api/cv/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify({ model: selectedAiModel, cvText: savedCvText }),
-      });
-      const result = await response.json() as { summary?: string; roles?: string[]; skills?: string[]; seniority?: string; domains?: string[]; highlights?: string[]; strengths?: string[]; improvements?: string[]; topRecommendation?: string; error?: string };
-      if (!response.ok || !result.summary || !Array.isArray(result.roles) || !Array.isArray(result.skills) || !Array.isArray(result.strengths) || !Array.isArray(result.improvements) || typeof result.topRecommendation !== "string") {
-        throw new Error(result.error ?? "The local model returned incomplete CV analysis.");
-      }
-      const roles = result.roles.join("; ") || previousRoles;
-      const skills = result.skills.join(", ") || previousSkills;
-      const analysis = {
-        summary: result.summary,
-        seniority: result.seniority ?? "Not identified",
-        domains: result.domains ?? [],
-        highlights: result.highlights ?? [],
-        strengths: result.strengths,
-        improvements: result.improvements,
-        topRecommendation: result.topRecommendation,
-      };
-      setCvSuggestions((current) => current ? { ...current, roles, skills, analysis } : current);
-      setProfile((current) => ({ ...current, roles: current.roles === previousRoles ? roles : current.roles, skills: current.skills === previousSkills ? skills : current.skills }));
-      setProfileDraft((current) => ({ ...current, roles: current.roles === previousRoles ? roles : current.roles, skills: current.skills === previousSkills ? skills : current.skills }));
-      setSearchRolesDraft((current) => current === previousRoles ? roles : current);
-      invalidateAiAssessment();
-      setCvAnalyzedModel("");
-      setLiveJobs((current) => current.map((job) => ({ ...job, aiMatch: undefined, screening: undefined, detailedAnalysis: undefined })));
-      setCvAnalysisStatus(`CV re-analyzed locally with ${selectedAiModel}. Review the feedback below; job scores were cleared so they can be recalculated with the updated CV analysis.`);
-    } catch (error) {
-      setCvAnalysisStatus(`Local CV analysis could not finish: ${error instanceof Error ? error.message : "unknown error"}`);
-    } finally {
-      setCvAnalyzing(false);
-    }
-  }
-
-  function removeSavedCvEvidence() {
-    invalidateAiAssessment();
-    if (cvPreviewUrl) URL.revokeObjectURL(cvPreviewUrl);
-    setCvPreviewUrl("");
-    setCvText("");
-    setCvSuggestions(null);
-    setCvFileName("");
-    setCvAnalyzedModel("");
-    setCvMessage("");
-    setCvAnalysisStatus("Saved CV matching text removed from this device. Your editable role and skill fields remain in the profile.");
-    setLiveJobs((current) => current.map((job) => ({ ...job, screening: undefined, aiMatch: undefined, detailedAnalysis: undefined })));
-  }
-
-  function downloadBackup() {
-    const backup = createBackup({ profile, saved, status, applicationNotes, applicationFollowUps, coverLetterDrafts, matchReviews, matchCohortKey, matchingSettings, liveJobs });
-    const url = URL.createObjectURL(new Blob([backup], { type: "application/json" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `jobpilot-backup-${new Date().toISOString().slice(0, 10)}.json`;
-    link.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-    setBackupMessage("Backup downloaded. Store the file somewhere safe; it contains your local profile and job tracking data.");
-  }
-
-  function buildCoverLetter() {
-    if (!selected) return;
-    setCoverLetterDrafts((current) => {
-      const prior = current[selected.job.id] ?? { interest: "", evidence: "", draft: "", updatedAt: "" };
-      return { ...current, [selected.job.id]: {
-        ...prior,
-        draft: createCoverLetterDraft({ candidateName: profile.name, role: selected.job.role, company: selected.job.company, matchedSkills: selected.matched, reason: prior.interest, evidence: prior.evidence }),
-        claimAudit: undefined,
-        updatedAt: new Date().toISOString(),
-      } };
-    });
-    setCoverLetterMessage("Basic English template created. AI tone, language, and length settings do not apply to this template.");
-  }
-
-  async function generateAiCoverLetter() {
-    if (!selected || !localAiModels.includes(selectedAiModel) || aiDrafting) return;
-    setAiDrafting(true);
-    setCoverLetterMessage("Drafting with the configured AI provider…");
-    try {
-      const response = await fetch("/api/application/draft", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: selectedAiModel,
-          job: {
-            company: selected.job.company,
-            role: selected.job.role,
-            location: selected.job.location,
-            description: selected.job.description ?? selected.job.summary,
-          },
-          candidate: { name: profile.name, skills: profile.skills },
-          interest: selectedCoverLetter?.interest ?? "",
-          evidence: selectedCoverLetter?.evidence ?? "",
-          preferences: selectedCoverLetter?.preferences ?? { tone: "professional", language: "English", length: "concise" },
-        }),
-      });
-      const result = await response.json() as { draft?: string; claimAudit?: CoverLetterDraftRecord["claimAudit"]; error?: string };
-      if (!response.ok || !result.draft) throw new Error(result.error ?? "The AI provider returned no draft.");
-      updateSelectedCoverLetter({ draft: result.draft, claimAudit: result.claimAudit });
-      const flagged = result.claimAudit?.unverifiedClaims.length ?? 0;
-      setCoverLetterMessage(`AI draft created. ${result.claimAudit?.verifiedClaims.length ?? 0} claim quotes matched your supplied fields; ${flagged} claims could not be matched. This checks for source text only, not truth. Review the full letter before use.`);
-    } catch (error) {
-      setCoverLetterMessage(error instanceof Error ? error.message : "Could not create the AI draft.");
-    } finally {
-      setAiDrafting(false);
-    }
-  }
-
-  function updateSelectedCoverLetter(patch: Partial<CoverLetterDraftRecord>) {
-    if (!selected) return;
-    setCoverLetterDrafts((current) => ({
-      ...current,
-      [selected.job.id]: {
-        ...(current[selected.job.id] ?? { interest: "", evidence: "", draft: "", updatedAt: "" }),
-        ...patch,
-        ...((patch.draft !== undefined || patch.interest !== undefined || patch.evidence !== undefined)
-          && !Object.prototype.hasOwnProperty.call(patch, "claimAudit") ? { claimAudit: undefined } : {}),
-        updatedAt: new Date().toISOString(),
-      },
-    }));
-  }
-
-  async function copyCoverLetter() {
-    try {
-      await navigator.clipboard.writeText(coverLetterDrafts[selected?.job.id ?? ""]?.draft ?? "");
-      setCoverLetterMessage("Draft copied to clipboard.");
-    } catch {
-      setCoverLetterMessage("Clipboard access is unavailable. Select and copy the draft text manually.");
-    }
-  }
-
-  async function copyApplicationPacket() {
-    if (!selected) return;
-    try {
-      await navigator.clipboard.writeText(createApplicationPacket(selected.job, profile, selectedCoverLetter?.draft ?? ""));
-      setApplicationKitMessage("Application packet copied. Paste details into the employer form and review each field.");
-    } catch {
-      setApplicationKitMessage("Clipboard access is unavailable. Use the details below to copy manually.");
-    }
-  }
-
-  function downloadCoverLetter() {
-    const draft = coverLetterDrafts[selected?.job.id ?? ""]?.draft;
-    if (!selected || !draft) return;
-    const safeName = `${selected.job.company}-${selected.job.role}`.replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/g, "").toLowerCase() || "application";
-    const url = URL.createObjectURL(new Blob([draft], { type: "text/plain;charset=utf-8" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `cover-letter-${safeName}.txt`;
-    link.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-    setCoverLetterMessage("Draft downloaded as a text file.");
-  }
-
-  async function restoreBackup(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.currentTarget.files?.[0];
-    event.currentTarget.value = "";
-    if (!file) return;
-    if (file.size > MAX_BACKUP_BYTES) {
-      setBackupMessage("This backup is too large to restore (maximum 23 MB).");
-      return;
-    }
-    let restoredState: PersistedState | null;
-    try {
-      restoredState = parseBackup(await file.text());
-    } catch {
-      setBackupMessage("Could not read the selected backup file.");
-      return;
-    }
-    if (!restoredState) {
-      setBackupMessage("This file is not a valid Jobpilot backup or uses an unsupported backup version.");
-      return;
-    }
-    if (!window.confirm("Restore this backup? It will replace the profile, saved jobs, application statuses, fetched listings, and local AI match reviews on this device.")) {
-      setBackupMessage("Restore cancelled. Your current data was not changed.");
-      return;
-    }
-    setBackupBusy(true);
-    setBackupMessage("Validating and restoring backup…");
-    const operation = saveQueue.current.catch(() => undefined).then(async () => {
-      const response = await fetch("/api/state?includeState=1", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(restoredState),
-      });
-      const result = await response.json() as PersistedState & { initialized?: boolean; error?: string };
-      if (!response.ok) throw new Error(result.error ?? "The backup data did not pass validation.");
-      skipNextStateAutosave.current = true;
-      setProfile(result.profile);
-      setSearchRolesDraft(result.profile.roles);
-      setSearchLocationsDraft(result.profile.locations);
-      setSaved(result.saved);
-      setStatus(result.status);
-      setApplicationNotes(result.applicationNotes ?? {});
-      setApplicationFollowUps(result.applicationFollowUps ?? {});
-      setCoverLetterDrafts(result.coverLetterDrafts ?? {});
-      setMatchReviews(result.matchReviews ?? []);
-      setMatchCohortKey(result.matchCohortKey ?? "");
-      setMatchingSettings(result.matchingSettings ?? DEFAULT_MATCHING_SETTINGS);
-      setWebSearchEnabled(result.webSearchEnabled === true);
-      setLiveJobs(result.liveJobs);
-      selectJob(result.liveJobs[0]?.id ?? "");
-      setStorageMessage("Backup restored and saved on this device.");
-    });
-    saveQueue.current = operation.then(() => undefined, () => undefined);
-    try {
-      await operation;
-      setBackupMessage("Backup restored successfully.");
-    } catch (error) {
-      setBackupMessage(error instanceof Error ? error.message : "Could not restore this backup.");
-    } finally {
-      setBackupBusy(false);
-    }
-  }
-
-  async function fetchLiveJobs() {
-    if (loadingJobs || loadingMoreJobs) return;
-    automaticPageBatchesRemaining.current = AUTOMATIC_PAGE_BATCH_LIMIT;
-    const searchGeneration = aiMatchGeneration.current;
-    const requestedPreferenceKey = searchPreferenceKey(profile.locations, profile.roles);
-    setLoadingJobs(true);
-    setCvAnalyzedModel("");
-    setSourceMessage(`Searching enabled feeds${webSearchEnabled ? " and optional Ollama web search" : ""} for ${profile.roles || "all job titles"} in ${profile.locations || "your selected locations"}…`);
-    setSourceErrors([]);
-    let fetchedJobs: Job[] = [];
-    let allDiscoveredJobs: Job[] = [];
-    try {
-      const searchParams = new URLSearchParams({ locations: profile.locations, roles: profile.roles, ...(webSearchEnabled ? { includeWebSearch: "1" } : {}) });
-      const response = await fetch(`/api/jobs/search?${searchParams}`, { cache: "no-store" });
-      const result = await response.json() as { jobs?: Job[]; discoveredJobs?: Job[]; errors?: string[]; error?: string; nextArbeitnowPage?: number | null; nextJobicyCursor?: string | null; sourceStatuses?: typeof sourceStatuses };
-      setSourceStatuses(result.sourceStatuses ?? []);
-      setSourceErrors(result.errors ?? []);
-      setNextArbeitnowPage(result.nextArbeitnowPage ?? null);
-      setNextJobicyCursor(result.nextJobicyCursor ?? null);
-      if (!response.ok && !(result.jobs?.length)) throw new Error(result.error ?? "Could not fetch jobs.");
-      fetchedJobs = result.jobs ?? [];
-      allDiscoveredJobs = result.discoveredJobs ?? fetchedJobs;
-      const locationJobs = fetchedJobs;
-      if (activeSearchPreferenceKey.current === requestedPreferenceKey) {
-        setSearchMatchSnapshot(snapshotSearchMatches(profile.locations, profile.roles, locationJobs));
-      }
-      // Show the normalized pool immediately. Screening updates these cards in
-      // small batches, so users can review early scores while later jobs run.
-      setLiveJobs((current) => mergeJobPool(current, allDiscoveredJobs, MAX_LOCAL_JOB_POOL));
-      selectJob(locationJobs[0]?.id ?? "");
-      const assessWithCurrentContext = localDecisionScreeningReady && searchGeneration === aiMatchGeneration.current;
-      setSourceMessage(assessWithCurrentContext
-        ? `Found ${locationJobs.length} listings for your selected roles and locations. Showing them now while local matching runs…`
-        : `Found ${locationJobs.length} listings for your selected roles and locations. Showing them now; local matching will start when CV and Ollama models are ready.`);
-      let analyzedJobs = allDiscoveredJobs;
-      let completed = 0;
-      let cancelled = false;
-      let matchingWarning = "";
-      if (assessWithCurrentContext) {
-        const candidates = jobsToAssess(locationJobs);
-        const generation = ++aiMatchGeneration.current;
-        const controller = new AbortController();
-        aiMatchAbortController.current = controller;
-        const outcome = await assessJobsLocally(candidates, controller.signal);
-        if (generation !== aiMatchGeneration.current) return;
-        completed = outcome.screenedCount;
-        cancelled = outcome.cancelled;
-        matchingWarning = outcome.error;
-        aiMatchAbortController.current = null;
-        analyzedJobs = allDiscoveredJobs.map((job) => ({
-          ...job,
-          ...(outcome.screeningById.has(job.id) ? { screening: outcome.screeningById.get(job.id) } : { screening: undefined }),
-        }));
-        setCvAnalyzedModel(matchingSettings.decisionModel);
-      }
-      // A search can finish after a later page/batch. Merge by canonical URL so
-      // an older snapshot cannot erase screening data or newer listings.
-      setLiveJobs((current) => mergeJobPool(current, analyzedJobs, MAX_LOCAL_JOB_POOL));
-      const locationCount = locationJobs.length;
-      const sourcesChecked = (result.sourceStatuses ?? []).map((source) => `${source.source}: ${source.count} matching of ${source.fetchedCount} fetched`).join(" · ");
-      setSourceMessage(result.jobs?.length
-        ? assessWithCurrentContext
-          ? `Local decision screening assessed ${completed} of ${locationCount} location-eligible jobs. ${cancelled ? "Assessment cancelled; fetched listings remain available." : matchingWarning ? `Some jobs remain unassessed: ${matchingWarning}` : ""} Scores are estimates, not hiring probabilities. Request detailed analysis from an individual job when you need it.`
-          : cvText.trim() && !isLocalJobpilotPage()
-            ? "CV analysis is blocked here for privacy. Open Jobpilot from localhost on this laptop; no CV text was sent. Showing profile matches."
-            : cvText.trim()
-              ? `Found ${result.jobs.length} listings, but local decision screening is unavailable. Start/update Ollama to 0.35 or newer, choose an installed decision model, and try again. ${localAiStatus}`
-              : `Found ${result.jobs.length} listings matching your selected titles and locations. Import your CV and select local models for fast scores; request detailed analysis on individual jobs. ${sourcesChecked}`
-        : `No listing matched the selected titles and locations. Try broader preferences or load more pages. ${sourcesChecked || "No source returned a listing."}`);
-      selectJob(locationJobs[0]?.id ?? "");
-    } catch (error) {
-      if (fetchedJobs.length) {
-        const fallback = fetchedJobs.filter((job) => matchesPreferredLocation(job.location, profile.locations, job.mode, job.source, job.sourceLocationScope));
-        setLiveJobs((current) => mergeJobPool(current, allDiscoveredJobs, MAX_LOCAL_JOB_POOL));
-        selectJob(fallback[0]?.id ?? "");
-        setSourceMessage(`Local job screening failed: ${error instanceof Error ? error.message : "unknown error"}. Jobs are still available to review; no hosted model fallback was used.`);
-      } else setSourceMessage(error instanceof Error ? error.message : "Could not fetch job listings.");
-    } finally {
-      aiMatchAbortController.current = null;
-      setAiMatchProgress(null);
-      setLoadingJobs(false);
-    }
-  }
-
-  useEffect(() => {
-    fetchLiveJobsRef.current = fetchLiveJobs;
-  });
-
-  useEffect(() => {
-    if (searchRequestId <= handledSearchRequestId.current || !stateLoaded || loadingJobs || loadingMoreJobs) return;
-    handledSearchRequestId.current = searchRequestId;
-    void fetchLiveJobsRef.current();
-  }, [searchRequestId, stateLoaded, loadingJobs, loadingMoreJobs]);
-
-  async function fetchMoreJobs() {
-    if ((nextArbeitnowPage === null && nextJobicyCursor === null) || loadingMoreJobs || loadingJobs || moreJobsInFlight.current) return;
-    moreJobsInFlight.current = true;
-    const searchGeneration = aiMatchGeneration.current;
-    setLoadingMoreJobs(true);
-    setSourceMessage("Checking the next pages from enabled job feeds. Current results stay visible while new listings are added and assessed…");
-    let fetchedMore: Job[] = [];
-    try {
-      const params = new URLSearchParams({ locations: profile.locations, roles: profile.roles });
-      if (nextArbeitnowPage !== null) params.set("arbeitnowStartPage", String(nextArbeitnowPage));
-      if (nextJobicyCursor !== null) params.set("jobicyCursor", nextJobicyCursor);
-      const response = await fetch(`/api/jobs/search?${params}`, { cache: "no-store" });
-      const result = await response.json() as { jobs?: Job[]; discoveredJobs?: Job[]; errors?: string[]; error?: string; nextArbeitnowPage?: number | null; nextJobicyCursor?: string | null; sourceStatuses?: SearchSourceStatus[] };
-      setSourceStatuses((current) => {
-        const merged = new Map(current.map((source) => [source.source, source]));
-        for (const source of result.sourceStatuses ?? []) {
-          const previous = merged.get(source.source);
-          merged.set(source.source, previous ? {
-            ...source,
-            count: previous.count + source.count,
-            fetchedCount: previous.fetchedCount + source.fetchedCount,
-            state: source.state === "failed" && previous.count > 0 ? "partial" : source.state,
-          } : source);
-        }
-        return [...merged.values()];
-      });
-      setSourceErrors((current) => [...current.filter((error) => !result.errors?.includes(error)), ...(result.errors ?? [])]);
-      // Keep the server's advanced cursor even for an all-failed batch (503).
-      // This preserves current listings and prevents repeatedly hitting the
-      // same unavailable page range.
-      setNextArbeitnowPage(result.nextArbeitnowPage ?? null);
-      setNextJobicyCursor(result.nextJobicyCursor ?? null);
-      if (!response.ok) throw new Error(result.error ?? "Could not load more jobs.");
-      fetchedMore = result.jobs ?? [];
-      const discoveredMore = result.discoveredJobs ?? fetchedMore;
-      const requestedPreferenceKey = searchPreferenceKey(profile.locations, profile.roles);
-      if (activeSearchPreferenceKey.current === requestedPreferenceKey) {
-        setSearchMatchSnapshot((current) => addSearchMatches(current, profile.locations, profile.roles, fetchedMore));
-      }
-      setLiveJobs((current) => mergeJobPool(current, discoveredMore, MAX_LOCAL_JOB_POOL));
-      const assessWithCurrentContext = localDecisionScreeningReady && searchGeneration === aiMatchGeneration.current;
-      if (!assessWithCurrentContext || !fetchedMore.length) {
-        const moreSources = [result.nextArbeitnowPage !== null && result.nextArbeitnowPage !== undefined ? "Arbeitnow" : "", result.nextJobicyCursor ? "Jobicy" : ""].filter(Boolean);
-        setSourceMessage(`Loaded ${fetchedMore.length} more listings. ${moreSources.length ? `More pages are available from ${moreSources.join(" and ")}.` : "No further pages are available."} ${assessWithCurrentContext ? "" : "Local decision screening is unavailable; listings remain visible."}`);
-        return;
-      }
-      const previouslyScreened = liveJobs.filter((job) => job.screening?.model === matchingSettings.decisionModel).map((job) => job.sourceUrl ?? job.id);
-      const candidates = jobsToAssess(fetchedMore, previouslyScreened);
-      const generation = ++aiMatchGeneration.current;
-      const controller = new AbortController();
-      aiMatchAbortController.current = controller;
-      const outcome = await assessJobsLocally(candidates, controller.signal);
-      if (generation !== aiMatchGeneration.current) return;
-      const analyzed = fetchedMore.map((job) => ({ ...job,
-        ...(outcome.screeningById.has(job.id) ? { screening: outcome.screeningById.get(job.id) } : {}),
-      }));
-      setLiveJobs((current) => mergeJobPool(current, analyzed, MAX_LOCAL_JOB_POOL));
-      setCvAnalyzedModel(matchingSettings.decisionModel);
-      const moreSources = [result.nextArbeitnowPage !== null && result.nextArbeitnowPage !== undefined ? "Arbeitnow" : "", result.nextJobicyCursor ? "Jobicy" : ""].filter(Boolean);
-      setSourceMessage(`Loaded ${fetchedMore.length} more listings. Screened ${outcome.screenedCount} of ${candidates.length}. ${outcome.error || (outcome.cancelled ? "Assessment cancelled." : "Scores are estimates, not hiring probabilities.")} Detailed reviews run only when requested from a job. ${moreSources.length ? `More pages are available from ${moreSources.join(" and ")}.` : "No further pages are available."}`);
-    } catch (error) {
-      if (fetchedMore.length) setSourceMessage(`Loaded ${fetchedMore.length} more listings, but local screening failed: ${error instanceof Error ? error.message : "unknown error"}.`);
-      else setSourceMessage(error instanceof Error ? error.message : "Could not load more jobs.");
-    } finally {
-      aiMatchAbortController.current = null;
-      setAiMatchProgress(null);
-      setLoadingMoreJobs(false);
-      moreJobsInFlight.current = false;
-    }
-  }
-
-  useEffect(() => {
-    fetchMoreJobsRef.current = fetchMoreJobs;
-  });
-
-  useEffect(() => {
-    if (!stateLoaded || loadingJobs || loadingMoreJobs || aiMatchProgress || automaticPageBatchesRemaining.current <= 0
-      || (nextArbeitnowPage === null && nextJobicyCursor === null)) return;
-    automaticPageBatchesRemaining.current -= 1;
-    void fetchMoreJobsRef.current();
-  }, [stateLoaded, loadingJobs, loadingMoreJobs, aiMatchProgress, nextArbeitnowPage, nextJobicyCursor]);
-
-  function cancelAiAssessment() {
-    aiMatchAbortController.current?.abort();
-  }
-
-  return (
-    <main className="app-shell">
-      <aside className="sidebar">
-        <div className="brand"><span className="brand-mark">J</span><span>jobpilot<span className="brand-dot">.</span></span></div>
-        <div className="sidebar-label">WORKSPACE</div>
-        <nav className="workspace-nav" aria-label="Workspace navigation">
-          <button className={`nav-item ${activeView === "overview" ? "active" : ""}`} aria-current={activeView === "overview" ? "page" : undefined} onClick={() => setActiveView("overview")}><span aria-hidden="true">▦</span> Overview</button>
-          <button className="nav-item" onClick={() => setActiveView("overview")}><span aria-hidden="true">⌕</span> Job matches <b className="nav-count">{ranked.length}</b></button>
-          <button className={`nav-item ${activeView === "all-found" ? "active" : ""}`} aria-current={activeView === "all-found" ? "page" : undefined} onClick={() => setActiveView("all-found")}><span aria-hidden="true">◎</span> All found jobs <b className="nav-count">{allFoundJobs.length}</b></button>
-          <button className={`nav-item ${activeView === "applications" ? "active" : ""}`} aria-current={activeView === "applications" ? "page" : undefined} onClick={() => setActiveView("applications")}><span aria-hidden="true">▤</span> Applications <b className="nav-count">{applicationJobs.length}</b></button>
-          <button className="nav-item" onClick={openProfile} aria-haspopup="dialog"><span aria-hidden="true">♧</span> Candidate profile</button>
-        </nav>
-        <div className="sidebar-bottom">
-          <div className="local-status"><i /> Local workspace <span>●</span></div>
-          <button className="profile-chip profile-chip-button" onClick={openProfile}><div className="avatar">{profile.name.split(/\s+/).map((part) => part[0]).slice(0, 2).join("").toUpperCase()}</div><div><strong>{profile.name}</strong><small>Private to this device</small></div><span className="more">···</span></button>
-        </div>
-      </aside>
-
-      <section className="main-panel">
-        <header className="topbar"><div className="breadcrumb">Workspace <span>/</span> {activeView === "applications" ? "Applications" : activeView === "all-found" ? "All found jobs" : "Overview"}</div><div className="topbar-right"><span className="privacy-pill"><i /> LOCAL APP</span><button className="icon-button" aria-label="Edit candidate profile" onClick={openProfile}>⚙</button><div className="avatar small">{profile.name.split(/\s+/).map((part) => part[0]).slice(0, 2).join("").toUpperCase()}</div></div></header>
-        <div className="content">
-          {activeView === "applications" ? (
-            <>
-              <div className="greeting-row"><div><div className="eyebrow">YOUR JOB SEARCH</div><h1>Applications <span>tracker.</span></h1><p className="subheading">Track saved roles and move each one through your review process.</p></div><button className="primary-button" onClick={() => setActiveView("overview")}>＋ Find jobs</button></div>
-              <div className="application-summary"><strong>{applicationJobs.length}</strong><span>roles in your tracker</span><span className="summary-divider"/><span>{applicationGroups.find((group) => group.title === "Applied")?.items.length ?? 0} applied</span><span>{saved.length} saved</span><span>{followUpJobs.length} follow-ups</span>{overdueFollowUps > 0 && <span className="follow-up-overdue-count">{overdueFollowUps} overdue</span>}</div>
-              <div className="application-board">{applicationGroups.map((group) => <section className="application-column" key={group.title}><div className="application-column-heading"><h2>{group.title}</h2><span>{group.items.length}</span></div>{group.items.length ? group.items.map((job) => <article className="application-card" key={job.id}><div className="application-company"><div className={`company-logo logo-${job.source.toLowerCase()}`}>{job.company.slice(0, 1)}</div><div><strong>{job.company}</strong><span>{job.location}</span></div></div><h3>{job.role}</h3><div className="follow-up-row"><label>Follow-up date<input type="date" aria-label={`Set follow-up date for ${job.company} — ${job.role}`} value={applicationFollowUps[job.id] ?? ""} onChange={(event) => updateFollowUp(job.id, event.target.value)}/></label>{applicationFollowUps[job.id] && <span className={`follow-up-badge ${applicationFollowUps[job.id] < todayKey ? "overdue" : applicationFollowUps[job.id] === todayKey ? "today" : "upcoming"}`}>{followUpLabel(applicationFollowUps[job.id])}</span>}</div><details className="application-notes"><summary>{applicationNotes[job.id]?.trim() ? "Edit notes" : "Add a note"}</summary><label><span className="visually-hidden">Notes for {job.role} at {job.company}</span><textarea maxLength={2000} rows={3} value={applicationNotes[job.id] ?? ""} onChange={(event) => setApplicationNotes((current) => ({ ...current, [job.id]: event.target.value }))} placeholder="Interview details, next steps, or why you saved this role…"/></label></details><div className="application-card-footer"><span>{job.source}</span><select aria-label={`Update ${job.company} application status`} value={status[job.id] ?? "Needs review"} onChange={(event) => setStatus((current) => ({ ...current, [job.id]: event.target.value as ApplicationStatus }))}><option>Needs review</option><option>Approved to prepare</option><option>Applied</option><option>Rejected</option></select></div></article>) : <p className="application-empty">No roles here yet.</p>}</section>)}</div>
-              <p className="application-footnote">Status changes, notes, and follow-up dates are saved on this device. Follow-up dates appear here as reminders; no notification is sent. “Applied” is a manual record; Jobpilot never submits applications.</p>
-            </>
-          ) : activeView === "all-found" ? <>
-            <div className="greeting-row"><div><div className="eyebrow">PUBLIC FEED DISCOVERIES</div><h1>All found <span>jobs.</span></h1><p className="subheading">{allFoundJobs.length} normalized listings returned before Jobpilot’s title and location filters.</p></div><button className="primary-button" onClick={searchWithPreferences} disabled={!stateLoaded || loadingJobs || loadingMoreJobs}><span>＋</span> {loadingJobs ? "Searching feeds…" : loadingMoreJobs ? "Loading more…" : "Search jobs"}</button></div>
-            <div className="found-jobs-notice"><strong>This view shows every listing returned by enabled feeds.</strong><span>Some providers apply their own search scope (for example, Jobicy is queried by selected region). Jobpilot scores only listings that fit your selected titles and locations; each listing shows which preference excluded it.</span></div>
-            {(loadingJobs || loadingMoreJobs) && <p className="source-message" role="status">{loadingMoreJobs ? "Loading another provider batch; current discoveries stay visible…" : "Searching enabled public feeds…"}</p>}
-            {sourceErrors.length > 0 && <ul className="source-errors" role="status">{sourceErrors.map((error) => <li key={error}>{error}</li>)}</ul>}
-            <div className="found-jobs-controls"><label className="search-box"><span>⌕</span><input aria-label="Search all found jobs" placeholder="Search all found titles, companies, or locations…" value={foundQuery} onChange={(event) => { setFoundQuery(event.target.value); setFoundVisibleCount(50); }} /></label><span>Showing {visibleFoundJobs.length} of {filteredFoundJobs.length}</span></div>
-            {visibleFoundJobs.length > 0 ? <div className="found-jobs-list">{visibleFoundJobs.map((job) => {
-              const locationMatches = matchesPreferredLocation(job.location, profile.locations, job.mode, job.source, job.sourceLocationScope)
-                || matchesEligibleRemoteLocation(job.location, profile.locations, job.mode);
-              const roleMatches = !profile.roles.trim() || matchesTargetRole(job, profile.roles);
-              const matchesPreferences = hasSearchMatch(job, profile.locations, profile.roles, searchMatchSnapshot) || locationMatches && roleMatches;
-              const excludedBy = [!roleMatches ? "title" : "", !locationMatches ? "location" : ""].filter(Boolean).join(" and ");
-              return <article className="found-job-row" key={job.id}>
-                <div className="found-job-heading"><div><h2>{job.role}</h2><p>{job.company} <span>·</span> {job.location}{job.locationEvidence ? " (snippet mention; unverified)" : ""}</p></div><span className={`found-job-status ${matchesPreferences ? "included" : "excluded"}`}>{matchesPreferences ? "Included in Job matches" : `Filtered by ${excludedBy}`}</span></div>
-                <div className="found-job-meta"><span>{job.listingVerification === "search-result" ? "Unverified web result · snippet only" : job.source}</span><span>{job.posted}</span><span>{job.mode}</span>{job.sourceUrl && <a href={job.sourceUrl} target="_blank" rel="noreferrer">{job.listingVerification === "search-result" ? "Open source result ↗" : "Open original posting ↗"}</a>}</div>
-                <details className="found-job-description"><summary>View available description</summary><p className="job-description-text">{job.description ?? job.summary}</p></details>
-              </article>;
-            })}</div> : <div className="empty-state">{allFoundJobs.length ? "No found jobs match this text search." : "No provider listings have been fetched yet. Search jobs to fill this view."}</div>}
-            {visibleFoundJobs.length < filteredFoundJobs.length && <button className="load-more" onClick={() => setFoundVisibleCount((count) => count + 50)}>Show more found jobs ({filteredFoundJobs.length - visibleFoundJobs.length} remaining)</button>}
-            {(nextArbeitnowPage !== null || nextJobicyCursor !== null) && <button className="load-more" onClick={() => void fetchMoreJobs()} disabled={loadingMoreJobs || loadingJobs}>{loadingMoreJobs ? "Loading more jobs…" : "Load more from public feeds"}</button>}
-            <footer className="page-footer"><span>JOBPILOT <b>·</b> PUBLIC FEED DISCOVERIES</span><span>Source descriptions are shown as provided; verify on the original posting.</span></footer>
-          </> : <>
-          <div className="greeting-row"><div><div className="eyebrow">{stateLoaded ? new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric" }).format(new Date()).toUpperCase() : "YOUR JOB SEARCH"}</div><h1>Your next opportunity <span>starts here.</span></h1><p className="subheading">A focused view of live roles that match your preferences.</p></div><button className="primary-button" onClick={searchWithPreferences} disabled={!stateLoaded || loadingJobs || loadingMoreJobs}><span>＋</span> {loadingJobs ? "Searching feeds…" : "Search jobs"}</button></div>
-
-          <section className="source-panel search-panel">
-            <div>
-              <span className="eyebrow">JOB SEARCH PREFERENCES</span>
-              <strong>Choose the roles and locations you want</strong>
-              <p>CV-suggested titles are ready to edit. Austria is the starting location; change it to any location. These preferences are saved on this device and used to filter and screen listings. All location-eligible jobs remain visible.</p>
-            </div>
-            <div className="job-search-preferences">
-              <label>Job titles<textarea rows={3} value={searchRolesDraft} onChange={(event) => setSearchRolesDraft(event.target.value)} placeholder="Suggested titles from your CV appear here. Add or remove titles; separate alternatives with commas or new lines." /></label>
-              <label>Preferred locations<textarea rows={2} value={searchLocationsDraft} onChange={(event) => setSearchLocationsDraft(event.target.value)} placeholder="For example: Vienna, Austria; Remote Europe. Leave blank for broad feed results." /></label>
-            </div>
-            <label className="optional-web-search"><input type="checkbox" checked={webSearchEnabled} onChange={(event) => setWebSearchEnabled(event.target.checked)} /><span><strong>Also search the web (optional)</strong><small>Uses Ollama Web Search with a free account and API key. Only job-title and location queries leave this computer; your CV and job descriptions stay local. Free starter usage is limited. Results are snippets and must be verified at the source.</small></span></label>
-            <div className="source-controls"><button className="primary-button" disabled={!stateLoaded || loadingJobs || loadingMoreJobs} onClick={searchWithPreferences}>{loadingJobs ? "Searching job feeds…" : loadingMoreJobs ? "Loading more jobs…" : liveJobs.length ? "↻ Search jobs" : "Search jobs"}</button><span className="feed-summary">Search checks enabled public feeds{webSearchEnabled ? " and the optional web search" : ""}, then scores eligible listings with the local decision model in small batches. It automatically checks up to three additional provider batches; use “Load more” to continue. Detailed analysis only runs when you request it for a job.</span></div>
-            {jobWorkflowBusy && <div className="job-workflow-status" role="status" aria-live="polite"><span className="job-workflow-spinner" aria-hidden="true"/><div><strong>{jobWorkflowHeading}</strong><p>{locationMatchedJobs.length} matching listings available · {decisionScoredCount} decision scores · {detailedAnalyzedCount} detailed reviews available. {loadingMoreJobs ? "The next listings are being fetched and decision-scored; detailed analysis stays off until requested." : nextArbeitnowPage !== null || nextJobicyCursor !== null ? "More feed pages are queued for automatic search and decision-scoring." : "The local decision model is checking the available listings."}</p></div></div>}
-            {liveJobs.length > 0 && <div className="match-jobs-action"><button type="button" className="secondary-button" onClick={() => cvText.trim() ? void screenCurrentJobs() : openProfile()} disabled={cvText.trim() ? !localDecisionScreeningReady || pendingMatchCount === 0 || Boolean(aiMatchProgress) || loadingJobs || loadingMoreJobs : false}>{!cvText.trim() ? "Upload CV to score jobs" : aiMatchProgress ? "Scoring locally…" : pendingMatchCount ? `${Object.keys(screeningErrors).length ? "Retry" : "Score"} ${pendingMatchCount} jobs` : "All jobs scored"}</button><span>{screeningReadinessMessage ?? (Object.keys(screeningErrors).length ? `${Object.keys(screeningErrors).length} scores failed. Retry after checking the selected decision model and Local AI status.` : pendingMatchCount ? "New listings are decision-scored automatically on this laptop." : "Every location-eligible listing has a score from the selected decision model. Choose a job and request a detailed review when you need one.")}</span></div>}
-            <p className="directory-credit">Public sources are free and need no account. Coverage is limited; no no-key provider gives complete Austria-wide vacancy coverage. <a href="https://www.arbeitnow.com/blog/job-board-api" target="_blank" rel="noreferrer">Arbeitnow</a> focuses on Germany and Europe, <a href="https://remotive.com/remote-jobs/api" target="_blank" rel="noreferrer">Remotive</a> is remote-only with a 24-hour publication delay, and <a href="https://jobicy.com/jobs-rss-feed" target="_blank" rel="noreferrer">Jobicy</a> is remote-only and covers a rolling seven-day window.</p>
+      const cohortKey = await createMatchCohortKey(sug…11126 tokens truncated…icy</a> is remote-only and covers a rolling seven-day window.</p>
             {sourceStatuses.length > 0 && <ul className="feed-source-status" aria-label="Job source results">{sourceStatuses.map((source) => <li key={source.source} className={`feed-${source.state}`}><strong>{source.source}</strong><span>{source.state === "failed" ? "Unavailable" : `${source.count} matching`}</span><small>{source.message ?? `${source.fetchedCount} listings received · checked ${new Date(source.checkedAt).toLocaleTimeString()}`}</small></li>)}</ul>}
             <details className="manual-job-panel"><summary>Can’t find a posting? Add it manually</summary><p>Paste the description below. Jobpilot does not fetch job URLs because external sites may block automated imports. A URL can be saved as the original posting link.</p><form onSubmit={(event) => void addManualJob(event)}>
               <div className="manual-job-fields"><label>Job title<input required value={manualJob.role} onChange={(event) => setManualJob((current) => ({ ...current, role: event.target.value }))} /></label><label>Company<input required value={manualJob.company} onChange={(event) => setManualJob((current) => ({ ...current, company: event.target.value }))} /></label><label>Location or remote eligibility<input required value={manualJob.location} onChange={(event) => setManualJob((current) => ({ ...current, location: event.target.value }))} /></label><label>Original posting URL (optional)<input type="url" placeholder="https://…" value={manualJob.url} onChange={(event) => setManualJob((current) => ({ ...current, url: event.target.value }))} /></label></div>
@@ -1445,7 +922,7 @@ export default function Home() {
                   {detailedAnalysisError?.jobId === selected.job.id && <p className="source-error-message" role="alert">{detailedAnalysisError.message}</p>}
                   {detailedAnalysisJobId && detailedAnalysisJobId !== selected.job.id && <p role="status">A different job is being analyzed. Starting a review here will stop that request.</p>}
                 </section>
-
+                {selected.job.detailedAnalysis && <section className="ai-match-explanation detailed-analysis" aria-label="Detailed local CV and job evidence"><div className="ai-match-title"><h4>Detailed local analysis</h4><strong>{selected.job.aiMatch?.score !== undefined ? `${selected.job.aiMatch.score}% detailed estimate · ` : ""}{selected.job.aiMatch?.model ?? selected.job.detailedAnalysis.model}</strong></div><p role="status">Analysis complete. Review the comparison below.</p><p>{selected.job.aiMatch?.reason ?? selected.job.detailedAnalysis.summary}</p>{selected.job.detailedAnalysis.matchedRequirements.length > 0 && <><h5>Matched requirements</h5><ul>{selected.job.detailedAnalysis.matchedRequirements.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</ul></>}{selected.job.detailedAnalysis.gaps.length > 0 && <><h5>Gaps or unclear requirements</h5><ul>{selected.job.detailedAnalysis.gaps.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</ul></>}{selected.job.detailedAnalysis.evidence.map((item, index) => <blockquote key={`${index}-${item.requirement}`}><strong>{item.requirement}</strong><br/><b>CV:</b> “{item.cvQuote}”<br/><b>Job:</b> “{item.jobQuote}”</blockquote>)}</section>}
                 <section className="cv-tailoring-panel" aria-label="Tailored CV export">
                   <div className="cv-tailoring-heading"><div><h4>Tailor CV for this job</h4><p>Selects relevant excerpts from the saved CV text. It does not invent or rewrite experience.</p></div><button type="button" className="secondary-button" onClick={() => void tailorCvForJob(selected.job)} disabled={cvTailoringJobId === selected.job.id}>{cvTailoringJobId === selected.job.id ? "Selecting verified CV evidence…" : tailoredCvDraft?.jobId === selected.job.id ? "Tailor again" : "Tailor CV"}</button></div>
                   <p className="cv-tailoring-help">Uses the selected local Ollama chat model and this posting’s full description. Every model-selected excerpt is checked against your saved CV text. Your original CV file is unchanged; no file is saved on the Jobpilot server.</p>
@@ -1460,7 +937,6 @@ export default function Home() {
                     <div className="cv-tailoring-export"><button type="button" className="primary-button" onClick={downloadTailoredCv}>Download print-ready CV</button><span>Open the downloaded HTML file, then choose Print / Save as PDF. Your original CV is not replaced.</span></div>
                   </>}
                 </section>
-                {selected.job.detailedAnalysis && <section className="ai-match-explanation detailed-analysis" aria-label="Detailed local CV and job evidence"><div className="ai-match-title"><h4>Detailed local analysis</h4><strong>{selected.job.aiMatch?.score !== undefined ? `${selected.job.aiMatch.score}% detailed estimate · ` : ""}{selected.job.aiMatch?.model ?? selected.job.detailedAnalysis.model}</strong></div><p>{selected.job.aiMatch?.reason ?? selected.job.detailedAnalysis.summary}</p>{selected.job.detailedAnalysis.matchedRequirements.length > 0 && <><h5>Matched requirements</h5><ul>{selected.job.detailedAnalysis.matchedRequirements.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</ul></>}{selected.job.detailedAnalysis.gaps.length > 0 && <><h5>Gaps or unclear requirements</h5><ul>{selected.job.detailedAnalysis.gaps.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</ul></>}{selected.job.detailedAnalysis.evidence.map((item, index) => <blockquote key={`${index}-${item.requirement}`}><strong>{item.requirement}</strong><br/><b>CV:</b> “{item.cvQuote}”<br/><b>Job:</b> “{item.jobQuote}”</blockquote>)}</section>}
                 <div className="evidence-label">PROFILE SKILLS MENTIONED IN POSTING <span>{selected.matched.length} found</span></div>
                 <div className="evidence-pills">{selected.matched.map((skill) => <span key={skill}>✓ {skill}{selected.titleMatched.includes(skill) && <small> · title</small>}</span>)}</div>
                 {selected.missing.length > 0 && <><div className="evidence-label gap-label">PROFILE SKILLS NOT MENTIONED <span>{selected.missing.length}</span></div><div className="evidence-pills missing-pills">{selected.missing.map((skill) => <span key={skill}>! {skill}</span>)}</div><p className="match-caveat">A skill missing from the posting text is not proof that the job requires it.</p></>}

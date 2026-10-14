@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addSearchMatches, applyScreeningsToSearchMatches, hasSearchMatch, mergeSearchMatchesIntoPool, snapshotSearchMatches } from "./search-match-snapshot";
+import { addSearchMatches, applyDetailedAnalysisToSearchMatches, applyScreeningsToSearchMatches, hasSearchMatch, mergeSearchMatchesIntoPool, snapshotSearchMatches } from "./search-match-snapshot";
 import type { Job } from "./types";
 
 const job: Job = {
@@ -37,5 +37,15 @@ describe("search match snapshots", () => {
     expect(updated?.jobs[0]?.screening).toEqual(screening);
     expect(mergeSearchMatchesIntoPool([], updated)[0]?.screening?.score).toBe(84);
     expect(mergeSearchMatchesIntoPool([job], updated)[0]?.screening?.score).toBe(84);
+  });
+
+  it("attaches detailed analysis to API matches outside the saved job pool", () => {
+    const result = {
+      aiMatch: { model: "chat-model", relevant: true, score: 88, reason: "Relevant delivery evidence.", cvEvidence: "Built software platforms." },
+      detailedAnalysis: { model: "chat-model", summary: "Strong relevant experience.", matchedRequirements: ["Architecture"], gaps: ["No stated German level"], evidence: [] },
+    };
+    const snapshot = snapshotSearchMatches("Vienna, Austria", "solution architect", [job]);
+    const updated = applyDetailedAnalysisToSearchMatches(snapshot, job.id, result);
+    expect(mergeSearchMatchesIntoPool([], updated)[0]).toMatchObject(result);
   });
 });

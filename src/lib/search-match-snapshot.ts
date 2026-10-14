@@ -64,3 +64,15 @@ export function applyScreeningsToSearchMatches(
     }),
   };
 }
+
+export function applyDetailedAnalysisToSearchMatches(
+  snapshot: SearchMatchSnapshot | null,
+  jobId: string,
+  result: { aiMatch: NonNullable<Job["aiMatch"]>; detailedAnalysis: NonNullable<Job["detailedAnalysis"]> },
+) {
+  if (!snapshot) return snapshot;
+  return {
+    ...snapshot,
+    jobs: snapshot.jobs.map((job) => job.id === jobId ? { ...job, ...result } : job),
+  };
+}
