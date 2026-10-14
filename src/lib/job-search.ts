@@ -290,7 +290,6 @@ async function himalayasJobs(retrievedAt: string, roles: string, locations: stri
   return { jobs, errors, state: outcomes.length > 0 && outcomes.every((outcome) => outcome.status === "rejected") ? "failed" as const : errors.length ? "partial" as const : "success" as const };
 }
 
-
 type JobicyCursorState = Record<string, string>;
 function decodeJobicyCursor(cursor?: string): JobicyCursorState {
   if (!cursor) return {};
@@ -361,7 +360,7 @@ function mergeDuplicate(previous: Job, current: Job): Job {
   };
 }
 
-export async function searchPublicJobs(options: { arbeitnowStartPage?: number; jobicyCursor?: string; locations?: string; roles?: string; includeWebSearch?: boolean } = {}) {
+export async function searchPublicJobs(options: { arbeitnowStartPage?: number; jobicyCursor?: string; locations?: string; roles?: string; includeWebSearch?: boolean; webSearchTerms?: string; webSearchRound?: number } = {}) {
   const retrievedAt = new Date().toISOString();
   const startPage = options.arbeitnowStartPage ?? 1;
   const loadingMore = options.arbeitnowStartPage !== undefined || options.jobicyCursor !== undefined;
@@ -377,7 +376,7 @@ export async function searchPublicJobs(options: { arbeitnowStartPage?: number; j
     requestArbeitnow ? arbeitnowJobs(retrievedAt, startPage).then((result) => ({ status: "fulfilled" as const, value: result }), (reason) => ({ status: "rejected" as const, reason })) : Promise.resolve(null),
     requestRemotive ? remotiveJobs(retrievedAt).then((value) => ({ status: "fulfilled" as const, value }), (reason) => ({ status: "rejected" as const, reason })) : Promise.resolve(null),
     requestHimalayas ? himalayasJobs(retrievedAt, options.roles ?? "", options.locations ?? "").then((value) => ({ status: "fulfilled" as const, value }), (reason) => ({ status: "rejected" as const, reason })) : Promise.resolve(null),
-    requestWebSearch ? searchWithOllamaWeb({ roles: options.roles ?? "", locations: options.locations ?? "" })
+    requestWebSearch ? searchWithOllamaWeb({ roles: options.roles ?? "", locations: options.locations ?? "", searchTerms: options.webSearchTerms, round: options.webSearchRound })
       .then((value) => ({ status: "fulfilled" as const, value }), (reason) => ({ status: "rejected" as const, reason })) : Promise.resolve(null),
   ]);
   const geoResult = geoOutcome?.state === "success" ? geoOutcome.value : null;
