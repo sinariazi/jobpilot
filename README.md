@@ -131,6 +131,8 @@ Ollama Web Search is off by default and requires an Ollama account and API key. 
 
 Public feeds may return the same listings until their data or cache refreshes. Use **Load more jobs** where a source provides pagination. If Ollama or a source fails, Jobpilot reports it and preserves available listings.
 
+**If a detailed job review stops at the output limit:** Jobpilot now requests a constrained JSON response and retries once with a shorter CV/job excerpt. If the retry also fails, select a smaller installed chat model with a larger context window in **Local AI status**. Search-result snippets are incomplete; open the original posting or add its full description before relying on the evidence review.
+
 ### Optional setup
 
 **Wider web search:** Create an Ollama Web Search API key, copy `.env.example` to `.env.local`, set `OLLAMA_API_KEY=your-key`, restart Jobpilot, and enable **Also search the web**. Do not commit `.env.local`. The API key is only used for this optional discovery source.

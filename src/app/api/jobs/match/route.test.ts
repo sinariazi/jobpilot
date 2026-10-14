@@ -31,9 +31,10 @@ describe("local CV-to-job matching API", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ matches: [{ id: "job-1", relevant: true, score: 86, reason: "The role uses frontend engineering skills demonstrated in your CV.", cvEvidence: "TypeScript and React experience", detailedAnalysis: { model: requestBody.model, summary: "The role uses frontend engineering skills demonstrated in your CV.", matchedRequirements: [], gaps: [], evidence: [] } }] });
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["http://127.0.0.1:11434/api/tags", "http://127.0.0.1:11434/api/chat"]);
-    const payload = JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body)) as { think: boolean; options: { num_predict: number }; messages: Array<{ content: string }> };
+    const payload = JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body)) as { think: boolean; format: { type: string; required: string[] }; options: { num_predict: number }; messages: Array<{ content: string }> };
     expect(payload.think).toBe(false);
-    expect(payload.options.num_predict).toBe(1_600);
+    expect(payload.options.num_predict).toBe(1_200);
+    expect(payload.format).toMatchObject({ type: "object", required: ["matches"] });
     expect(payload.messages[1]?.content).toContain(requestBody.cvText);
     expect(payload.messages[1]?.content).toContain(requestBody.candidatePreferences.targetRoles);
   });
@@ -59,17 +60,31 @@ describe("local CV-to-job matching API", () => {
     expect((await response.json()).matches[0].score).toBe(81);
   });
 
-
-  it("reports when generation stopped at the output limit before completing JSON", async () => {
+  it("retries truncated output with a shorter CV excerpt and completes the analysis", async () => {
+    const output = { matches: [{ id: "job-1", relevant: true, score: 81, reason: "Relevant experience evidence.", cvEvidence: "TypeScript experience", matchedRequirements: ["TypeScript"], gaps: [], evidence: [] }] };
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ models: [{ name: requestBody.model }] }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ done_reason: "length", message: { content: "{\\\"matches\\\":[" } }), { status: 200 }));
+      .mockResolvedValueOnce(new Response(JSON.stringify({ done_reason: "length", message: { content: "{\\\"matches\\\":[" } }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: { content: JSON.stringify(output) } }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await POST(new Request("http://localhost/api/jobs/match", { method: "POST", body: JSON.stringify(requestBody) }));
+    expect(response.status).toBe(200);
+    expect((await response.json()).matches[0].score).toBe(81);
+    const retryPayload = JSON.parse(String((fetchMock.mock.calls[2]?.[1] as RequestInit).body)) as { messages: Array<{ content: string }> };
+    expect(retryPayload.messages[1]?.content.length).toBeLessThan(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body).length);
+  });
+
+  it("reports when generation remains truncated after the compact retry", async () => {
+    const truncated = JSON.stringify({ done_reason: "length", message: { content: "{\\\"matches\\\":[" } });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ models: [{ name: requestBody.model }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(truncated, { status: 200 }))
+      .mockResolvedValueOnce(new Response(truncated, { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     const response = await POST(new Request("http://localhost/api/jobs/match", { method: "POST", body: JSON.stringify(requestBody) }));
     expect(response.status).toBe(502);
-    expect((await response.json()).error).toContain("reached its output limit");
+    expect((await response.json()).error).toContain("still reached its output limit");
   });
-
 
   it("keeps detailed scores distinct and drops evidence that is not an exact source excerpt", async () => {
     const fetchMock = vi.fn()
