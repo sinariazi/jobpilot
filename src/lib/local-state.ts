@@ -86,7 +86,7 @@ export function parseJob(value: unknown): Job | null {
   const department = typeof value.department === "string" && value.department.trim() ? value.department.trim().slice(0, 500) : undefined;
   const sourceLocationScope = boundedString(value.sourceLocationScope, 500) ? value.sourceLocationScope.slice(0, 100) : undefined;
   const locationEvidence = boundedString(value.locationEvidence, 500) ? value.locationEvidence.slice(0, 100) : undefined;
-  const sourceAliases = value.sourceAliases === undefined ? undefined : parseStringArray(value.sourceAliases, 10, 500)?.map((alias) => alias.slice(0, 100));
+  const sourceAliases = value.sourceAliases === undefined ? undefined : parseStringArray(value.sourceAliases, 10, 100);
   if (value.description !== undefined && typeof value.description !== "string") return null;
   let aiMatch: Job["aiMatch"];
   if (isRecord(value.aiMatch)

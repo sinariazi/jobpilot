@@ -22,14 +22,14 @@ describe("search match snapshots", () => {
     expect(extended.listingKeys).toEqual([job.sourceUrl]);
     expect(extended.jobs).toHaveLength(1);
   });
-});
 
   it("keeps server-filtered matches visible when the bounded discovery pool omits them", () => {
     const score = { ...job, screening: { model: "decision-model", score: 84, confidence: 80, breakdown: { skills: 90, experience: 80, domain: 70 }, disqualifierRisk: 0, informationStatus: "sufficient" as const } };
     const snapshot = snapshotSearchMatches("Vienna, Austria", "solution architect", [job]);
     expect(mergeSearchMatchesIntoPool([], snapshot)).toEqual([job]);
     expect(mergeSearchMatchesIntoPool([score], snapshot)).toEqual([score]);
-  
+  });
+
   it("attaches successful local scores to API matches outside the saved job pool", () => {
     const screening = { model: "decision-model", score: 84, confidence: 80, breakdown: { skills: 90, experience: 80, domain: 70 }, disqualifierRisk: 0, informationStatus: "sufficient" as const };
     const snapshot = snapshotSearchMatches("Vienna, Austria", "solution architect", [job]);
