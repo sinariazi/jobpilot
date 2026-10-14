@@ -17,7 +17,7 @@ import { createApplicationPacket, detectAtsPlatform } from "@/lib/application-pr
 import { compareDecisionScores, passesMinimumDecisionScore } from "@/lib/job-ranking";
 import { composeTailoredCvText, renderTailoredCvHtml, tailoredCvFilename, type VerifiedCvTailoring } from "@/lib/cv-tailoring";
 import { mergeJobPool } from "@/lib/job-pool";
-import { addSearchMatches, hasSearchMatch, searchPreferenceKey, snapshotSearchMatches, type SearchMatchSnapshot } from "@/lib/search-match-snapshot";
+import { addSearchMatches, hasSearchMatch, mergeSearchMatchesIntoPool, searchPreferenceKey, snapshotSearchMatches, type SearchMatchSnapshot } from "@/lib/search-match-snapshot";
 
 const LEGACY_STORAGE_KEY = "jobpilot-local-v1";
 const MAX_BACKUP_BYTES = 23_000_000;
@@ -138,11 +138,10 @@ export default function Home() {
   const [localAiStatus, setLocalAiStatus] = useState("Checking for Ollama on this laptop…");
   const [aiDrafting, setAiDrafting] = useState(false);
   const candidateSkills = useMemo(() => profile.skills.split(",").map((skill) => skill.trim()).filter(Boolean), [profile.skills]);
-  const jobs = useMemo(() => {
-    const unique = new Map<string, Job>();
-    liveJobs.forEach((job) => unique.set(job.sourceUrl ?? job.id, job));
-    return [...unique.values()];
-  }, [liveJobs]);
+  // The API's filtered `jobs` may contain rows absent from its broad discovery
+  // pool or the bounded local pool. Keep confirmed matches visible; richer
+  // local copies with scores override the unscored API copies.
+  const jobs = useMemo(() => mergeSearchMatchesIntoPool(liveJobs, searchMatchSnapshot), [liveJobs, searchMatchSnapshot]);
   const allFoundJobs = useMemo(() => jobs.filter((job) => job.source !== "Manual"), [jobs]);
   const filteredFoundJobs = useMemo(() => {
     const normalizedQuery = foundQuery.trim().toLocaleLowerCase();

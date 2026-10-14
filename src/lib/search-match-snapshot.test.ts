@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addSearchMatches, hasSearchMatch, snapshotSearchMatches } from "./search-match-snapshot";
+import { addSearchMatches, hasSearchMatch, mergeSearchMatchesIntoPool, snapshotSearchMatches } from "./search-match-snapshot";
 import type { Job } from "./types";
 
 const job: Job = {
@@ -12,6 +12,7 @@ describe("search match snapshots", () => {
     const snapshot = snapshotSearchMatches("Vienna, Austria;", "solution architect", [job]);
     expect(hasSearchMatch(job, "Vienna, Austria;", "solution architect", snapshot)).toBe(true);
     expect(hasSearchMatch(job, "Vienna, Austria;", "product manager", snapshot)).toBe(false);
+    expect(snapshot.jobs).toEqual([job]);
   });
 
   it("adds paginated matches without duplicating canonical listing URLs", () => {
@@ -19,5 +20,13 @@ describe("search match snapshots", () => {
     const snapshot = snapshotSearchMatches("Austria", "Solution Architect", [job]);
     const extended = addSearchMatches(snapshot, "Austria", "Solution Architect", [duplicate]);
     expect(extended.listingKeys).toEqual([job.sourceUrl]);
+    expect(extended.jobs).toHaveLength(1);
   });
 });
+
+  it("keeps server-filtered matches visible when the bounded discovery pool omits them", () => {
+    const score = { ...job, screening: { model: "decision-model", score: 84, confidence: 80, breakdown: { skills: 90, experience: 80, domain: 70 }, disqualifierRisk: 0, informationStatus: "sufficient" as const } };
+    const snapshot = snapshotSearchMatches("Vienna, Austria", "solution architect", [job]);
+    expect(mergeSearchMatchesIntoPool([], snapshot)).toEqual([job]);
+    expect(mergeSearchMatchesIntoPool([score], snapshot)).toEqual([score]);
+  });
