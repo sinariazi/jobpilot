@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { localScreeningReadinessMessage, normalizeMatchingSettings, normalizeSystemOneScreenResult } from "./job-screening";
-import { assessJobFit } from "./fit-assessment";
+import { assessJobFit, matchesFitFilter } from "./fit-assessment";
 
 const weights = { skills: 40, experience: 30, domain: 20, disqualifier: 10 };
 const valid = { answers: {
@@ -70,5 +70,13 @@ describe("local job screening", () => {
     };
     expect(assessJobFit(job, normalizeMatchingSettings(undefined))).toBe("detailed_poor_fit");
     expect(job.screening.score).toBe(88);
+  });
+  it("filters candidate listings by the current CV fit verdict", () => {
+    expect(matchesFitFilter("potential_fit", "potential")).toBe(true);
+    expect(matchesFitFilter("detailed_potential_fit", "potential")).toBe(true);
+    expect(matchesFitFilter("detailed_poor_fit", "low")).toBe(true);
+    expect(matchesFitFilter("low_fit", "review")).toBe(false);
+    expect(matchesFitFilter("not_scored", "review")).toBe(true);
+    expect(matchesFitFilter("needs_review", "all")).toBe(true);
   });
 });
