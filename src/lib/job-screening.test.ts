@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { localScreeningReadinessMessage, normalizeMatchingSettings, normalizeSystemOneScreenResult } from "./job-screening";
+import { assessJobFit } from "./fit-assessment";
 
 const weights = { skills: 40, experience: 30, domain: 20, disqualifier: 10 };
 const valid = { answers: {
@@ -33,8 +34,8 @@ describe("local job screening", () => {
     expect(result?.confidence).toBe(66);
   });
   it("uses documented defaults, keeps the review relevance cutoff, and migrates the former detail threshold", () => {
-    expect(normalizeMatchingSettings(undefined)).toEqual({ decisionModel: "", weights: weights, relevanceScoreThreshold: 65 });
-    expect(normalizeMatchingSettings({ decisionModel: "tag", weights: { skills: 50, experience: 20, domain: 20, disqualifier: 10 }, relevanceScoreThreshold: 72 })).toEqual({ decisionModel: "tag", weights: { skills: 50, experience: 20, domain: 20, disqualifier: 10 }, relevanceScoreThreshold: 72 });
+    expect(normalizeMatchingSettings(undefined)).toEqual({ decisionModel: "", weights: weights, relevanceScoreThreshold: 65, minimumFitScore: 70, minimumFitConfidence: 60 });
+    expect(normalizeMatchingSettings({ decisionModel: "tag", weights: { skills: 50, experience: 20, domain: 20, disqualifier: 10 }, relevanceScoreThreshold: 72, minimumFitScore: 75, minimumFitConfidence: 68 })).toEqual({ decisionModel: "tag", weights: { skills: 50, experience: 20, domain: 20, disqualifier: 10 }, relevanceScoreThreshold: 72, minimumFitScore: 75, minimumFitConfidence: 68 });
     expect(normalizeMatchingSettings({ detailedScoreThreshold: 74, detailedConfidenceThreshold: 40 }).relevanceScoreThreshold).toBe(74);
     expect(normalizeMatchingSettings({ weights: { skills: 50, experience: 20, domain: 20, disqualifier: 20 } }).weights).toEqual(weights);
   });
@@ -46,5 +47,27 @@ describe("local job screening", () => {
     const result = normalizeSystemOneScreenResult({ answers: { ...valid.answers, information: { choice: "cv_missing" } } }, "decision:tag", weights);
     expect(result?.informationStatus).toBe("cv_missing");
     expect(result?.confidence).toBe(80);
+  });
+  it("requires both score and confidence cutoffs and sufficient job evidence before calling a potential fit", () => {
+    const settings = normalizeMatchingSettings(undefined);
+    const job = {
+      id: "job-1", company: "Example", role: "Solution Architect", location: "Vienna, Austria", mode: "Hybrid", posted: "Today", source: "Feed", summary: "Role summary", description: "A detailed job description with requirements and responsibilities.",
+      screening: { model: "decision:tag", score: 85, confidence: 46, breakdown: { skills: 90, experience: 80, domain: 75 }, disqualifierRisk: 0, informationStatus: "sufficient" as const },
+    };
+    expect(assessJobFit(job, settings)).toBe("needs_review");
+    expect(assessJobFit({ ...job, screening: { ...job.screening, confidence: 75 } }, settings)).toBe("potential_fit");
+    expect(assessJobFit({ ...job, screening: { ...job.screening, score: 69, confidence: 75 } }, settings)).toBe("low_fit");
+    expect(assessJobFit({ ...job, screening: { ...job.screening, confidence: 75, informationStatus: "job_missing" } }, settings)).toBe("needs_review");
+    expect(assessJobFit({ ...job, descriptionKind: "search-snippet" as const, screening: { ...job.screening, confidence: 75 } }, settings)).toBe("needs_review");
+  });
+  it("uses requested detailed analysis as the list verdict without overwriting the first-stage score", () => {
+    const job = {
+      id: "job-2", company: "Example", role: "Developer", location: "Vienna", mode: "On-site", posted: "Today", source: "Feed", summary: "Role summary", description: "Detailed role description.",
+      screening: { model: "decision:tag", score: 88, confidence: 82, breakdown: { skills: 90, experience: 85, domain: 80 }, disqualifierRisk: 0, informationStatus: "sufficient" as const },
+      aiMatch: { model: "chat:tag", relevant: false, score: 25, reason: "Material gaps", cvEvidence: "" },
+      detailedAnalysis: { model: "chat:tag", summary: "Material gaps", matchedRequirements: [], gaps: ["Required architecture experience absent"], evidence: [] },
+    };
+    expect(assessJobFit(job, normalizeMatchingSettings(undefined))).toBe("detailed_poor_fit");
+    expect(job.screening.score).toBe(88);
   });
 });

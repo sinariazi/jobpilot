@@ -34,6 +34,8 @@ export type MatchingSettings = {
   decisionModel: string;
   weights: MatchWeights;
   relevanceScoreThreshold: number;
+  minimumFitScore: number;
+  minimumFitConfidence: number;
 };
 export type JobScreening = {
   model: string;

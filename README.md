@@ -12,7 +12,7 @@ Jobpilot helps a candidate move from CV to a focused job review: it searches pub
 
 - **CV analysis:** Extracts PDF, DOCX, and TXT files in the browser; optionally OCRs scanned PDFs locally with Tesseract. A local chat model summarizes the CV, suggests roles and skills, and gives evidence-based improvement feedback.
 - **Job discovery:** Searches four public feeds—Arbeitnow, Remotive, Jobicy, and Himalayas—without provider API keys or registration. An optional Ollama Web Search integration can broaden discovery. Users can edit job titles and locations, inspect all discovered listings, and paste a posting missed by public feeds.
-- **Progressive matching:** Shows the normalized job pool before all scoring completes. Eligible listings are assessed in small batches with Ollama's `/v1/systemone` decision endpoint. Scores, confidence, category breakdowns, and missing evidence are displayed separately.
+- **Progressive matching:** Shows title/location candidates before all scoring completes. Eligible listings are assessed in small batches with Ollama's `/v1/systemone` decision endpoint. Scores, confidence, category breakdowns, and missing evidence are displayed separately. “Potential fit” requires the configurable score and confidence cutoffs plus enough job evidence; low-confidence, missing-data, and snippet-only items stay visible as “Needs review.”
 - **On-demand job analysis:** A local chat model runs only when the user requests a detailed review for one job. It returns matched requirements, gaps, and CV/job evidence without replacing the first-stage score.
 - **CV and application preparation:** Selects exact CV excerpts for a chosen job, checks them against saved CV text, and exports a new editable, print-ready HTML file. Cover-letter drafts include a source-quote check. A local Chromium extension can prefill recognized empty ATS contact fields after a user click.
 - **Local persistence and control:** Saves the profile, CV text excerpt, job pool, reviews, and tracker on the user's device. Jobpilot never submits applications.
@@ -51,7 +51,7 @@ flowchart TB
     tailor --> human
 ```
 
-The decision stage compares skills, experience, domain fit, and explicit disqualifier risk against available CV and job evidence. Its normalized 0–100 score is an estimate, not the probability of being hired. Confidence is separate from fit. The user can configure model and scoring weights. Low-quality or missing source text is surfaced instead of being silently treated as a match.
+The decision stage compares skills, experience, domain fit, and explicit disqualifier risk against available CV and job evidence. Its normalized 0–100 score is an estimate, not the probability of being hired. Confidence is separate from fit. The user can configure model, scoring weights, minimum score, and minimum confidence. The score alone does not establish a good match: missing information, low confidence, and search snippets are marked for review, and an on-demand detailed review can change the displayed fit verdict while preserving the first-stage score. Low-quality or missing source text is surfaced instead of being silently treated as a match.
 
 The detailed stage is user-triggered for one selected job; it does not run across the pool. This keeps the first pass responsive and avoids sending every listing through a slower chat model. The first-stage score remains intact beside the detailed analysis.
 
@@ -179,6 +179,7 @@ The automated suite uses mocked provider fixtures and does not depend on live fe
 
 - No comprehensive Austria-wide job feed is available under the current no-key/no-registration constraints. Results are useful but incomplete and weighted toward remote and Germany/Europe listings.
 - Decision-score error rates and calibration have not been established. The UI collects local human feedback, but a held-out, varied human-reviewed evaluation set is still needed.
+- The score/confidence cutoffs are transparent triage rules, not empirically calibrated thresholds. A “Potential fit” label still needs candidate review; detailed analysis can disagree.
 - Local state is not encrypted. Protect the device and backups; encryption remains unfinished.
 - A full screen-reader and cross-browser accessibility audit has not been completed.
 - End-to-end tests against live job searches, profile workflows, and supported ATS pages remain outstanding.

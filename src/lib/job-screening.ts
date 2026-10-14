@@ -5,6 +5,8 @@ export const DEFAULT_MATCHING_SETTINGS: MatchingSettings = {
   decisionModel: "",
   weights: DEFAULT_MATCH_WEIGHTS,
   relevanceScoreThreshold: 65,
+  minimumFitScore: 70,
+  minimumFitConfidence: 60,
 };
 
 export type LocalScreeningReadiness = {
@@ -38,13 +40,15 @@ export function normalizeMatchingSettings(value: unknown): MatchingSettings {
     decisionModel: typeof raw.decisionModel === "string" && raw.decisionModel.length <= 200 ? raw.decisionModel.trim() : "",
     weights: isValidWeights ? { ...weights } : DEFAULT_MATCH_WEIGHTS,
     relevanceScoreThreshold: readScoreThreshold(raw.relevanceScoreThreshold ?? (value as { detailedScoreThreshold?: unknown }).detailedScoreThreshold),
+    minimumFitScore: readScoreThreshold(raw.minimumFitScore, DEFAULT_MATCHING_SETTINGS.minimumFitScore),
+    minimumFitConfidence: readScoreThreshold(raw.minimumFitConfidence, DEFAULT_MATCHING_SETTINGS.minimumFitConfidence),
   };
 }
 
-function readScoreThreshold(value: unknown) {
+function readScoreThreshold(value: unknown, fallback = DEFAULT_MATCHING_SETTINGS.relevanceScoreThreshold) {
   return Number.isInteger(value) && Number(value) >= 0 && Number(value) <= 100
     ? Number(value)
-    : DEFAULT_MATCHING_SETTINGS.relevanceScoreThreshold;
+    : fallback;
 }
 
 type Answer = { type?: unknown; score?: unknown; confidence?: unknown; noul?: unknown; choice?: unknown };
