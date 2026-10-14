@@ -207,7 +207,7 @@ export default function Home() {
           const legacyValue = window.localStorage.getItem(LEGACY_STORAGE_KEY);
           if (legacyValue) {
             const legacy = JSON.parse(legacyValue) as Partial<PersistedState>;
-            const migration = await fetch("/api/state", {
+            const migration = await fetch("/api/state?includeState=1", {
               method: "PUT",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -324,10 +324,17 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (!stateLoaded) return;
+    // Scoring updates the pool once per small batch. Persist one settled snapshot instead of queuing full-pool writes.
+    if (!stateLoaded || aiMatchProgress) return;
     let cancelled = false;
     const snapshot = {
-      profile, saved, status, applicationNotes, applicationFollowUps, coverLetterDrafts, matchReviews, matchCohortKey, matchingSettings, liveJobs, webSearchEnabled,
+      profile, saved, status, applicationNotes, applicationFollowUps, coverLetterDrafts, matchReviews, matchCohortKey, matchingSettings,
+      liveJobs: liveJobs.map((job) => ({
+        ...job,
+        summary: job.summary.slice(0, 4000),
+        ...(job.description ? { description: job.description.slice(0, 8000) } : {}),
+      })),
+      webSearchEnabled,
       cvText: cvText.slice(0, MAX_CV_MATCH_CHARS),
       cvFileName,
       ...(cvSuggestions ? { cvAnalysis: {
@@ -357,7 +364,7 @@ export default function Home() {
       cancelled = true;
       window.clearTimeout(timeout);
     };
-  }, [profile, saved, status, applicationNotes, applicationFollowUps, coverLetterDrafts, matchReviews, matchCohortKey, matchingSettings, liveJobs, webSearchEnabled, cvText, cvFileName, cvSuggestions, stateLoaded]);
+  }, [profile, saved, status, applicationNotes, applicationFollowUps, coverLetterDrafts, matchReviews, matchCohortKey, matchingSettings, liveJobs, webSearchEnabled, cvText, cvFileName, cvSuggestions, stateLoaded, aiMatchProgress]);
 
   const locationMatchedJobs = useMemo(() => jobs.filter((job) =>
     (job.source === "Manual" || matchesPreferredLocation(job.location, profile.locations, job.mode, job.source, job.sourceLocationScope))
@@ -1037,7 +1044,7 @@ export default function Home() {
     setBackupBusy(true);
     setBackupMessage("Validating and restoring backup…");
     const operation = saveQueue.current.catch(() => undefined).then(async () => {
-      const response = await fetch("/api/state", {
+      const response = await fetch("/api/state?includeState=1", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(restoredState),
