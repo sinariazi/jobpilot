@@ -1178,7 +1178,7 @@ export default function Home() {
     let fetchedJobs: Job[] = [];
     let allDiscoveredJobs: Job[] = [];
     try {
-      const webSearchTerms = [...profile.skills.split(/[;,\\n]+/), ...(cvSuggestions?.analysis?.domains ?? [])]
+      const webSearchTerms = [...profile.skills.split(/[;,\n]+/), ...(cvSuggestions?.analysis?.domains ?? [])]
         .map((term) => term.trim()).filter(Boolean).slice(0, 8).join(", ");
       const searchParams = new URLSearchParams({ locations: profile.locations, roles: profile.roles, ...(webSearchEnabled ? { includeWebSearch: "1", webSearchRound: String(currentWebSearchRound), webSearchTerms } : {}) });
       const response = await fetch(`/api/jobs/search?${searchParams}`, { cache: "no-store" });
