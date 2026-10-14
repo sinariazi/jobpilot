@@ -24,6 +24,15 @@ describe("public job search pagination API", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("rejects malformed web-search round values before calling providers", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await GET(new Request("http://localhost/api/jobs/search?webSearchRound=-1"));
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toBe("Invalid web-search round.");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("requests only the supplied Jobicy continuation page", async () => {
     const cursor = "opaque+cursor/with=reserved&characters";
     const requests: string[] = [];
