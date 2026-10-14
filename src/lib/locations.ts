@@ -105,7 +105,6 @@ export function matchesEligibleRemoteLocation(jobLocation: string, preferences: 
     && [...requestedCountries].some((country) => eligibleCountries.has(country));
 }
 
-
 function canonicalLocationWords(value: string): string[] {
   const input = locationWords(value);
   const words: string[] = [];
@@ -167,6 +166,11 @@ export function matchesPreferredLocation(jobLocation: string, preferences: strin
   const alternatives: string[][] = preferences.split(/[;\n|]+/).map((part) => canonicalLocationWords(part)).filter((words) => words.length > 0);
   if (alternatives.length === 0) return true;
   if (alternatives.some((words) => words.every((word) => actual.has(word)))) return true;
+
+  // A remote listing restricted to a country is eligible for cities in that
+  // country (for example, "Remote · Austria" for Vienna). The search API and
+  // the browser use this same rule so a result cannot disappear after search.
+  if (matchesEligibleRemoteLocation(jobLocation, preferences, jobMode)) return true;
 
   const remoteListing = /remote/i.test(jobMode) || actual.has("remote");
   if (!remoteListing) return false;

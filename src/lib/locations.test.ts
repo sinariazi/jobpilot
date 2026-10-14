@@ -10,11 +10,11 @@ describe("preferred job locations", () => {
 
   it("matches country-eligible remote roles for a city preference without reclassifying other remote regions", () => {
     expect(matchesEligibleRemoteLocation("Remote · Austria", "Vienna, Austria", "Remote · Full-time")).toBe(true);
+    expect(matchesPreferredLocation("Remote · Austria", "Vienna, Austria", "Remote · Full-time", "Himalayas")).toBe(true);
     expect(matchesEligibleRemoteLocation("Remote · Germany", "Vienna, Austria", "Remote · Full-time")).toBe(false);
     expect(matchesEligibleRemoteLocation("Remote · Europe", "Vienna, Austria", "Remote · Full-time")).toBe(false);
     expect(matchesEligibleRemoteLocation("Remote · Austria", "Vienna, Austria", "On-site")).toBe(false);
   });
-
 
   it("maps user preferences to the current public provider taxonomy", () => {
     const available = [{ name: "Austria", slug: "austria" }, { name: "Europe", slug: "europe" }, { name: "Anywhere", slug: "anywhere" }];

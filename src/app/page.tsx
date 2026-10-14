@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ApplicationStatus, CandidateProfile, CoverLetterDraftRecord, Job, MatchReview, PersistedState, MatchingSettings, MatchWeights } from "@/lib/types";
 import { defaultProfile } from "@/lib/types";
 import { jobsForReview, matchesTargetRole, scoreJob } from "@/lib/matcher";
-import { matchesPreferredLocation } from "@/lib/locations";
+import { matchesEligibleRemoteLocation, matchesPreferredLocation } from "@/lib/locations";
 import { matchesDepartment, matchesPostedWithin, matchesWorkMode, type PostedWithin, type WorkMode } from "@/lib/job-filters";
 import type { CvSuggestions } from "@/lib/cv-parser";
 import { createBackup, parseBackup } from "@/lib/backup";
@@ -17,6 +17,7 @@ import { createApplicationPacket, detectAtsPlatform } from "@/lib/application-pr
 import { compareDecisionScores, passesMinimumDecisionScore } from "@/lib/job-ranking";
 import { composeTailoredCvText, renderTailoredCvHtml, tailoredCvFilename, type VerifiedCvTailoring } from "@/lib/cv-tailoring";
 import { mergeJobPool } from "@/lib/job-pool";
+import { addSearchMatches, hasSearchMatch, searchPreferenceKey, snapshotSearchMatches, type SearchMatchSnapshot } from "@/lib/search-match-snapshot";
 
 const LEGACY_STORAGE_KEY = "jobpilot-local-v1";
 const MAX_BACKUP_BYTES = 23_000_000;
@@ -83,6 +84,7 @@ export default function Home() {
   const [tailoredCvDraft, setTailoredCvDraft] = useState<{ jobId: string; role: string; text: string; verifiedText: string; result: VerifiedCvTailoring } | null>(null);
   const [nextArbeitnowPage, setNextArbeitnowPage] = useState<number | null>(null);
   const [nextJobicyCursor, setNextJobicyCursor] = useState<string | null>(null);
+  const [searchMatchSnapshot, setSearchMatchSnapshot] = useState<SearchMatchSnapshot | null>(null);
   const [stateLoaded, setStateLoaded] = useState(false);
   const [storageMessage, setStorageMessage] = useState("Loading saved data from this device…");
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
@@ -91,6 +93,7 @@ export default function Home() {
   const detailedAnalysisAbortController = useRef<AbortController | null>(null);
   const cvTailoringAbortController = useRef<AbortController | null>(null);
   const aiMatchGeneration = useRef(0);
+  const activeSearchPreferenceKey = useRef("");
   const fetchLiveJobsRef = useRef<() => Promise<void>>(async () => undefined);
   const handledSearchRequestId = useRef(0);
   const automaticScreeningLock = useRef(false);
@@ -373,9 +376,20 @@ export default function Home() {
     };
   }, [profile, saved, status, applicationNotes, applicationFollowUps, coverLetterDrafts, matchReviews, matchCohortKey, matchingSettings, liveJobs, webSearchEnabled, cvText, cvFileName, cvSuggestions, stateLoaded, aiMatchProgress]);
 
-  const locationMatchedJobs = useMemo(() => jobs.filter((job) =>
-    (job.source === "Manual" || matchesPreferredLocation(job.location, profile.locations, job.mode, job.source, job.sourceLocationScope))
-    && (job.source === "Manual" || !profile.roles.trim() || matchesTargetRole(job, profile.roles))), [jobs, profile.locations, profile.roles]);
+  const currentSearchPreferenceKey = searchPreferenceKey(profile.locations, profile.roles);
+  useEffect(() => {
+    activeSearchPreferenceKey.current = currentSearchPreferenceKey;
+  }, [currentSearchPreferenceKey]);
+  const confirmedSearchMatches = useMemo(() => new Set(
+    searchMatchSnapshot?.preferenceKey === currentSearchPreferenceKey ? searchMatchSnapshot.listingKeys : [],
+  ), [searchMatchSnapshot, currentSearchPreferenceKey]);
+  const locationMatchedJobs = useMemo(() => jobs.filter((job) => {
+    if (job.source === "Manual") return true;
+    if (confirmedSearchMatches.has(job.sourceUrl ?? job.id)) return true;
+    const locationMatches = matchesPreferredLocation(job.location, profile.locations, job.mode, job.source, job.sourceLocationScope)
+      || matchesEligibleRemoteLocation(job.location, profile.locations, job.mode);
+    return locationMatches && (!profile.roles.trim() || matchesTargetRole(job, profile.roles));
+  }), [jobs, profile.locations, profile.roles, confirmedSearchMatches]);
   const localDecisionScreeningReady = Boolean(cvText.trim() && localAiModels.includes(matchingSettings.decisionModel) && systemOneAvailable && isLocalJobpilotPage());
   const screeningReadinessMessage = localScreeningReadinessMessage({
     hasCv: Boolean(cvText.trim()),
@@ -1090,6 +1104,7 @@ export default function Home() {
     if (loadingJobs || loadingMoreJobs) return;
     automaticPageBatchesRemaining.current = AUTOMATIC_PAGE_BATCH_LIMIT;
     const searchGeneration = aiMatchGeneration.current;
+    const requestedPreferenceKey = searchPreferenceKey(profile.locations, profile.roles);
     setLoadingJobs(true);
     setCvAnalyzedModel("");
     setSourceMessage(`Searching enabled feeds${webSearchEnabled ? " and optional Ollama web search" : ""} for ${profile.roles || "all job titles"} in ${profile.locations || "your selected locations"}…`);
@@ -1107,8 +1122,10 @@ export default function Home() {
       if (!response.ok && !(result.jobs?.length)) throw new Error(result.error ?? "Could not fetch jobs.");
       fetchedJobs = result.jobs ?? [];
       allDiscoveredJobs = result.discoveredJobs ?? fetchedJobs;
-      const locationJobs = fetchedJobs.filter((job) => matchesPreferredLocation(job.location, profile.locations, job.mode, job.source, job.sourceLocationScope)
-        && (!profile.roles.trim() || matchesTargetRole(job, profile.roles)));
+      const locationJobs = fetchedJobs;
+      if (activeSearchPreferenceKey.current === requestedPreferenceKey) {
+        setSearchMatchSnapshot(snapshotSearchMatches(profile.locations, profile.roles, locationJobs));
+      }
       // Show the normalized pool immediately. Screening updates these cards in
       // small batches, so users can review early scores while later jobs run.
       setLiveJobs((current) => mergeJobPool(current, allDiscoveredJobs, MAX_LOCAL_JOB_POOL));
@@ -1212,6 +1229,10 @@ export default function Home() {
       if (!response.ok) throw new Error(result.error ?? "Could not load more jobs.");
       fetchedMore = result.jobs ?? [];
       const discoveredMore = result.discoveredJobs ?? fetchedMore;
+      const requestedPreferenceKey = searchPreferenceKey(profile.locations, profile.roles);
+      if (activeSearchPreferenceKey.current === requestedPreferenceKey) {
+        setSearchMatchSnapshot((current) => addSearchMatches(current, profile.locations, profile.roles, fetchedMore));
+      }
       setLiveJobs((current) => mergeJobPool(current, discoveredMore, MAX_LOCAL_JOB_POOL));
       const assessWithCurrentContext = localDecisionScreeningReady && searchGeneration === aiMatchGeneration.current;
       if (!assessWithCurrentContext || !fetchedMore.length) {
@@ -1220,8 +1241,7 @@ export default function Home() {
         return;
       }
       const previouslyScreened = liveJobs.filter((job) => job.screening?.model === matchingSettings.decisionModel).map((job) => job.sourceUrl ?? job.id);
-      const candidates = jobsToAssess(fetchedMore.filter((job) => matchesPreferredLocation(job.location, profile.locations, job.mode, job.source, job.sourceLocationScope)
-        && (!profile.roles.trim() || matchesTargetRole(job, profile.roles))), previouslyScreened);
+      const candidates = jobsToAssess(fetchedMore, previouslyScreened);
       const generation = ++aiMatchGeneration.current;
       const controller = new AbortController();
       aiMatchAbortController.current = controller;
@@ -1295,9 +1315,10 @@ export default function Home() {
             {sourceErrors.length > 0 && <ul className="source-errors" role="status">{sourceErrors.map((error) => <li key={error}>{error}</li>)}</ul>}
             <div className="found-jobs-controls"><label className="search-box"><span>⌕</span><input aria-label="Search all found jobs" placeholder="Search all found titles, companies, or locations…" value={foundQuery} onChange={(event) => { setFoundQuery(event.target.value); setFoundVisibleCount(50); }} /></label><span>Showing {visibleFoundJobs.length} of {filteredFoundJobs.length}</span></div>
             {visibleFoundJobs.length > 0 ? <div className="found-jobs-list">{visibleFoundJobs.map((job) => {
-              const locationMatches = matchesPreferredLocation(job.location, profile.locations, job.mode, job.source, job.sourceLocationScope);
+              const locationMatches = matchesPreferredLocation(job.location, profile.locations, job.mode, job.source, job.sourceLocationScope)
+                || matchesEligibleRemoteLocation(job.location, profile.locations, job.mode);
               const roleMatches = !profile.roles.trim() || matchesTargetRole(job, profile.roles);
-              const matchesPreferences = locationMatches && roleMatches;
+              const matchesPreferences = hasSearchMatch(job, profile.locations, profile.roles, searchMatchSnapshot) || locationMatches && roleMatches;
               const excludedBy = [!roleMatches ? "title" : "", !locationMatches ? "location" : ""].filter(Boolean).join(" and ");
               return <article className="found-job-row" key={job.id}>
                 <div className="found-job-heading"><div><h2>{job.role}</h2><p>{job.company} <span>·</span> {job.location}{job.locationEvidence ? " (snippet mention; unverified)" : ""}</p></div><span className={`found-job-status ${matchesPreferences ? "included" : "excluded"}`}>{matchesPreferences ? "Included in Job matches" : `Filtered by ${excludedBy}`}</span></div>
