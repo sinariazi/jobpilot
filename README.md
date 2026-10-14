@@ -113,7 +113,7 @@ On **Windows**, open PowerShell and paste:
 irm https://raw.githubusercontent.com/sinariazi/jobpilot/main/scripts/quickstart.ps1 | iex
 ```
 
-The quick start downloads Jobpilot into `~/Jobpilot` (or `%USERPROFILE%\\Jobpilot` on Windows), installs Node.js if needed, asks before installing Ollama, downloads the suggested local models, installs the exact project dependencies, and starts the app. It will not overwrite an existing project folder. To reuse an existing copy, run the script from that project folder.
+The quick start downloads Jobpilot into `~/Jobpilot` (or `%USERPROFILE%\\Jobpilot` on Windows), installs Node.js if needed, asks before installing Ollama, downloads the suggested local models, installs the exact project dependencies, and starts the core app. It will not overwrite an existing project folder. To reuse an existing copy, run the script from that project folder. Optional features such as scanned-CV OCR and web search have separate setup steps below.
 
 The first run needs internet access and several gigabytes of free disk space for the models. Ollama's installer may request administrator permission. Keep the terminal open while Jobpilot is running; open [http://localhost:3000](http://localhost:3000) after the server reports that it is ready. Press **Ctrl+C** in that terminal to stop the app.
 
