@@ -1289,6 +1289,14 @@ export default function Home() {
         setSearchMatchSnapshot((current) => addSearchMatches(current, profile.locations, profile.roles, fetchedMore));
       }
       setLiveJobs((current) => mergeJobPool(current, discoveredMore, MAX_LOCAL_JOB_POOL));
+      if (!response.ok && fetchedMore.length === 0 && (result.nextArbeitnowPage != null || result.nextJobicyCursor != null)) {
+        const continuation = [
+          result.nextArbeitnowPage != null ? `Arbeitnow can continue at page ${result.nextArbeitnowPage}` : "",
+          result.nextJobicyCursor != null ? "Jobicy has another page available" : "",
+        ].filter(Boolean).join("; ");
+        setSourceMessage(`${result.error ?? "A job-feed page failed."} Existing listings and scores are preserved. ${continuation}; use “Load more from public feeds” to continue.`);
+        return;
+      }
       const assessWithCurrentContext = localDecisionScreeningReady && searchGeneration === aiMatchGeneration.current;
       if (!assessWithCurrentContext || !fetchedMore.length) {
         const moreSources = [result.nextArbeitnowPage !== null && result.nextArbeitnowPage !== undefined ? "Arbeitnow" : "", result.nextJobicyCursor ? "Jobicy" : ""].filter(Boolean);
