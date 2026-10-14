@@ -5,17 +5,44 @@ import type { Job } from "./types";
 const SEARCH_ENDPOINT = "https://ollama.com/api/web_search";
 const SEARCH_SOURCE = "Ollama Web Search";
 export const OLLAMA_WEB_SEARCH_MAX_QUERIES = 5;
-const RESULTS_PER_QUERY = 5;
+export const OLLAMA_WEB_SEARCH_RESULTS_PER_QUERY = 10;
+const QUERY_VARIANTS = [
+  "{role} careers and open positions {location} {terms}",
+  "{role} vacancies hiring now {location} {terms}",
+  "{role} newly posted jobs {location} {terms}",
+  "{role} employer career page job openings {location} {terms}",
+  "{role} job opportunities applications open {location} {terms}",
+  "{role} careers recruitment positions {location} {terms}",
+  "{role} job listings accepting applications {location} {terms}",
+  "{role} full time job openings {location} {terms}",
+  "{role} current hiring opportunities {location} {terms}",
+  "{role} employment vacancy career site {location} {terms}",
+  "{role} open roles hiring companies {location} {terms}",
+  "{role} job advertisement apply now {location} {terms}",
+  "{role} senior professional position {location} {terms}",
+  "{role} technical leadership jobs {location} {terms}",
+  "{role} career opportunities {location} {terms}",
+];
 
 type OllamaWebResult = { title?: unknown; url?: unknown; content?: unknown };
 type OllamaWebResponse = { results?: unknown };
 
-export function buildOllamaWebSearchQueries(roles: string, locations: string) {
+export function buildOllamaWebSearchQueries(roles: string, locations: string, searchTerms = "", round = 0) {
   const titleGroups = roles.split(/[;,\n]+/).map((item) => item.trim()).filter(Boolean).slice(0, OLLAMA_WEB_SEARCH_MAX_QUERIES);
-  const places = locations.split(/[;\n]+/).map((item) => item.trim()).filter(Boolean).slice(0, 8);
-  const locationText = places.length ? ` in ${places.join(" or ")}` : "";
+  const places = locations.split(/[;\n]+/).map((item) => item.trim()).filter(Boolean).slice(0, 4);
+  const locationText = places.join(" or ");
   const roleGroups = titleGroups.length ? titleGroups : ["job vacancy"];
-  return roleGroups.map((role) => `${role} jobs hiring${locationText} official job posting`);
+  const terms = searchTerms.split(/[;,\n]+/).map((item) => item.trim()).filter(Boolean).slice(0, 8);
+  const start = (Math.max(0, Math.floor(round)) * OLLAMA_WEB_SEARCH_MAX_QUERIES) % QUERY_VARIANTS.length;
+  return Array.from({ length: OLLAMA_WEB_SEARCH_MAX_QUERIES }, (_, index) => {
+    const role = roleGroups[index % roleGroups.length];
+    const variant = QUERY_VARIANTS[(start + index) % QUERY_VARIANTS.length];
+    const termCount = Math.min(4, terms.length);
+    const termOffset = terms.length ? (Math.max(0, Math.floor(round)) * 3 + index * 2) % terms.length : 0;
+    const queryTerms = Array.from({ length: termCount }, (_, termIndex) => terms[(termOffset + termIndex) % terms.length]).join(" ");
+    return variant.replace("{role}", role).replace("{location}", locationText).replace("{terms}", queryTerms)
+      .replace(/\s+/g, " ").trim();
+  });
 }
 
 function validResultUrl(value: unknown): value is string {
@@ -62,25 +89,27 @@ function errorMessage(status: number) {
 export async function searchWithOllamaWeb(options: {
   roles: string;
   locations: string;
+  searchTerms?: string;
+  round?: number;
   apiKey?: string;
   fetcher?: typeof fetch;
   now?: () => Date;
 }) {
   const apiKey = options.apiKey ?? process.env.OLLAMA_API_KEY;
   if (!apiKey?.trim()) throw new Error("Optional web search is enabled, but OLLAMA_API_KEY is not set. Follow the optional web-search setup in README, or turn web search off.");
-  const queries = buildOllamaWebSearchQueries(options.roles, options.locations);
+  const queries = buildOllamaWebSearchQueries(options.roles, options.locations, options.searchTerms, options.round);
   const fetcher = options.fetcher ?? fetch;
   const retrievedAt = (options.now ?? (() => new Date()))().toISOString();
   const jobs: Job[] = [];
-  // Ollama's free plan allows one concurrent request. Keep these sequential,
-  // cap queries per search, and let the ordinary feeds finish independently.
+  // Ollama's free plan allows one concurrent request. Keep requests sequential
+  // and bounded; query rounds vary wording because this endpoint has no paging.
   for (const query of queries) {
     let response: Response;
     try {
       response = await fetcher(SEARCH_ENDPOINT, {
         method: "POST",
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ query, max_results: RESULTS_PER_QUERY }),
+        body: JSON.stringify({ query, max_results: OLLAMA_WEB_SEARCH_RESULTS_PER_QUERY }),
         cache: "no-store",
         signal: AbortSignal.timeout(8_000),
       });
@@ -108,10 +137,10 @@ export async function searchWithOllamaWeb(options: {
       if (jobs.length) return { jobs, error: message, state: "partial" as const };
       throw new Error(message);
     }
-    jobs.push(...payload.results.slice(0, RESULTS_PER_QUERY).flatMap((item) => {
+    jobs.push(...payload.results.slice(0, OLLAMA_WEB_SEARCH_RESULTS_PER_QUERY).flatMap((item) => {
       if (typeof item !== "object" || item === null || Array.isArray(item)) return [];
       const mapped = mapResult(item as OllamaWebResult, options.locations, retrievedAt);
-      return mapped ? [mapped] : [];
+      return mapped && !jobs.some((job) => job.sourceUrl === mapped.sourceUrl) ? [mapped] : [];
     }));
   }
   return { jobs, state: "success" as const };
