@@ -357,12 +357,11 @@ export default function Home() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(snapshot),
         });
-        if (!response.ok) {
-          const result = await response.json().catch(() => null) as { error?: string } | null;
-          throw new Error(result?.error ?? "Could not save local data.");
-        }
-      }).then(() => {
-        if (!cancelled) setStorageMessage("Saved on this device.");
+        const result = await response.json().catch(() => null) as { error?: string; warning?: string } | null;
+        if (!response.ok) throw new Error(result?.error ?? "Could not save local data.");
+        return result?.warning;
+      }).then((warning) => {
+        if (!cancelled) setStorageMessage(warning ?? "Saved on this device.");
       }).catch((error: unknown) => {
         if (!cancelled) setStorageMessage(error instanceof Error ? error.message : "Could not save local data.");
       });
