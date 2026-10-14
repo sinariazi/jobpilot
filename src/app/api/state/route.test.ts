@@ -36,7 +36,7 @@ describe("local state API", () => {
     expect(await response.json()).toEqual({ initialized: true, saved: true });
   });
 
-  it("reports which found listing contains invalid required fields", async () => {
+  it("skips one malformed listing without blocking the rest of a state save", async () => {
     const state = {
       ...defaultState(),
       liveJobs: [{
@@ -47,7 +47,11 @@ describe("local state API", () => {
     const response = await PUT(new Request("http://localhost/api/state", {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(state),
     }));
-    expect(response.status).toBe(400);
-    expect(await response.json()).toMatchObject({ error: expect.stringContaining("Found job 1 (job-1)") });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      initialized: true,
+      saved: true,
+      warning: "1 malformed job listing was skipped; the other jobs and scores were saved.",
+    });
   });
 });
