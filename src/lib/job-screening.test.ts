@@ -49,7 +49,7 @@ describe("local job screening", () => {
     expect(result?.confidence).toBe(80);
   });
   it("requires both score and confidence cutoffs and sufficient job evidence before calling a potential fit", () => {
-    const settings = normalizeMatchingSettings(undefined);
+    const settings = { ...normalizeMatchingSettings(undefined), decisionModel: "decision:tag" };
     const job = {
       id: "job-1", company: "Example", role: "Solution Architect", location: "Vienna, Austria", mode: "Hybrid", posted: "Today", source: "Feed", summary: "Role summary", description: "A detailed job description with requirements and responsibilities.",
       screening: { model: "decision:tag", score: 85, confidence: 46, breakdown: { skills: 90, experience: 80, domain: 75 }, disqualifierRisk: 0, informationStatus: "sufficient" as const },
@@ -59,6 +59,7 @@ describe("local job screening", () => {
     expect(assessJobFit({ ...job, screening: { ...job.screening, score: 69, confidence: 75 } }, settings)).toBe("low_fit");
     expect(assessJobFit({ ...job, screening: { ...job.screening, confidence: 75, informationStatus: "job_missing" } }, settings)).toBe("needs_review");
     expect(assessJobFit({ ...job, descriptionKind: "search-snippet" as const, screening: { ...job.screening, confidence: 75 } }, settings)).toBe("needs_review");
+    expect(assessJobFit({ ...job, screening: { ...job.screening, model: "previous:tag", confidence: 75 } }, settings)).toBe("not_scored");
   });
   it("uses requested detailed analysis as the list verdict without overwriting the first-stage score", () => {
     const job = {

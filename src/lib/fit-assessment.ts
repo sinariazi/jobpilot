@@ -11,7 +11,7 @@ export function assessJobFit(job: Job, settings: MatchingSettings): FitAssessmen
     return job.aiMatch.relevant ? "detailed_potential_fit" : "detailed_poor_fit";
   }
   const screening = job.screening;
-  if (!screening) return "not_scored";
+  if (!screening || screening.model !== settings.decisionModel) return "not_scored";
   if (screening.informationStatus !== "sufficient" || screening.confidence === null
     || screening.confidence < settings.minimumFitConfidence
     || job.descriptionKind === "search-snippet" || !job.description?.trim()) {
