@@ -1,6 +1,14 @@
 import type { Job, MatchingSettings } from "./types";
 
 export type FitAssessment = "potential_fit" | "needs_review" | "low_fit" | "not_scored" | "detailed_poor_fit" | "detailed_potential_fit";
+export type FitFilter = "all" | "potential" | "review" | "low";
+
+export function matchesFitFilter(assessment: FitAssessment, filter: FitFilter) {
+  if (filter === "potential") return assessment === "potential_fit" || assessment === "detailed_potential_fit";
+  if (filter === "review") return assessment === "needs_review" || assessment === "not_scored";
+  if (filter === "low") return assessment === "low_fit" || assessment === "detailed_poor_fit";
+  return true;
+}
 
 /**
  * Keep title/location discovery separate from CV fit. A score is a potential fit
