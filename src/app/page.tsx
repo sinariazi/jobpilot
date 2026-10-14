@@ -27,6 +27,7 @@ const AI_MATCH_BATCH_SIZE = 2;
 const AUTOMATIC_PAGE_BATCH_LIMIT = 3;
 const MAX_CV_MATCH_CHARS = 10_000;
 const MAX_LOCAL_JOB_POOL = 2_000;
+const WEB_SEARCH_ROUND_KEY = "jobpilot-web-search-round-v1";
 
 function createCvMatchContext(cvText: string, suggestions: CvSuggestions | null, profile: CandidateProfile) {
   const analysis = suggestions?.analysis;
@@ -106,6 +107,7 @@ export default function Home() {
   const screenCurrentJobsRef = useRef<() => Promise<void>>(async () => undefined);
   const fetchMoreJobsRef = useRef<() => Promise<void>>(async () => undefined);
   const automaticPageBatchesRemaining = useRef(0);
+  const webSearchRound = useRef(0);
   const backupInput = useRef<HTMLInputElement>(null);
   const [sourceMessage, setSourceMessage] = useState("");
   const [sourceErrors, setSourceErrors] = useState<string[]>([]);
@@ -257,6 +259,8 @@ export default function Home() {
         setMatchCohortKey(restored.matchCohortKey ?? "");
         setMatchingSettings((current) => ({ ...(restored.matchingSettings ?? DEFAULT_MATCHING_SETTINGS), decisionModel: restored.matchingSettings?.decisionModel || current.decisionModel }));
         setWebSearchEnabled(restored.webSearchEnabled === true);
+        const savedWebSearchRound = Number(window.localStorage.getItem(WEB_SEARCH_ROUND_KEY));
+        webSearchRound.current = Number.isSafeInteger(savedWebSearchRound) && savedWebSearchRound >= 0 ? savedWebSearchRound : 0;
         setLiveJobs(restored.liveJobs ?? []);
         const restoredCvText = restored.cvText ?? "";
         setCvText(restoredCvText);
@@ -756,6 +760,7 @@ export default function Home() {
   }
 
   function searchWithPreferences() {
+    setFitFilter("all");
     const nextProfile = {
       ...profile,
       roles: searchRolesDraft.trim(),
@@ -1161,6 +1166,11 @@ export default function Home() {
     automaticPageBatchesRemaining.current = AUTOMATIC_PAGE_BATCH_LIMIT;
     const searchGeneration = aiMatchGeneration.current;
     const requestedPreferenceKey = searchPreferenceKey(profile.locations, profile.roles);
+    const currentWebSearchRound = webSearchRound.current;
+    if (webSearchEnabled) {
+      webSearchRound.current += 1;
+      window.localStorage.setItem(WEB_SEARCH_ROUND_KEY, String(webSearchRound.current));
+    }
     setLoadingJobs(true);
     setCvAnalyzedModel("");
     setSourceMessage(`Searching enabled feeds${webSearchEnabled ? " and optional Ollama web search" : ""} for ${profile.roles || "all job titles"} in ${profile.locations || "your selected locations"}…`);
@@ -1168,7 +1178,9 @@ export default function Home() {
     let fetchedJobs: Job[] = [];
     let allDiscoveredJobs: Job[] = [];
     try {
-      const searchParams = new URLSearchParams({ locations: profile.locations, roles: profile.roles, ...(webSearchEnabled ? { includeWebSearch: "1" } : {}) });
+      const webSearchTerms = [...profile.skills.split(/[;,\\n]+/), ...(cvSuggestions?.analysis?.domains ?? [])]
+        .map((term) => term.trim()).filter(Boolean).slice(0, 8).join(", ");
+      const searchParams = new URLSearchParams({ locations: profile.locations, roles: profile.roles, ...(webSearchEnabled ? { includeWebSearch: "1", webSearchRound: String(currentWebSearchRound), webSearchTerms } : {}) });
       const response = await fetch(`/api/jobs/search?${searchParams}`, { cache: "no-store" });
       const result = await response.json() as { jobs?: Job[]; discoveredJobs?: Job[]; errors?: string[]; error?: string; nextArbeitnowPage?: number | null; nextJobicyCursor?: string | null; sourceStatuses?: typeof sourceStatuses };
       setSourceStatuses(result.sourceStatuses ?? []);
@@ -1180,7 +1192,9 @@ export default function Home() {
       allDiscoveredJobs = result.discoveredJobs ?? fetchedJobs;
       const locationJobs = fetchedJobs;
       if (activeSearchPreferenceKey.current === requestedPreferenceKey) {
-        setSearchMatchSnapshot(snapshotSearchMatches(profile.locations, profile.roles, locationJobs));
+        setSearchMatchSnapshot((current) => current?.preferenceKey === requestedPreferenceKey
+          ? addSearchMatches(current, profile.locations, profile.roles, locationJobs)
+          : snapshotSearchMatches(profile.locations, profile.roles, locationJobs));
       }
       // Show the normalized pool immediately. Screening updates these cards in
       // small batches, so users can review early scores while later jobs run.
@@ -1216,14 +1230,17 @@ export default function Home() {
       setLiveJobs((current) => mergeJobPool(current, analyzedJobs, MAX_LOCAL_JOB_POOL));
       const locationCount = locationJobs.length;
       const sourcesChecked = (result.sourceStatuses ?? []).map((source) => `${source.source}: ${source.count} title/location candidates of ${source.fetchedCount} fetched`).join(" · ");
+      const existingWebUrls = new Set(liveJobs.filter((job) => job.source === "Ollama Web Search").map((job) => job.sourceUrl ?? job.id));
+      const newWebLeadCount = allDiscoveredJobs.filter((job) => job.source === "Ollama Web Search" && !existingWebUrls.has(job.sourceUrl ?? job.id)).length;
+      const webRoundMessage = webSearchEnabled ? ` Ollama Web Search round ${currentWebSearchRound + 1} used up to five varied queries; ${newWebLeadCount} new unique web leads were added. Repeating searches may return duplicates.` : "";
       setSourceMessage(result.jobs?.length
         ? assessWithCurrentContext
-          ? `Local decision screening assessed ${completed} of ${locationCount} location-eligible jobs. ${cancelled ? "Assessment cancelled; fetched listings remain available." : matchingWarning ? `Some jobs remain unassessed: ${matchingWarning}` : ""} Scores are estimates, not hiring probabilities. Request detailed analysis from an individual job when you need it.`
+          ? `Local decision screening assessed ${completed} of ${locationCount} location-eligible jobs. ${cancelled ? "Assessment cancelled; fetched listings remain available." : matchingWarning ? `Some jobs remain unassessed: ${matchingWarning}` : ""} Scores are estimates, not hiring probabilities. Request detailed analysis from an individual job when you need it.${webRoundMessage}`
           : cvText.trim() && !isLocalJobpilotPage()
             ? "CV analysis is blocked here for privacy. Open Jobpilot from localhost on this laptop; no CV text was sent. Showing profile matches."
             : cvText.trim()
               ? `Found ${result.jobs.length} listings, but local decision screening is unavailable. Start/update Ollama to 0.35 or newer, choose an installed decision model, and try again. ${localAiStatus}`
-              : `Found ${result.jobs.length} listings matching your selected titles and locations. Import your CV and select local models for fast scores; request detailed analysis on individual jobs. ${sourcesChecked}`
+              : `Found ${result.jobs.length} listings matching your selected titles and locations. Import your CV and select local models for fast scores; request detailed analysis on individual jobs. ${sourcesChecked}${webRoundMessage}`
         : `No listing matched the selected titles and locations. Try broader preferences or load more pages. ${sourcesChecked || "No source returned a listing."}`);
       selectJob(locationJobs[0]?.id ?? "");
     } catch (error) {
@@ -1405,8 +1422,8 @@ export default function Home() {
               <label>Job titles<textarea rows={3} value={searchRolesDraft} onChange={(event) => setSearchRolesDraft(event.target.value)} placeholder="Suggested titles from your CV appear here. Add or remove titles; separate alternatives with commas or new lines." /></label>
               <label>Preferred locations<textarea rows={2} value={searchLocationsDraft} onChange={(event) => setSearchLocationsDraft(event.target.value)} placeholder="For example: Vienna, Austria; Remote Europe. Leave blank for broad feed results." /></label>
             </div>
-            <label className="optional-web-search"><input type="checkbox" checked={webSearchEnabled} onChange={(event) => setWebSearchEnabled(event.target.checked)} /><span><strong>Also search the web (optional)</strong><small>Uses Ollama Web Search with a free account and API key. Only job-title and location queries leave this computer; your CV and job descriptions stay local. Free starter usage is limited. Results are snippets and must be verified at the source.</small></span></label>
-            <div className="source-controls"><button className="primary-button" disabled={!stateLoaded || loadingJobs || loadingMoreJobs} onClick={searchWithPreferences}>{loadingJobs ? "Searching job feeds…" : loadingMoreJobs ? "Loading more jobs…" : liveJobs.length ? "↻ Search jobs" : "Search jobs"}</button><span className="feed-summary">Search checks enabled public feeds{webSearchEnabled ? " and the optional web search" : ""}, then scores eligible listings with the local decision model in small batches. It automatically checks up to three additional provider batches; use “Load more” to continue. Detailed analysis only runs when you request it for a job.</span></div>
+            <label className="optional-web-search"><input type="checkbox" checked={webSearchEnabled} onChange={(event) => setWebSearchEnabled(event.target.checked)} /><span><strong>Also search the web (optional)</strong><small>Uses Ollama Web Search with a free account and API key. Selected titles, locations, and up to eight CV-derived skill/domain terms are sent as search queries; CV text and full job descriptions stay local. Each search makes up to five sequential queries with up to 10 snippets each. Results are unverified and must be checked at the source.</small></span></label>
+            <div className="source-controls"><button className="primary-button" disabled={!stateLoaded || loadingJobs || loadingMoreJobs} onClick={searchWithPreferences}>{loadingJobs ? "Searching job feeds…" : loadingMoreJobs ? "Loading more jobs…" : liveJobs.length ? "↻ Search jobs" : "Search jobs"}</button><span className="feed-summary">Search checks enabled public feeds{webSearchEnabled ? " and five varied Ollama Web Search queries; search again to rotate query wording and add unique leads (repeats may duplicate)" : ""}, then scores eligible listings with the local decision model in small batches. It automatically checks up to three additional provider batches; use “Load more” to continue. Detailed analysis only runs when you request it for a job.</span></div>
             {jobWorkflowBusy && <div className="job-workflow-status" role="status" aria-live="polite"><span className="job-workflow-spinner" aria-hidden="true"/><div><strong>{jobWorkflowHeading}</strong><p>{locationMatchedJobs.length} title/location candidates available · {decisionScoredCount} decision scores · {detailedAnalyzedCount} detailed reviews available. {loadingMoreJobs ? "The next listings are being fetched and decision-scored; detailed analysis stays off until requested." : nextArbeitnowPage !== null || nextJobicyCursor !== null ? "More feed pages are queued for automatic search and decision-scoring." : "The local decision model is checking the available listings."}</p></div></div>}
             {liveJobs.length > 0 && <div className="match-jobs-action"><button type="button" className="secondary-button" onClick={() => cvText.trim() ? void screenCurrentJobs() : openProfile()} disabled={cvText.trim() ? !localDecisionScreeningReady || pendingMatchCount === 0 || Boolean(aiMatchProgress) || loadingJobs || loadingMoreJobs : false}>{!cvText.trim() ? "Upload CV to score jobs" : aiMatchProgress ? "Scoring locally…" : pendingMatchCount ? `${Object.keys(screeningErrors).length ? "Retry" : "Score"} ${pendingMatchCount} jobs` : "All jobs scored"}</button><span>{screeningReadinessMessage ?? (Object.keys(screeningErrors).length ? `${Object.keys(screeningErrors).length} scores failed. Retry after checking the selected decision model and Local AI status.` : pendingMatchCount ? "New listings are decision-scored automatically on this laptop." : "Every location-eligible listing has a score from the selected decision model. Choose a job and request a detailed review when you need one.")}</span></div>}
             <p className="directory-credit">Public sources are free and need no account. Coverage is limited; no no-key provider gives complete Austria-wide vacancy coverage. <a href="https://www.arbeitnow.com/blog/job-board-api" target="_blank" rel="noreferrer">Arbeitnow</a> focuses on Germany and Europe, <a href="https://remotive.com/remote-jobs/api" target="_blank" rel="noreferrer">Remotive</a> is remote-only with a 24-hour publication delay, and <a href="https://jobicy.com/jobs-rss-feed" target="_blank" rel="noreferrer">Jobicy</a> is remote-only and covers a rolling seven-day window.</p>
