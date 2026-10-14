@@ -33,12 +33,13 @@ export function buildOllamaWebSearchQueries(roles: string, locations: string, se
   const locationText = places.join(" or ");
   const roleGroups = titleGroups.length ? titleGroups : ["job vacancy"];
   const terms = searchTerms.split(/[;,\n]+/).map((item) => item.trim()).filter(Boolean).slice(0, 8);
-  const start = (Math.max(0, Math.floor(round)) * OLLAMA_WEB_SEARCH_MAX_QUERIES) % QUERY_VARIANTS.length;
+  const searchRound = Number.isSafeInteger(round) && round >= 0 ? round : 0;
+  const start = (searchRound * OLLAMA_WEB_SEARCH_MAX_QUERIES) % QUERY_VARIANTS.length;
   return Array.from({ length: OLLAMA_WEB_SEARCH_MAX_QUERIES }, (_, index) => {
-    const role = roleGroups[index % roleGroups.length];
+    const role = roleGroups[(index + searchRound) % roleGroups.length];
     const variant = QUERY_VARIANTS[(start + index) % QUERY_VARIANTS.length];
     const termCount = Math.min(4, terms.length);
-    const termOffset = terms.length ? (Math.max(0, Math.floor(round)) * 3 + index * 2) % terms.length : 0;
+    const termOffset = terms.length ? (searchRound * 3 + index * 2) % terms.length : 0;
     const queryTerms = Array.from({ length: termCount }, (_, termIndex) => terms[(termOffset + termIndex) % terms.length]).join(" ");
     return variant.replace("{role}", role).replace("{location}", locationText).replace("{terms}", queryTerms)
       .replace(/\s+/g, " ").trim();
