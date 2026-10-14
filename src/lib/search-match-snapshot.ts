@@ -37,3 +37,17 @@ export function mergeSearchMatchesIntoPool(pool: Job[], snapshot: SearchMatchSna
   pool.forEach((job) => unique.set(listingKey(job), job));
   return [...unique.values()];
 }
+
+export function applyScreeningsToSearchMatches(
+  snapshot: SearchMatchSnapshot | null,
+  screeningsById: Map<string, NonNullable<Job["screening"]>>,
+) {
+  if (!snapshot || screeningsById.size === 0) return snapshot;
+  return {
+    ...snapshot,
+    jobs: snapshot.jobs.map((job) => {
+      const screening = screeningsById.get(job.id);
+      return screening ? { ...job, screening, aiMatch: undefined, detailedAnalysis: undefined } : job;
+    }),
+  };
+}

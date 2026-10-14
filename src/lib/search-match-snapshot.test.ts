@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addSearchMatches, hasSearchMatch, mergeSearchMatchesIntoPool, snapshotSearchMatches } from "./search-match-snapshot";
+import { addSearchMatches, applyScreeningsToSearchMatches, hasSearchMatch, mergeSearchMatchesIntoPool, snapshotSearchMatches } from "./search-match-snapshot";
 import type { Job } from "./types";
 
 const job: Job = {
@@ -29,4 +29,12 @@ describe("search match snapshots", () => {
     const snapshot = snapshotSearchMatches("Vienna, Austria", "solution architect", [job]);
     expect(mergeSearchMatchesIntoPool([], snapshot)).toEqual([job]);
     expect(mergeSearchMatchesIntoPool([score], snapshot)).toEqual([score]);
+  
+  it("attaches successful local scores to API matches outside the saved job pool", () => {
+    const screening = { model: "decision-model", score: 84, confidence: 80, breakdown: { skills: 90, experience: 80, domain: 70 }, disqualifierRisk: 0, informationStatus: "sufficient" as const };
+    const snapshot = snapshotSearchMatches("Vienna, Austria", "solution architect", [job]);
+    const updated = applyScreeningsToSearchMatches(snapshot, new Map([[job.id, screening]]));
+    expect(updated?.jobs[0]?.screening).toEqual(screening);
+    expect(mergeSearchMatchesIntoPool([], updated)[0]?.screening?.score).toBe(84);
   });
+});

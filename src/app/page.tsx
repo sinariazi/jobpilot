@@ -17,7 +17,7 @@ import { createApplicationPacket, detectAtsPlatform } from "@/lib/application-pr
 import { compareDecisionScores, passesMinimumDecisionScore } from "@/lib/job-ranking";
 import { composeTailoredCvText, renderTailoredCvHtml, tailoredCvFilename, type VerifiedCvTailoring } from "@/lib/cv-tailoring";
 import { mergeJobPool } from "@/lib/job-pool";
-import { addSearchMatches, hasSearchMatch, mergeSearchMatchesIntoPool, searchPreferenceKey, snapshotSearchMatches, type SearchMatchSnapshot } from "@/lib/search-match-snapshot";
+import { addSearchMatches, applyScreeningsToSearchMatches, hasSearchMatch, mergeSearchMatchesIntoPool, searchPreferenceKey, snapshotSearchMatches, type SearchMatchSnapshot } from "@/lib/search-match-snapshot";
 
 const LEGACY_STORAGE_KEY = "jobpilot-local-v1";
 const MAX_BACKUP_BYTES = 23_000_000;
@@ -521,6 +521,10 @@ export default function Home() {
         const succeededIds = new Set(screened.map(({ job }) => job.id));
         setScreeningErrors((current) => Object.fromEntries(Object.entries(current).filter(([id]) => !succeededIds.has(id))));
         setLiveJobs((current) => current.map((item) => screeningById.has(item.id) ? { ...item, screening: screeningById.get(item.id), aiMatch: undefined, detailedAnalysis: undefined } : item));
+        // API-confirmed jobs can be retained only in the search snapshot when
+        // the broad provider pool is capped. Update those copies too, or the
+        // visible cards keep saying “Match score pending” after HTTP 200.
+        setSearchMatchSnapshot((current) => applyScreeningsToSearchMatches(current, screeningById));
       }
       setAiMatchProgress({ completed: Math.min(offset + batch.length, candidates.length), total: candidates.length });
       if (signal.aborted) { cancelled = true; break; }
