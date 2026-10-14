@@ -63,60 +63,70 @@ function parseStringArray(value: unknown, maxItems: number, maxLength: number): 
   return [...new Set(value.map((item) => item.trim()))];
 }
 
-function parseJob(value: unknown): Job | null {
+export function parseJob(value: unknown): Job | null {
   if (!isRecord(value)) return null;
   const textFields: Array<[keyof Pick<Job, "id" | "company" | "role" | "location" | "mode" | "posted" | "source">, number]> = [
     ["id", 300], ["company", 160], ["role", 300], ["location", 300],
     ["mode", 100], ["posted", 100], ["source", 100],
   ];
   if (!textFields.every(([key, max]) => boundedString(value[key], max))) return null;
-  if (typeof value.summary !== "string" || !value.summary.trim()) return null;
+  if (typeof value.summary !== "string") return null;
+  let safeSourceUrl: string | undefined;
   if (value.sourceUrl !== undefined) {
-    if (!boundedString(value.sourceUrl, 2048)) return null;
     try {
-      if (new URL(value.sourceUrl).protocol !== "https:") return null;
+      if (boundedString(value.sourceUrl, 2048) && new URL(value.sourceUrl).protocol === "https:") safeSourceUrl = value.sourceUrl;
     } catch {
-      return null;
+      // A bad optional source URL should not prevent other valid jobs and
+      // decision scores from being saved. The listing remains visible without
+      // an unsafe link.
     }
   }
-  if (value.retrievedAt !== undefined && !boundedString(value.retrievedAt, 50)) return null;
-  if (value.postedAt !== undefined && (!boundedString(value.postedAt, 50) || !Number.isFinite(Date.parse(value.postedAt)))) return null;
-  if (value.department !== undefined && (typeof value.department !== "string" || !value.department.trim())) return null;
-  if (value.sourceLocationScope !== undefined && !boundedString(value.sourceLocationScope, 100)) return null;
-  if (value.locationEvidence !== undefined && !boundedString(value.locationEvidence, 100)) return null;
-  if (value.listingVerification !== undefined && value.listingVerification !== "search-result") return null;
-  if (value.descriptionKind !== undefined && value.descriptionKind !== "search-snippet") return null;
-  const sourceAliases = value.sourceAliases === undefined ? undefined : parseStringArray(value.sourceAliases, 10, 100);
-  if (value.sourceAliases !== undefined && !sourceAliases) return null;
+  const retrievedAt = boundedString(value.retrievedAt, 50) ? value.retrievedAt : undefined;
+  const postedAt = boundedString(value.postedAt, 50) && Number.isFinite(Date.parse(value.postedAt)) ? value.postedAt : undefined;
+  const department = typeof value.department === "string" && value.department.trim() ? value.department.trim().slice(0, 500) : undefined;
+  const sourceLocationScope = boundedString(value.sourceLocationScope, 500) ? value.sourceLocationScope.slice(0, 100) : undefined;
+  const locationEvidence = boundedString(value.locationEvidence, 500) ? value.locationEvidence.slice(0, 100) : undefined;
+  const sourceAliases = value.sourceAliases === undefined ? undefined : parseStringArray(value.sourceAliases, 10, 500)?.map((alias) => alias.slice(0, 100));
   if (value.description !== undefined && typeof value.description !== "string") return null;
-  if (value.aiMatch !== undefined && (!isRecord(value.aiMatch)
-    || !boundedString(value.aiMatch.model, 200)
-    || typeof value.aiMatch.relevant !== "boolean"
-    || typeof value.aiMatch.score !== "number" || !Number.isInteger(value.aiMatch.score) || value.aiMatch.score < 0 || value.aiMatch.score > 100
-    || !boundedString(value.aiMatch.reason, 500) || !boundedString(value.aiMatch.cvEvidence, 300))) return null;
+  let aiMatch: Job["aiMatch"];
+  if (isRecord(value.aiMatch)
+    && boundedString(value.aiMatch.model, 200)
+    && typeof value.aiMatch.relevant === "boolean"
+    && typeof value.aiMatch.score === "number" && Number.isInteger(value.aiMatch.score) && value.aiMatch.score >= 0 && value.aiMatch.score <= 100
+    && boundedString(value.aiMatch.reason, 500) && boundedString(value.aiMatch.cvEvidence, 300)) {
+    aiMatch = {
+      model: value.aiMatch.model,
+      relevant: value.aiMatch.relevant,
+      score: value.aiMatch.score,
+      reason: value.aiMatch.reason,
+      cvEvidence: value.aiMatch.cvEvidence,
+    };
+  }
   let screening: JobScreening | undefined;
-  if (value.screening !== undefined) {
+  if (value.screening !== undefined && isRecord(value.screening)) {
     const item = value.screening;
-    if (!isRecord(item) || !boundedString(item.model, 200) || !Number.isInteger(item.score) || (item.score as number) < 0 || (item.score as number) > 100
-      || !isRecord(item.breakdown)
-      || !(item.confidence === null || (typeof item.confidence === "number" && Number.isInteger(item.confidence) && item.confidence >= 0 && item.confidence <= 100))
-      || !(item.disqualifierRisk === null || (typeof item.disqualifierRisk === "number" && Number.isInteger(item.disqualifierRisk) && item.disqualifierRisk >= 0 && item.disqualifierRisk <= 100))
-      || !["sufficient", "cv_missing", "job_missing", "both_missing"].includes(String(item.informationStatus))) return null;
-    const breakdown = item.breakdown;
-    if (!["skills", "experience", "domain"].every((key) => {
-      const part = breakdown[key];
+    const rawBreakdown = item.breakdown;
+    const breakdownValid = isRecord(rawBreakdown) && ["skills", "experience", "domain"].every((key) => {
+      const part = rawBreakdown[key];
       return part === null || (typeof part === "number" && Number.isInteger(part) && part >= 0 && part <= 100);
-    })) return null;
-    screening = item as unknown as JobScreening;
+    });
+    if (boundedString(item.model, 200) && Number.isInteger(item.score) && (item.score as number) >= 0 && (item.score as number) <= 100
+      && breakdownValid
+      && (item.confidence === null || (typeof item.confidence === "number" && Number.isInteger(item.confidence) && item.confidence >= 0 && item.confidence <= 100))
+      && (item.disqualifierRisk === null || (typeof item.disqualifierRisk === "number" && Number.isInteger(item.disqualifierRisk) && item.disqualifierRisk >= 0 && item.disqualifierRisk <= 100))
+      && ["sufficient", "cv_missing", "job_missing", "both_missing"].includes(String(item.informationStatus))) {
+      screening = item as unknown as JobScreening;
+    }
   }
   let detailedAnalysis: DetailedJobAnalysis | undefined;
   if (value.detailedAnalysis !== undefined) {
     const item = value.detailedAnalysis;
-    if (!isRecord(item) || !boundedString(item.model, 200) || typeof item.summary !== "string" || item.summary.length > 3000
-      || !Array.isArray(item.matchedRequirements) || item.matchedRequirements.length > 30 || !item.matchedRequirements.every((entry) => boundedString(entry, 500))
-      || !Array.isArray(item.gaps) || item.gaps.length > 30 || !item.gaps.every((entry) => boundedString(entry, 500))
-      || !Array.isArray(item.evidence) || item.evidence.length > 30 || !item.evidence.every((entry) => isRecord(entry) && boundedString(entry.requirement, 500) && boundedString(entry.cvQuote, 500) && boundedString(entry.jobQuote, 500))) return null;
-    detailedAnalysis = item as unknown as DetailedJobAnalysis;
+    if (isRecord(item) && boundedString(item.model, 200) && typeof item.summary === "string" && item.summary.length <= 3000
+      && Array.isArray(item.matchedRequirements) && item.matchedRequirements.length <= 30 && item.matchedRequirements.every((entry) => boundedString(entry, 500))
+      && Array.isArray(item.gaps) && item.gaps.length <= 30 && item.gaps.every((entry) => boundedString(entry, 500))
+      && Array.isArray(item.evidence) && item.evidence.length <= 30 && item.evidence.every((entry) => isRecord(entry) && boundedString(entry.requirement, 500) && boundedString(entry.cvQuote, 500) && boundedString(entry.jobQuote, 500))) {
+      detailedAnalysis = item as unknown as DetailedJobAnalysis;
+    }
   }
   return {
     id: (value.id as string).trim(),
@@ -125,25 +135,19 @@ function parseJob(value: unknown): Job | null {
     location: (value.location as string).trim(),
     mode: (value.mode as string).trim(),
     posted: (value.posted as string).trim(),
-    ...(typeof value.postedAt === "string" ? { postedAt: value.postedAt } : {}),
+    ...(postedAt ? { postedAt } : {}),
     source: (value.source as string).trim(),
-    ...(typeof value.department === "string" ? { department: value.department.trim().slice(0, 500) } : {}),
+    ...(department ? { department } : {}),
     summary: (value.summary as string).trim().slice(0, 4000),
     ...(typeof value.description === "string" ? { description: value.description.trim().slice(0, 8000) } : {}),
-    ...(typeof value.sourceUrl === "string" ? { sourceUrl: value.sourceUrl } : {}),
-    ...(typeof value.sourceLocationScope === "string" ? { sourceLocationScope: value.sourceLocationScope } : {}),
-    ...(typeof value.locationEvidence === "string" ? { locationEvidence: value.locationEvidence } : {}),
+    ...(safeSourceUrl ? { sourceUrl: safeSourceUrl } : {}),
+    ...(sourceLocationScope ? { sourceLocationScope } : {}),
+    ...(locationEvidence ? { locationEvidence } : {}),
     ...(value.listingVerification === "search-result" ? { listingVerification: value.listingVerification } : {}),
     ...(value.descriptionKind === "search-snippet" ? { descriptionKind: value.descriptionKind } : {}),
     ...(sourceAliases ? { sourceAliases } : {}),
-    ...(typeof value.retrievedAt === "string" ? { retrievedAt: value.retrievedAt } : {}),
-    ...(isRecord(value.aiMatch) ? { aiMatch: {
-      model: value.aiMatch.model as string,
-      relevant: value.aiMatch.relevant as boolean,
-      score: value.aiMatch.score as number,
-      reason: value.aiMatch.reason as string,
-      cvEvidence: value.aiMatch.cvEvidence as string,
-    } } : {}),
+    ...(retrievedAt ? { retrievedAt } : {}),
+    ...(aiMatch ? { aiMatch } : {}),
     ...(screening ? { screening } : {}),
     ...(detailedAnalysis ? { detailedAnalysis } : {}),
   };
