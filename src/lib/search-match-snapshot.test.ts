@@ -36,5 +36,6 @@ describe("search match snapshots", () => {
     const updated = applyScreeningsToSearchMatches(snapshot, new Map([[job.id, screening]]));
     expect(updated?.jobs[0]?.screening).toEqual(screening);
     expect(mergeSearchMatchesIntoPool([], updated)[0]?.screening?.score).toBe(84);
+    expect(mergeSearchMatchesIntoPool([job], updated)[0]?.screening?.score).toBe(84);
   });
 });

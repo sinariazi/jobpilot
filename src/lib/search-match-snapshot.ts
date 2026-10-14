@@ -32,9 +32,22 @@ export function hasSearchMatch(job: Job, locations: string, roles: string, snaps
 export function mergeSearchMatchesIntoPool(pool: Job[], snapshot: SearchMatchSnapshot | null) {
   const unique = new Map<string, Job>();
   snapshot?.jobs.forEach((job) => unique.set(listingKey(job), job));
-  // Pool copies carry screening and detailed-analysis fields, so prefer them
-  // when an API-confirmed listing is present in both collections.
-  pool.forEach((job) => unique.set(listingKey(job), job));
+  // Pool copies may be stale or lack a score when the matched row was only
+  // retained in the API snapshot. Prefer current provider fields while keeping
+  // whichever copy has screening and detailed-analysis results.
+  pool.forEach((job) => {
+    const key = listingKey(job);
+    const previous = unique.get(key);
+    unique.set(key, previous ? {
+      ...previous,
+      ...job,
+      screening: job.screening ?? previous.screening,
+      aiMatch: job.aiMatch ?? previous.aiMatch,
+      detailedAnalysis: job.detailedAnalysis ?? previous.detailedAnalysis,
+      description: job.description || previous.description,
+      summary: job.summary.length >= previous.summary.length ? job.summary : previous.summary,
+    } : job);
+  });
   return [...unique.values()];
 }
 
