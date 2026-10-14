@@ -12,7 +12,7 @@ function emptySourceResponse(url: string) {
 }
 
 describe("searchPublicJobs", () => {
-  it("adds opt-in Ollama web snippets to the same searchable pool without sending CV data", async () => {
+  it("adds opt-in Ollama web snippets using tailored query terms without sending raw CV data", async () => {
     vi.stubEnv("OLLAMA_API_KEY", "web-test-key");
     const webRequests: Array<{ url: string; body?: string }> = [];
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, options?: RequestInit) => {
@@ -27,10 +27,10 @@ describe("searchPublicJobs", () => {
     expect(result.jobs.map((job) => job.source)).toContain("Ollama Web Search");
     expect(result.jobs[0]).toMatchObject({ listingVerification: "search-result", descriptionKind: "search-snippet", location: "Vienna, Austria" });
     expect(result.sourceStatuses.find((source) => source.source === "Ollama Web Search")).toMatchObject({ state: "success", count: 1, fetchedCount: 1 });
-    expect(webRequests).toHaveLength(1);
+    expect(webRequests).toHaveLength(5);
     expect(webRequests[0].body).toContain("Solution Architect");
     expect(webRequests[0].body).toContain("Vienna, Austria");
-    expect(webRequests[0].body).not.toMatch(/cv|skills|description/i);
+    expect(webRequests[0].body).not.toMatch(/raw CV|description/i);
   });
 
   it("normalizes the public feeds with original source details and retrieval metadata", async () => {
@@ -56,6 +56,70 @@ describe("searchPublicJobs", () => {
     expect(result.sourceStatuses.filter((source) => source.source !== "Arbeitnow").every((source) => source.fetchedCount === 1 || source.source === "Himalayas")).toBe(true);
     expect(result.errors).toContain("No location preference was supplied; the remote-job feed uses its Europe-wide public feed.");
     expect(requests.filter(({ url }) => url.includes("arbeitnow")).every(({ options }) => options?.cache === "no-store")).toBe(true);
+  });
+
+  it("plans bounded Himalayas queries from selected roles and countries", () => {
+    expect(buildHimalayasSearchPlan("Architect; Engineer", "Vienna, Austria; Remote Europe")).toEqual([
+      { role: "Architect", country: "Austria" },
+      { role: "Engineer", country: "Austria" },
+    ]);
+    expect(buildHimalayasSearchPlan("A; B; C", "Austria; Switzerland")).toHaveLength(HIMALAYAS_MAX_QUERIES_PER_SEARCH);
+  });
+
+  it("imports Austria-eligible remote jobs from the attributed public Himalayas API", async () => {
+    const requests: Array<{ url: string; options?: RequestInit }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, options?: RequestInit) => {
+      const url = String(input); requests.push({ url, options });
+      if (url.includes("himalayas.app/jobs/api/search")) return Response.json({ jobs: [{
+        title: "Solution Architect", companyName: "Example GmbH", applicationLink: "https://himalayas.app/companies/example/jobs/architect",
+        guid: "https://himalayas.app/companies/example/jobs/architect", locationRestrictions: ["Austria"], timezoneRestrictions: [1],
+        employmentType: "Full-time", categories: ["Engineering"], excerpt: "Design cloud systems", description: "<p>Design cloud systems in production.</p>", pubDate: 1790812800,
+      }] });
+      return emptySourceResponse(url);
+    }));
+    const result = await searchPublicJobs({ locations: "Austria; Remote Europe", roles: "Solution Architect" });
+    expect(result.discoveredJobs.find((item) => item.source === "Himalayas")).toMatchObject({
+      role: "Solution Architect", company: "Example GmbH", location: "Remote · Austria", mode: "Remote · UTC+1 · Full-time",
+      sourceUrl: "https://himalayas.app/companies/example/jobs/architect", sourceAttributionUrl: "https://himalayas.app/jobs",
+      department: "Engineering", description: "Design cloud systems in production.",
+    });
+    expect(result.sourceStatuses.find((source) => source.source === "Himalayas")).toMatchObject({ state: "success", count: 1, fetchedCount: 1 });
+    const request = requests.find(({ url }) => url.includes("himalayas.app/jobs/api/search"));
+    expect(request && new URL(request.url).searchParams.get("country")).toBe("Austria");
+    expect(request && new URL(request.url).searchParams.get("q")).toBe("Solution Architect");
+    expect(request?.options).toMatchObject({ next: { revalidate: 86400 } });
+  });
+
+  it("summarizes broad Himalayas timezone eligibility without flooding the job card", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("himalayas.app/jobs/api/search")) return Response.json({ jobs: [{
+        title: "Solution Architect", companyName: "Global Example", applicationLink: "https://himalayas.app/jobs/global",
+        locationRestrictions: [], timezoneRestrictions: Array.from({ length: 51 }, (_, index) => -11 + index * 0.5),
+      }] });
+      return emptySourceResponse(url);
+    }));
+    const result = await searchPublicJobs({ locations: "Austria", roles: "Solution Architect" });
+    expect(result.discoveredJobs.find((job) => job.source === "Himalayas")).toMatchObject({
+      location: "Remote · Worldwide",
+      mode: "Remote · Global time zones",
+    });
+  });
+
+  it("keeps successful Himalayas queries when one query fails", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("himalayas.app/jobs/api/search")) {
+        const query = new URL(url).searchParams.get("q");
+        if (query === "Engineer") throw new Error("provider rate limited");
+        return Response.json({ jobs: [{ title: "Architect", companyName: "Example", applicationLink: "https://himalayas.app/jobs/architect", locationRestrictions: ["Austria"] }] });
+      }
+      return emptySourceResponse(url);
+    }));
+    const result = await searchPublicJobs({ locations: "Austria", roles: "Architect; Engineer" });
+    expect(result.jobs.some((job) => job.source === "Himalayas" && job.role === "Architect")).toBe(true);
+    expect(result.errors).toContain("Himalayas had partial query failures; successful query results remain available.");
+    expect(result.sourceStatuses.find((source) => source.source === "Himalayas")?.state).toBe("partial");
   });
 
   it("retains successful source results and reports a failed feed", async () => {
@@ -183,6 +247,7 @@ describe("searchPublicJobs", () => {
     expect(result.sourceStatuses.find((source) => source.source === "Arbeitnow")).toMatchObject({ fetchedCount: 5, count: 0, state: "success" });
     expect(result.sourceStatuses.find((source) => source.source === "Remotive")).toMatchObject({ fetchedCount: 1, count: 0, state: "success" });
     expect(result.sourceStatuses.find((source) => source.source === "Jobicy")).toMatchObject({ fetchedCount: 1, count: 0, state: "success" });
+    expect(result.sourceStatuses.find((source) => source.source === "Himalayas")).toMatchObject({ fetchedCount: 0, count: 0, state: "success" });
   });
 
   it("keeps successful pages when one public source page fails", async () => {
@@ -286,69 +351,4 @@ describe("searchPublicJobs", () => {
     expect(result.jobs).toHaveLength(5);
     expect(result.nextArbeitnowPage).toBeNull();
   });
-  it("plans bounded Himalayas queries from selected roles and countries", () => {
-    expect(buildHimalayasSearchPlan("Architect; Engineer", "Vienna, Austria; Remote Europe")).toEqual([
-      { role: "Architect", country: "Austria" },
-      { role: "Engineer", country: "Austria" },
-    ]);
-    expect(buildHimalayasSearchPlan("A; B; C", "Austria; Switzerland")).toHaveLength(HIMALAYAS_MAX_QUERIES_PER_SEARCH);
-  });
-
-  it("imports Austria-eligible remote jobs from the attributed public Himalayas API", async () => {
-    const requests: Array<{ url: string; options?: RequestInit }> = [];
-    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, options?: RequestInit) => {
-      const url = String(input); requests.push({ url, options });
-      if (url.includes("himalayas.app/jobs/api/search")) return Response.json({ jobs: [{
-        title: "Solution Architect", companyName: "Example GmbH", applicationLink: "https://himalayas.app/companies/example/jobs/architect",
-        guid: "https://himalayas.app/companies/example/jobs/architect", locationRestrictions: ["Austria"], timezoneRestrictions: [1],
-        employmentType: "Full-time", categories: ["Engineering"], excerpt: "Design cloud systems", description: "<p>Design cloud systems in production.</p>", pubDate: 1790812800,
-      }] });
-      return emptySourceResponse(url);
-    }));
-    const result = await searchPublicJobs({ locations: "Austria; Remote Europe", roles: "Solution Architect" });
-    expect(result.discoveredJobs.find((item) => item.source === "Himalayas")).toMatchObject({
-      role: "Solution Architect", company: "Example GmbH", location: "Remote · Austria", mode: "Remote · UTC+1 · Full-time",
-      sourceUrl: "https://himalayas.app/companies/example/jobs/architect", sourceAttributionUrl: "https://himalayas.app/jobs",
-      department: "Engineering", description: "Design cloud systems in production.",
-    });
-    expect(result.sourceStatuses.find((source) => source.source === "Himalayas")).toMatchObject({ state: "success", count: 1, fetchedCount: 1 });
-    const request = requests.find(({ url }) => url.includes("himalayas.app/jobs/api/search"));
-    expect(request && new URL(request.url).searchParams.get("country")).toBe("Austria");
-    expect(request && new URL(request.url).searchParams.get("q")).toBe("Solution Architect");
-    expect(request?.options).toMatchObject({ next: { revalidate: 86400 } });
-  });
-
-  it("summarizes broad Himalayas timezone eligibility without flooding the job card", async () => {
-    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
-      const url = String(input);
-      if (url.includes("himalayas.app/jobs/api/search")) return Response.json({ jobs: [{
-        title: "Solution Architect", companyName: "Global Example", applicationLink: "https://himalayas.app/jobs/global",
-        locationRestrictions: [], timezoneRestrictions: Array.from({ length: 51 }, (_, index) => -11 + index * 0.5),
-      }] });
-      return emptySourceResponse(url);
-    }));
-    const result = await searchPublicJobs({ locations: "Austria", roles: "Solution Architect" });
-    expect(result.discoveredJobs.find((job) => job.source === "Himalayas")).toMatchObject({
-      location: "Remote · Worldwide",
-      mode: "Remote · Global time zones",
-    });
-  });
-
-  it("keeps successful Himalayas queries when one query fails", async () => {
-    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
-      const url = String(input);
-      if (url.includes("himalayas.app/jobs/api/search")) {
-        const query = new URL(url).searchParams.get("q");
-        if (query === "Engineer") throw new Error("provider rate limited");
-        return Response.json({ jobs: [{ title: "Architect", companyName: "Example", applicationLink: "https://himalayas.app/jobs/architect", locationRestrictions: ["Austria"] }] });
-      }
-      return emptySourceResponse(url);
-    }));
-    const result = await searchPublicJobs({ locations: "Austria", roles: "Architect; Engineer" });
-    expect(result.jobs.some((job) => job.source === "Himalayas" && job.role === "Architect")).toBe(true);
-    expect(result.errors).toContain("Himalayas had partial query failures; successful query results remain available.");
-    expect(result.sourceStatuses.find((source) => source.source === "Himalayas")?.state).toBe("partial");
-  });
-
-
 });
