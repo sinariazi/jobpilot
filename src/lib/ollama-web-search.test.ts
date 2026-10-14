@@ -15,6 +15,8 @@ describe("optional Ollama Web Search", () => {
     expect(queries[0]).toContain("TypeScript AWS Product platforms");
     expect(queries.join(" ")).not.toContain("raw CV text");
     expect(buildOllamaWebSearchQueries("Architect", "Vienna", "TypeScript; AWS", 0)).not.toEqual(buildOllamaWebSearchQueries("Architect", "Vienna", "TypeScript; AWS", 1));
+    expect(buildOllamaWebSearchQueries("Architect; Engineer", "Vienna", "", 0)[0]).toContain("Architect ");
+    expect(buildOllamaWebSearchQueries("Architect; Engineer", "Vienna", "", 1)[0]).toContain("Engineer ");
     const cvTerms = "SkillA; SkillB; SkillC; SkillD; SkillE; SkillF; SkillG; SkillH";
     expect(buildOllamaWebSearchQueries("Architect", "Vienna", cvTerms, 0)[0]).toContain("SkillA SkillB SkillC SkillD");
     expect(buildOllamaWebSearchQueries("Architect", "Vienna", cvTerms, 1)[0]).toContain("SkillD SkillE SkillF SkillG");
