@@ -86,6 +86,20 @@ function publishedAt(value?: string | number) {
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
 }
 
+function formatTimezoneRestrictions(values: number[]) {
+  const offsets = [...new Set(values.filter(Number.isFinite))].sort((a, b) => a - b);
+  if (offsets.length === 0) return "";
+  // Himalayas can return every half-hour offset for globally eligible roles.
+  // Listing dozens of offsets in each card makes the role and location hard
+  // to scan, so summarize broad eligibility and keep small sets explicit.
+  if (offsets.length >= 8) return "Global time zones";
+  const format = (offset: number) => {
+    const magnitude = Math.abs(offset).toFixed(1).replace(/\.0$/, "");
+    return `UTC${offset < 0 ? "−" : "+"}${magnitude}`;
+  };
+  return offsets.map(format).join(" / ");
+}
+
 function clean(value?: string) {
   return descriptionText(value ?? "");
 }
@@ -159,16 +173,16 @@ function mapHimalayas(posting: HimalayasPosting, retrievedAt: string): Job | nul
   if (!posting.title?.trim() || !posting.companyName?.trim() || !sourceUrl) return null;
   const description = clean(posting.description);
   const locations = Array.isArray(posting.locationRestrictions) ? posting.locationRestrictions.filter((value) => typeof value === "string" && value.trim()) : [];
-  const timezoneRestrictions = (posting.timezoneRestrictions ?? posting.timezoneRestriction ?? []).filter(Number.isFinite);
+  const timezoneRestrictions = posting.timezoneRestrictions ?? posting.timezoneRestriction ?? [];
   const location = locations.length ? `Remote · ${locations.join(", ")}` : "Remote · Worldwide";
-  const timezone = timezoneRestrictions.length ? ` · UTC${timezoneRestrictions.map((offset) => `${offset >= 0 ? "+" : ""}${offset}`).join("/")}` : "";
+  const timezone = formatTimezoneRestrictions(timezoneRestrictions);
   const date = typeof posting.pubDate === "number" ? postedDate(new Date(posting.pubDate * 1000).toISOString()) : "Date not provided";
   return {
     id: `himalayas-${posting.guid || sourceUrl}`,
     company: posting.companyName,
     role: posting.title,
     location,
-    mode: `Remote${timezone}${posting.employmentType ? ` · ${posting.employmentType}` : ""}`,
+    mode: `Remote${timezone ? ` · ${timezone}` : ""}${posting.employmentType ? ` · ${posting.employmentType}` : ""}`,
     posted: date,
     ...(publishedAt(posting.pubDate) ? { postedAt: publishedAt(posting.pubDate) } : {}),
     source: HIMALAYAS_SOURCE,

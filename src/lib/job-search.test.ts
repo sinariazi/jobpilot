@@ -318,6 +318,22 @@ describe("searchPublicJobs", () => {
     expect(request?.options).toMatchObject({ next: { revalidate: 86400 } });
   });
 
+  it("summarizes broad Himalayas timezone eligibility without flooding the job card", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("himalayas.app/jobs/api/search")) return Response.json({ jobs: [{
+        title: "Solution Architect", companyName: "Global Example", applicationLink: "https://himalayas.app/jobs/global",
+        locationRestrictions: [], timezoneRestrictions: Array.from({ length: 51 }, (_, index) => -11 + index * 0.5),
+      }] });
+      return emptySourceResponse(url);
+    }));
+    const result = await searchPublicJobs({ locations: "Austria", roles: "Solution Architect" });
+    expect(result.discoveredJobs.find((job) => job.source === "Himalayas")).toMatchObject({
+      location: "Remote · Worldwide",
+      mode: "Remote · Global time zones",
+    });
+  });
+
   it("keeps successful Himalayas queries when one query fails", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
