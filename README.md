@@ -11,7 +11,7 @@ Jobpilot helps a candidate move from CV to a focused job review: it searches pub
 ## Product capabilities
 
 - **CV analysis:** Extracts PDF, DOCX, and TXT files in the browser; optionally OCRs scanned PDFs locally with Tesseract. A local chat model summarizes the CV, suggests roles and skills, and gives evidence-based improvement feedback.
-- **Job discovery:** Searches four public feeds—Arbeitnow, Remotive, Jobicy, and Himalayas—without provider API keys or registration. An optional Ollama Web Search integration can broaden discovery. Users can edit job titles and locations, inspect all discovered listings, and paste a posting missed by public feeds.
+- **Job discovery:** Searches four public feeds—Arbeitnow, Remotive, Jobicy, and Himalayas—without provider API keys or registration. An optional Ollama Web Search integration can broaden discovery. Users can edit job titles and locations, inspect the locally retained discovery pool (up to 2,000 listings), and paste a posting missed by public feeds. The All found jobs view is paginated for responsiveness and includes listings that did not pass the title/location filters.
 - **Progressive matching:** Shows title/location candidates before all scoring completes. Eligible listings are assessed in small batches with Ollama's `/v1/systemone` decision endpoint. Scores, confidence, category breakdowns, and missing evidence are displayed separately. “Potential fit” requires the configurable score and confidence cutoffs plus enough job evidence; low-confidence, missing-data, and snippet-only items stay visible as “Needs review.”
 - **On-demand job analysis:** A local chat model runs only when the user requests a detailed review for one job. It returns matched requirements, gaps, and CV/job evidence without replacing the first-stage score.
 - **CV and application preparation:** Selects exact CV excerpts for a chosen job, checks them against saved CV text, and exports a new editable, print-ready HTML file. Cover-letter drafts include a source-quote check. A local Chromium extension can prefill recognized empty ATS contact fields after a user click.
@@ -69,7 +69,7 @@ The detailed stage is user-triggered for one selected job; it does not run acros
 
 ## Data sources and coverage
 
-The four public feeds are free to query without API keys or registration. Their presence does **not** mean comprehensive Austrian coverage: several focus on remote roles or Germany/Europe. A successful search may return the same listings while provider data is unchanged or cached.
+The four public feeds are free to query without API keys or registration. Their presence does **not** mean comprehensive Austrian coverage: several focus on remote roles or Germany/Europe. A successful search may return the same listings while provider data is unchanged or cached. Jobpilot keeps up to 2,000 normalized listings in its local discovery pool; the All found jobs tab shows that broader pool, with search, sorting, filter-status labels, and pagination. It is not a count of every current job published by the providers or on the internet.
 
 | Source | Access and useful fields | Coverage and limits |
 |---|---|---|

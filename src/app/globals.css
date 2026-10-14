@@ -120,6 +120,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .found-jobs-controls{display:flex;align-items:center;gap:14px;margin:15px 0 10px;color:#59675d;font-size:12px}
 .found-jobs-controls .search-box{height:40px;max-width:640px}
 .found-jobs-controls .search-box input{font-size:13px}
+.found-jobs-controls select{height:40px;padding:0 10px;border:1px solid var(--line);border-radius:6px;background:#fff;color:#435047;font-size:12px}.found-jobs-pagination{display:flex;justify-content:center;align-items:center;gap:9px;flex-wrap:wrap;margin:12px 0}.found-jobs-pagination .load-more{margin:0}.found-collapse{display:block;margin:10px auto}
 .found-jobs-list{display:flex;flex-direction:column;gap:10px}
 .found-job-row{padding:16px 18px;border:1px solid var(--line);border-radius:7px;background:#fff}
 .found-job-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}

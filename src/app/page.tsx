@@ -18,7 +18,8 @@ import { compareDecisionScores, passesMinimumDecisionScore } from "@/lib/job-ran
 import { composeTailoredCvText, renderTailoredCvHtml, tailoredCvFilename, type VerifiedCvTailoring } from "@/lib/cv-tailoring";
 import { mergeJobPool } from "@/lib/job-pool";
 import { assessJobFit, fitAssessmentLabel } from "@/lib/fit-assessment";
-import { addSearchMatches, applyDetailedAnalysisToSearchMatches, applyScreeningsToSearchMatches, hasSearchMatch, mergeSearchMatchesIntoPool, searchPreferenceKey, snapshotSearchMatches, type SearchMatchSnapshot } from "@/lib/search-match-snapshot";
+import { getFoundJobPreferenceStatus } from "@/lib/found-job-status";
+import { addSearchMatches, applyDetailedAnalysisToSearchMatches, applyScreeningsToSearchMatches, mergeSearchMatchesIntoPool, searchPreferenceKey, snapshotSearchMatches, type SearchMatchSnapshot } from "@/lib/search-match-snapshot";
 
 const LEGACY_STORAGE_KEY = "jobpilot-local-v1";
 const MAX_BACKUP_BYTES = 23_000_000;
@@ -73,6 +74,7 @@ export default function Home() {
   const [activeView, setActiveView] = useState<"overview" | "all-found" | "applications">("overview");
   const [foundQuery, setFoundQuery] = useState("");
   const [foundVisibleCount, setFoundVisibleCount] = useState(50);
+  const [foundSort, setFoundSort] = useState<"newest" | "company" | "title">("newest");
   const [liveJobs, setLiveJobs] = useState<Job[]>([]);
   const [loadingJobs, setLoadingJobs] = useState(false);
   const [loadingMoreJobs, setLoadingMoreJobs] = useState(false);
@@ -144,11 +146,22 @@ export default function Home() {
   // local copies with scores override the unscored API copies.
   const jobs = useMemo(() => mergeSearchMatchesIntoPool(liveJobs, searchMatchSnapshot), [liveJobs, searchMatchSnapshot]);
   const allFoundJobs = useMemo(() => jobs.filter((job) => job.source !== "Manual"), [jobs]);
+  const foundPreferenceCounts = useMemo(() => allFoundJobs.reduce((counts, job) => {
+    if (getFoundJobPreferenceStatus(job, profile.locations, profile.roles, searchMatchSnapshot).included) counts.included += 1;
+    else counts.filtered += 1;
+    return counts;
+  }, { included: 0, filtered: 0 }), [allFoundJobs, profile.locations, profile.roles, searchMatchSnapshot]);
   const filteredFoundJobs = useMemo(() => {
     const normalizedQuery = foundQuery.trim().toLocaleLowerCase();
-    if (!normalizedQuery) return allFoundJobs;
-    return allFoundJobs.filter((job) => `${job.role} ${job.company} ${job.location} ${job.source}`.toLocaleLowerCase().includes(normalizedQuery));
-  }, [allFoundJobs, foundQuery]);
+    const filtered = normalizedQuery
+      ? allFoundJobs.filter((job) => `${job.role} ${job.company} ${job.location} ${job.source}`.toLocaleLowerCase().includes(normalizedQuery))
+      : [...allFoundJobs];
+    return filtered.sort((a, b) => {
+      if (foundSort === "company") return a.company.localeCompare(b.company) || a.role.localeCompare(b.role);
+      if (foundSort === "title") return a.role.localeCompare(b.role) || a.company.localeCompare(b.company);
+      return (Date.parse(b.postedAt ?? b.retrievedAt ?? "") || 0) - (Date.parse(a.postedAt ?? a.retrievedAt ?? "") || 0);
+    });
+  }, [allFoundJobs, foundQuery, foundSort]);
   const visibleFoundJobs = filteredFoundJobs.slice(0, foundVisibleCount);
 
   function selectJob(jobId: string) {
@@ -1351,24 +1364,23 @@ export default function Home() {
               <p className="application-footnote">Status changes, notes, and follow-up dates are saved on this device. Follow-up dates appear here as reminders; no notification is sent. “Applied” is a manual record; Jobpilot never submits applications.</p>
             </>
           ) : activeView === "all-found" ? <>
-            <div className="greeting-row"><div><div className="eyebrow">PUBLIC FEED DISCOVERIES</div><h1>All found <span>jobs.</span></h1><p className="subheading">{allFoundJobs.length} normalized listings returned before Jobpilot’s title and location filters.</p></div><button className="primary-button" onClick={searchWithPreferences} disabled={!stateLoaded || loadingJobs || loadingMoreJobs}><span>＋</span> {loadingJobs ? "Searching feeds…" : loadingMoreJobs ? "Loading more…" : "Search jobs"}</button></div>
-            <div className="found-jobs-notice"><strong>This view shows every listing returned by enabled feeds.</strong><span>Some providers apply their own search scope (for example, Jobicy is queried by selected region). Jobpilot scores only listings that fit your selected titles and locations; each listing shows which preference excluded it.</span></div>
+            <div className="greeting-row"><div><div className="eyebrow">PUBLIC FEED DISCOVERIES</div><h1>All found <span>jobs.</span></h1><p className="subheading">{allFoundJobs.length} unique listings currently stored in the discovery pool (maximum {MAX_LOCAL_JOB_POOL}).</p></div><button className="primary-button" onClick={searchWithPreferences} disabled={!stateLoaded || loadingJobs || loadingMoreJobs}><span>＋</span> {loadingJobs ? "Searching feeds…" : loadingMoreJobs ? "Loading more…" : "Search jobs"}</button></div>
+            <div className="found-jobs-notice"><strong>This is the unfiltered discovery pool.</strong><span>{foundPreferenceCounts.included} pass your current title and location preferences; {foundPreferenceCounts.filtered} do not. All {allFoundJobs.length} remain available here. Listings are retained from the feeds Jobpilot queried, not every job on the internet; providers may apply their own query scope.</span></div>
             {(loadingJobs || loadingMoreJobs) && <p className="source-message" role="status">{loadingMoreJobs ? "Loading another provider batch; current discoveries stay visible…" : "Searching enabled public feeds…"}</p>}
             {sourceErrors.length > 0 && <ul className="source-errors" role="status">{sourceErrors.map((error) => <li key={error}>{error}</li>)}</ul>}
-            <div className="found-jobs-controls"><label className="search-box"><span>⌕</span><input aria-label="Search all found jobs" placeholder="Search all found titles, companies, or locations…" value={foundQuery} onChange={(event) => { setFoundQuery(event.target.value); setFoundVisibleCount(50); }} /></label><span>Showing {visibleFoundJobs.length} of {filteredFoundJobs.length}</span></div>
+            <div className="found-jobs-controls"><label className="search-box"><span>⌕</span><input aria-label="Search all found jobs" placeholder="Search all found titles, companies, or locations…" value={foundQuery} onChange={(event) => { setFoundQuery(event.target.value); setFoundVisibleCount(50); }} /></label><select aria-label="Sort all found jobs" value={foundSort} onChange={(event) => setFoundSort(event.target.value as typeof foundSort)}><option value="newest">Sort: Newest first</option><option value="company">Sort: Company A–Z</option><option value="title">Sort: Job title A–Z</option></select><span>Showing {visibleFoundJobs.length} of {filteredFoundJobs.length}</span></div>
             {visibleFoundJobs.length > 0 ? <div className="found-jobs-list">{visibleFoundJobs.map((job) => {
-              const locationMatches = matchesPreferredLocation(job.location, profile.locations, job.mode, job.source, job.sourceLocationScope)
-                || matchesEligibleRemoteLocation(job.location, profile.locations, job.mode);
-              const roleMatches = !profile.roles.trim() || matchesTargetRole(job, profile.roles);
-              const matchesPreferences = hasSearchMatch(job, profile.locations, profile.roles, searchMatchSnapshot) || locationMatches && roleMatches;
-              const excludedBy = [!roleMatches ? "title" : "", !locationMatches ? "location" : ""].filter(Boolean).join(" and ");
+              const preferenceStatus = getFoundJobPreferenceStatus(job, profile.locations, profile.roles, searchMatchSnapshot);
+              const matchesPreferences = preferenceStatus.included;
+              const excludedBy = preferenceStatus.excludedBy;
               return <article className="found-job-row" key={job.id}>
                 <div className="found-job-heading"><div><h2>{job.role}</h2><p>{job.company} <span>·</span> {job.location}{job.locationEvidence ? " (snippet mention; unverified)" : ""}</p></div><span className={`found-job-status ${matchesPreferences ? "included" : "excluded"}`}>{matchesPreferences ? "Included in Job matches" : `Filtered by ${excludedBy}`}</span></div>
                 <div className="found-job-meta"><span>{job.listingVerification === "search-result" ? "Unverified web result · snippet only" : job.source}</span><span>{job.posted}</span><span>{job.mode}</span>{job.sourceUrl && <a href={job.sourceUrl} target="_blank" rel="noreferrer">{job.listingVerification === "search-result" ? "Open source result ↗" : "Open original posting ↗"}</a>}</div>
                 <details className="found-job-description"><summary>View available description</summary><p className="job-description-text">{job.description ?? job.summary}</p></details>
               </article>;
             })}</div> : <div className="empty-state">{allFoundJobs.length ? "No found jobs match this text search." : "No provider listings have been fetched yet. Search jobs to fill this view."}</div>}
-            {visibleFoundJobs.length < filteredFoundJobs.length && <button className="load-more" onClick={() => setFoundVisibleCount((count) => count + 50)}>Show more found jobs ({filteredFoundJobs.length - visibleFoundJobs.length} remaining)</button>}
+            {visibleFoundJobs.length < filteredFoundJobs.length && <div className="found-jobs-pagination"><button className="load-more" onClick={() => setFoundVisibleCount((count) => count + 50)}>Show next 50 ({filteredFoundJobs.length - visibleFoundJobs.length} remaining)</button><button className="secondary-button" onClick={() => setFoundVisibleCount(filteredFoundJobs.length)}>Show all {filteredFoundJobs.length}</button></div>}
+            {foundVisibleCount > 50 && visibleFoundJobs.length === filteredFoundJobs.length && <button className="secondary-button found-collapse" onClick={() => { setFoundVisibleCount(50); document.querySelector(".found-jobs-controls")?.scrollIntoView({ behavior: "smooth", block: "center" }); }}>Show first 50 only</button>}
             {(nextArbeitnowPage !== null || nextJobicyCursor !== null) && <button className="load-more" onClick={() => void fetchMoreJobs()} disabled={loadingMoreJobs || loadingJobs}>{loadingMoreJobs ? "Loading more jobs…" : "Load more from public feeds"}</button>}
             <footer className="page-footer"><span>JOBPILOT <b>·</b> PUBLIC FEED DISCOVERIES</span><span>Source descriptions are shown as provided; verify on the original posting.</span></footer>
           </> : <>
