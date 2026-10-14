@@ -85,6 +85,7 @@ export default function Home() {
   const [stateLoaded, setStateLoaded] = useState(false);
   const [storageMessage, setStorageMessage] = useState("Loading saved data from this device…");
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
+  const skipNextStateAutosave = useRef(false);
   const aiMatchAbortController = useRef<AbortController | null>(null);
   const detailedAnalysisAbortController = useRef<AbortController | null>(null);
   const cvTailoringAbortController = useRef<AbortController | null>(null);
@@ -263,6 +264,7 @@ export default function Home() {
         }
         selectJob(restored.liveJobs?.[0]?.id ?? "");
         setStorageMessage(migrated ? "Existing browser data moved to a private local file." : "Saved on this device.");
+        skipNextStateAutosave.current = true;
         setStateLoaded(true);
       } catch (error) {
         if (cancelled) return;
@@ -326,6 +328,11 @@ export default function Home() {
   useEffect(() => {
     // Scoring updates the pool once per small batch. Persist one settled snapshot instead of queuing full-pool writes.
     if (!stateLoaded || aiMatchProgress) return;
+    // State restoration is not a user edit. Avoid uploading the full pool after every reload.
+    if (skipNextStateAutosave.current) {
+      skipNextStateAutosave.current = false;
+      return;
+    }
     let cancelled = false;
     const snapshot = {
       profile, saved, status, applicationNotes, applicationFollowUps, coverLetterDrafts, matchReviews, matchCohortKey, matchingSettings,
@@ -1051,6 +1058,7 @@ export default function Home() {
       });
       const result = await response.json() as PersistedState & { initialized?: boolean; error?: string };
       if (!response.ok) throw new Error(result.error ?? "The backup data did not pass validation.");
+      skipNextStateAutosave.current = true;
       setProfile(result.profile);
       setSearchRolesDraft(result.profile.roles);
       setSearchLocationsDraft(result.profile.locations);
