@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildOllamaWebSearchQueries, searchWithOllamaWeb } from "./ollama-web-search";
+import { buildOllamaWebSearchQueries, OLLAMA_WEB_SEARCH_RESULTS_PER_QUERY, searchWithOllamaWeb } from "./ollama-web-search";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -7,15 +7,21 @@ afterEach(() => {
 });
 
 describe("optional Ollama Web Search", () => {
-  it("builds a bounded query for each requested role without CV data", () => {
-    const queries = buildOllamaWebSearchQueries("Architect; Engineer; Product lead; Designer; Analyst; Extra", "Vienna, Austria; Graz, Austria");
+  it("builds five bounded, varied queries using only selected titles, locations, and supplied CV-derived search terms", () => {
+    const queries = buildOllamaWebSearchQueries("Architect; Engineer; Product lead; Designer; Analyst; Extra", "Vienna, Austria; Graz, Austria", "TypeScript; AWS; Product platforms", 0);
     expect(queries).toHaveLength(5);
-    expect(queries[0]).toContain("Architect jobs hiring");
+    expect(queries[0]).toContain("Architect careers and open positions");
     expect(queries[0]).toContain("Vienna, Austria or Graz, Austria");
-    expect(queries.join(" ")).not.toContain("CV");
+    expect(queries[0]).toContain("TypeScript AWS Product platforms");
+    expect(queries.join(" ")).not.toContain("raw CV text");
+    expect(buildOllamaWebSearchQueries("Architect", "Vienna", "TypeScript; AWS", 0)).not.toEqual(buildOllamaWebSearchQueries("Architect", "Vienna", "TypeScript; AWS", 1));
+    const cvTerms = "SkillA; SkillB; SkillC; SkillD; SkillE; SkillF; SkillG; SkillH";
+    expect(buildOllamaWebSearchQueries("Architect", "Vienna", cvTerms, 0)[0]).toContain("SkillA SkillB SkillC SkillD");
+    expect(buildOllamaWebSearchQueries("Architect", "Vienna", cvTerms, 1)[0]).toContain("SkillD SkillE SkillF SkillG");
+    expect(OLLAMA_WEB_SEARCH_RESULTS_PER_QUERY).toBe(10);
   });
 
-  it("keeps requests sequential, passes only title/location queries, and marks snippets as unverified", async () => {
+  it("keeps requests sequential, passes only bounded query terms, requests ten results, and marks snippets as unverified", async () => {
     const events: string[] = [];
     let activeRequests = 0;
     let maximumConcurrent = 0;
@@ -23,7 +29,7 @@ describe("optional Ollama Web Search", () => {
       activeRequests += 1;
       maximumConcurrent = Math.max(maximumConcurrent, activeRequests);
       const payload = JSON.parse(String(init?.body)) as { query: string; max_results: number; cv?: string };
-      expect(payload.max_results).toBe(5);
+      expect(payload.max_results).toBe(10);
       expect(payload.cv).toBeUndefined();
       expect(init?.headers).toMatchObject({ Authorization: "Bearer test-secret" });
       events.push(payload.query);
@@ -36,13 +42,15 @@ describe("optional Ollama Web Search", () => {
     const response = await searchWithOllamaWeb({
       roles: "Solution Architect; Cloud Architect",
       locations: "Vienna, Austria",
+      searchTerms: "AWS, TypeScript, cloud architecture",
       apiKey: "test-secret",
       fetcher: fetcher as typeof fetch,
       now: () => new Date("2026-10-05T12:00:00.000Z"),
     });
 
-    expect(events).toHaveLength(2);
-    expect(response.jobs).toHaveLength(2);
+    expect(events).toHaveLength(5);
+    expect(events[0]).toContain("AWS TypeScript cloud architecture");
+    expect(response.jobs).toHaveLength(1);
     expect(maximumConcurrent).toBe(1);
     expect(response.jobs[0]).toMatchObject({
       role: "Solution Architect — Acme",
