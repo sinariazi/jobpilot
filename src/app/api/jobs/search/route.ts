@@ -9,7 +9,11 @@ export async function GET(request: Request) {
   const locations = url.searchParams.get("locations") ?? "";
   const roles = url.searchParams.get("roles") ?? "";
   const includeWebSearch = url.searchParams.get("includeWebSearch") === "1";
-  if (locations.length > 2000 || roles.length > 2000) return Response.json({ error: "Search locations and job titles must each be 2,000 characters or less." }, { status: 400 });
+  const webSearchTerms = url.searchParams.get("webSearchTerms") ?? "";
+  const rawWebSearchRound = url.searchParams.get("webSearchRound");
+  const webSearchRound = rawWebSearchRound === null ? 0 : Number(rawWebSearchRound);
+  if (locations.length > 2000 || roles.length > 2000 || webSearchTerms.length > 1000) return Response.json({ error: "Search locations, job titles, or web-search terms exceed the allowed length." }, { status: 400 });
+  if (!Number.isSafeInteger(webSearchRound) || webSearchRound < 0 || webSearchRound > 100_000) return Response.json({ error: "Invalid web-search round." }, { status: 400 });
   if (includeWebSearch) {
     const hostname = new URL(request.url).hostname.replace(/^\[|\]$/g, "");
     if (!["localhost", "127.0.0.1", "::1"].includes(hostname)) {
@@ -29,6 +33,7 @@ export async function GET(request: Request) {
     locations,
     roles,
     includeWebSearch,
+    ...(includeWebSearch ? { webSearchTerms, webSearchRound } : {}),
   });
   // A healthy feed can return listings that do not match the user's local
   // filters. That is a successful search with zero matches, not an outage.
