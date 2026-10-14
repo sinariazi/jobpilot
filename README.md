@@ -84,14 +84,16 @@ Jobpilot preserves source links and attribution, reports partial failures, and d
 
 ### Optional web search
 
-Ollama Web Search is off by default and requires an Ollama account and API key. It sends only selected titles and location terms, returns short unverified snippets, and does not fetch employer pages. It can broaden discovery, but it is not a reliable vacancy feed. Availability, free usage, and service terms can change; see Ollama's [Web Search documentation](https://docs.ollama.com/capabilities/web-search), [pricing](https://ollama.com/pricing), [terms](https://ollama.com/terms), and [privacy policy](https://ollama.com/privacy). Search-specific quotas and snippet reuse/retention terms are not stated separately in those general materials.
+Ollama Web Search is off by default and requires an Ollama account and API key. When enabled, Jobpilot sends selected job titles, locations, and up to eight CV-derived skill/domain terms as query text. It never sends the CV text or full job descriptions to this search API. Each search round makes up to five sequential, varied queries and requests up to 10 snippets per query. The five queries vary their wording, role selection, and skill terms; clicking **Search jobs** again rotates to more query variants and adds newly discovered URLs to the local pool instead of replacing it. Repeated rounds may still return duplicates or stale pages because this API has no documented result-page cursor or offset.
+
+Ollama documents up to 10 results per query. Free usage and availability can change, and no fixed Web Search quota is promised. More queries use more of the account's available usage and may be rate limited. See Ollama's [Web Search API documentation](https://docs.ollama.com/capabilities/web-search), [pricing](https://ollama.com/pricing), [terms](https://ollama.com/terms), and [privacy policy](https://ollama.com/privacy).
 
 ## Privacy, persistence, and user control
 
 - The original CV file is not saved. Up to 10,000 extracted characters, analysis, and profile suggestions are saved in the local Jobpilot state file.
 - Local state is stored in `~/.jobpilot/state.json` by default, or in `JOBPILOT_DATA_DIR` when configured. The directory/file use restrictive permissions on supported systems, but the contents are **not encrypted**.
 - Local matching, CV analysis, detailed job analysis, CV tailoring, and AI cover-letter drafting use Ollama on loopback. Jobpilot has no hosted AI fallback.
-- The optional hosted search API receives titles and locations only. Public job feeds receive no CV or profile data.
+- The optional hosted search API receives selected titles, locations, and up to eight CV-derived skills/domains as search terms; it does not receive CV text or full job descriptions. Public job feeds receive no CV or profile data.
 - The CV tailoring export is a new HTML file downloaded by the browser. It does not overwrite the original CV or save the export on the Jobpilot server. Open it in a browser and use **Print / Save as PDF** if you need a PDF. It is not a direct DOCX or Canva export.
 - AI-generated text and scores can be wrong. Review the source posting, every CV claim, and every exported document yourself. Jobpilot never applies or submits forms automatically.
 
@@ -197,7 +199,7 @@ This section summarizes the implementation choices relevant to a systems-design 
 sequenceDiagram
     participant UI as Browser UI
     participant App as Local Jobpilot API
-    participant Sources as Public feeds
+    participant Sources as Public feeds and optional search
     participant AI as Local Ollama
     participant State as Local JSON state
 
@@ -206,7 +208,7 @@ sequenceDiagram
         App->>Sources: Fetch listings
         Sources-->>App: Listings or source-specific failures
     and Optional web search when enabled
-        App->>Sources: Send title and location terms only
+        App->>Sources: Send titles, locations, and selected CV-derived terms
         Sources-->>App: Unverified snippets or actionable error
     end
     App->>App: Normalize, deduplicate, and filter
