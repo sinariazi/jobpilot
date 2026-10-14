@@ -164,10 +164,10 @@ Restart Jobpilot and choose English, German, or both in the CV upload section. O
 
 ## Developer setup
 
-Requirements: Node.js 22.13+ and npm.
+Requirements: Node.js 22.13+ and npm. Use `npm ci` to install the exact dependencies recorded in the lockfile.
 
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
