@@ -53,6 +53,8 @@ flowchart TB
 
 The decision stage compares skills, experience, domain fit, and explicit disqualifier risk against available CV and job evidence. Its normalized 0–100 score is an estimate, not the probability of being hired. Confidence is separate from fit. The user can configure model, scoring weights, minimum score, and minimum confidence. The score alone does not establish a good match: missing information, low confidence, and search snippets are marked for review, and an on-demand detailed review can change the displayed fit verdict while preserving the first-stage score. Low-quality or missing source text is surfaced instead of being silently treated as a match.
 
+The overview keeps title/location candidates separate from potential CV fits. Its sidebar count and fit-status filter show only jobs that clear the configured score, confidence, and evidence requirements; jobs needing review, not scored, or rated low remain available under their own filter. Provider counts refer to title/location candidates, not confirmed matches.
+
 The detailed stage is user-triggered for one selected job; it does not run across the pool. This keeps the first pass responsive and avoids sending every listing through a slower chat model. The first-stage score remains intact beside the detailed analysis.
 
 ### Key design decisions
