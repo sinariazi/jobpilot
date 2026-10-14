@@ -16,6 +16,7 @@ import { DEFAULT_MATCHING_SETTINGS, localScreeningReadinessMessage } from "@/lib
 import { createApplicationPacket, detectAtsPlatform } from "@/lib/application-preparation";
 import { compareDecisionScores, passesMinimumDecisionScore } from "@/lib/job-ranking";
 import { composeTailoredCvText, renderTailoredCvHtml, tailoredCvFilename, type VerifiedCvTailoring } from "@/lib/cv-tailoring";
+import { mergeJobPool } from "@/lib/job-pool";
 
 const LEGACY_STORAGE_KEY = "jobpilot-local-v1";
 const MAX_BACKUP_BYTES = 23_000_000;
@@ -1110,13 +1111,13 @@ export default function Home() {
         && (!profile.roles.trim() || matchesTargetRole(job, profile.roles)));
       // Show the normalized pool immediately. Screening updates these cards in
       // small batches, so users can review early scores while later jobs run.
-      setLiveJobs(allDiscoveredJobs.slice(-MAX_LOCAL_JOB_POOL));
+      setLiveJobs((current) => mergeJobPool(current, allDiscoveredJobs, MAX_LOCAL_JOB_POOL));
       selectJob(locationJobs[0]?.id ?? "");
       const assessWithCurrentContext = localDecisionScreeningReady && searchGeneration === aiMatchGeneration.current;
       setSourceMessage(assessWithCurrentContext
         ? `Found ${locationJobs.length} listings for your selected roles and locations. Showing them now while local matching runs…`
         : `Found ${locationJobs.length} listings for your selected roles and locations. Showing them now; local matching will start when CV and Ollama models are ready.`);
-      let analyzedJobs = allDiscoveredJobs.slice(-MAX_LOCAL_JOB_POOL);
+      let analyzedJobs = allDiscoveredJobs;
       let completed = 0;
       let cancelled = false;
       let matchingWarning = "";
@@ -1131,13 +1132,15 @@ export default function Home() {
         cancelled = outcome.cancelled;
         matchingWarning = outcome.error;
         aiMatchAbortController.current = null;
-        analyzedJobs = allDiscoveredJobs.slice(-MAX_LOCAL_JOB_POOL).map((job) => ({
+        analyzedJobs = allDiscoveredJobs.map((job) => ({
           ...job,
           ...(outcome.screeningById.has(job.id) ? { screening: outcome.screeningById.get(job.id) } : { screening: undefined }),
         }));
         setCvAnalyzedModel(matchingSettings.decisionModel);
       }
-      setLiveJobs(analyzedJobs);
+      // A search can finish after a later page/batch. Merge by canonical URL so
+      // an older snapshot cannot erase screening data or newer listings.
+      setLiveJobs((current) => mergeJobPool(current, analyzedJobs, MAX_LOCAL_JOB_POOL));
       const locationCount = locationJobs.length;
       const sourcesChecked = (result.sourceStatuses ?? []).map((source) => `${source.source}: ${source.count} matching of ${source.fetchedCount} fetched`).join(" · ");
       setSourceMessage(result.jobs?.length
@@ -1153,7 +1156,7 @@ export default function Home() {
     } catch (error) {
       if (fetchedJobs.length) {
         const fallback = fetchedJobs.filter((job) => matchesPreferredLocation(job.location, profile.locations, job.mode, job.source, job.sourceLocationScope));
-        setLiveJobs(allDiscoveredJobs.slice(-MAX_LOCAL_JOB_POOL).map((job) => ({ ...job, screening: undefined, aiMatch: undefined, detailedAnalysis: undefined })));
+        setLiveJobs((current) => mergeJobPool(current, allDiscoveredJobs, MAX_LOCAL_JOB_POOL));
         selectJob(fallback[0]?.id ?? "");
         setSourceMessage(`Local job screening failed: ${error instanceof Error ? error.message : "unknown error"}. Jobs are still available to review; no hosted model fallback was used.`);
       } else setSourceMessage(error instanceof Error ? error.message : "Could not fetch job listings.");
@@ -1209,10 +1212,7 @@ export default function Home() {
       if (!response.ok) throw new Error(result.error ?? "Could not load more jobs.");
       fetchedMore = result.jobs ?? [];
       const discoveredMore = result.discoveredJobs ?? fetchedMore;
-      setLiveJobs((current) => {
-        const seen = new Set(current.map((job) => job.sourceUrl ?? job.id));
-        return [...current, ...discoveredMore.filter((job) => !seen.has(job.sourceUrl ?? job.id))].slice(-MAX_LOCAL_JOB_POOL);
-      });
+      setLiveJobs((current) => mergeJobPool(current, discoveredMore, MAX_LOCAL_JOB_POOL));
       const assessWithCurrentContext = localDecisionScreeningReady && searchGeneration === aiMatchGeneration.current;
       if (!assessWithCurrentContext || !fetchedMore.length) {
         const moreSources = [result.nextArbeitnowPage !== null && result.nextArbeitnowPage !== undefined ? "Arbeitnow" : "", result.nextJobicyCursor ? "Jobicy" : ""].filter(Boolean);
@@ -1230,7 +1230,7 @@ export default function Home() {
       const analyzed = fetchedMore.map((job) => ({ ...job,
         ...(outcome.screeningById.has(job.id) ? { screening: outcome.screeningById.get(job.id) } : {}),
       }));
-      setLiveJobs((current) => current.map((job) => analyzed.find((item) => item.id === job.id) ?? job));
+      setLiveJobs((current) => mergeJobPool(current, analyzed, MAX_LOCAL_JOB_POOL));
       setCvAnalyzedModel(matchingSettings.decisionModel);
       const moreSources = [result.nextArbeitnowPage !== null && result.nextArbeitnowPage !== undefined ? "Arbeitnow" : "", result.nextJobicyCursor ? "Jobicy" : ""].filter(Boolean);
       setSourceMessage(`Loaded ${fetchedMore.length} more listings. Screened ${outcome.screenedCount} of ${candidates.length}. ${outcome.error || (outcome.cancelled ? "Assessment cancelled." : "Scores are estimates, not hiring probabilities.")} Detailed reviews run only when requested from a job. ${moreSources.length ? `More pages are available from ${moreSources.join(" and ")}.` : "No further pages are available."}`);
