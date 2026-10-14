@@ -104,7 +104,7 @@ describe("local state storage", () => {
     expect(parsed?.liveJobs[0]?.department).toHaveLength(500);
   });
 
-  it("rejects invalid review states and unsafe job posting URLs", () => {
+  it("rejects invalid review states and strips unsafe optional job metadata", () => {
     const base = {
       ...defaultState(),
       initialized: undefined,
@@ -112,10 +112,11 @@ describe("local state storage", () => {
     };
     expect(parsePersistedState(base)).toBeNull();
 
-    expect(parsePersistedState({
+    const unsafeUrl = parsePersistedState({
       ...defaultState(),
       liveJobs: [{ ...exampleJob, sourceUrl: "javascript:alert(1)" }],
-    })).toBeNull();
+    });
+    expect(unsafeUrl?.liveJobs[0]?.sourceUrl).toBeUndefined();
 
     expect(parsePersistedState({
       ...defaultState(),
@@ -155,14 +156,34 @@ describe("local state storage", () => {
       matchReviews: [{ jobId: "job-1", company: "Example", role: "Engineer", model: "local:latest", cohortKey: "invalid", score: 80, predictedRelevant: true, reviewedRelevant: false, reviewedAt: "2026-10-02T12:00:00.000Z" }],
     })).toBeNull();
 
-    expect(parsePersistedState({
+    const invalidScore = parsePersistedState({
       ...defaultState(),
       liveJobs: [{ ...exampleJob, aiMatch: { model: "local-model:latest", relevant: true, score: 101, reason: "Invalid score", cvEvidence: "Evidence" } }],
-    })).toBeNull();
+    });
+    expect(invalidScore?.liveJobs[0]?.aiMatch).toBeUndefined();
 
     expect(parsePersistedState({ ...defaultState(), cvText: "x".repeat(10_001) })).toBeNull();
     expect(parsePersistedState({ ...defaultState(), webSearchEnabled: "yes" })).toBeNull();
     expect(parsePersistedState({ ...defaultState(), cvAnalysis: { highlights: ["x".repeat(501)] } })).toBeNull();
+  });
+
+  it("keeps valid scores when optional provider fields are malformed", () => {
+    const parsed = parsePersistedState({
+      ...defaultState(),
+      liveJobs: [{
+        ...exampleJob,
+        postedAt: "not a date",
+        retrievedAt: "x".repeat(100),
+        sourceUrl: "not a URL",
+        sourceAliases: ["x".repeat(200)],
+        screening: exampleJob.screening,
+      }],
+    });
+    expect(parsed?.liveJobs[0]?.screening?.score).toBe(82);
+    expect(parsed?.liveJobs[0]?.postedAt).toBeUndefined();
+    expect(parsed?.liveJobs[0]?.retrievedAt).toBeUndefined();
+    expect(parsed?.liveJobs[0]?.sourceUrl).toBeUndefined();
+    expect(parsed?.liveJobs[0]?.sourceAliases).toBeUndefined();
   });
 
   it("accepts older saved states without optional tracker fields", () => {
